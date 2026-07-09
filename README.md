@@ -17,6 +17,10 @@ pnpm -r typecheck
 
 The adapter package has no runtime dependencies beyond the official [`@linqapp/sdk`](https://www.npmjs.com/package/@linqapp/sdk), with `chat` as a peer dependency.
 
+## Credits
+
+Originally created by [Fardeem Munir](https://github.com/fardeem). This project began as his work and is maintained by the [Linq](https://linqapp.com) team — thank you, Fardeem 🙏
+
 ## License
 
 [Apache-2.0](LICENSE)
