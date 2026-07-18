@@ -2,6 +2,7 @@
 // Whatever lands on your phone is exactly what ships.
 //
 //   send  — bootstrap a chat (or reuse one) and send text + two images
+//   cards — send Chat SDK cards (incl. the image+buttons card that used to vanish)
 //   serve — receive real webhooks (text/reactions) and optionally echo-reply
 //
 // Run from packages/adapter-linq so deps + ./dist resolve.
@@ -18,6 +19,18 @@ import { createServer } from "node:http";
 import { Buffer } from "node:buffer";
 
 import { LinqAPIV3 } from "@linqapp/sdk";
+import {
+  Actions,
+  Button,
+  Card,
+  CardLink,
+  CardText,
+  Divider,
+  Field,
+  Fields,
+  Image,
+  LinkButton,
+} from "chat";
 import { createLinqAdapter } from "./dist/index.js";
 
 const API_KEY = need("LINQ_API_KEY");
@@ -58,8 +71,7 @@ async function step(label, fn) {
   }
 }
 
-async function send() {
-  const a = adapter();
+async function bootstrapChat(firstMessage) {
   let chatId = process.env.LINQ_TEST_CHAT_ID;
 
   if (!chatId) {
@@ -70,7 +82,7 @@ async function send() {
     const created = await sdk.chats.create({
       from,
       to: [to],
-      message: { parts: [{ type: "text", value: "linq adapter smoke test 👋 (1/4)" }] },
+      message: { parts: [{ type: "text", value: firstMessage }] },
     });
     chatId = created.chat.id;
     console.log(`chat id: ${chatId}\n`);
@@ -78,6 +90,12 @@ async function send() {
     console.log(`reusing chat ${chatId}\n`);
   }
 
+  return chatId;
+}
+
+async function send() {
+  const a = adapter();
+  const chatId = await bootstrapChat("linq adapter smoke test 👋 (1/4)");
   const threadId = `linq:${chatId}`;
   console.log("sending through the adapter — watch your phone:");
 
@@ -105,6 +123,71 @@ async function send() {
     ok
       ? "\nall sends accepted by Linq. confirm all 4 messages + both images arrived on the device."
       : "\nsomething was rejected — the error above is the real Linq response. that's the bug to fix before Wed.",
+  );
+  process.exit(ok ? 0 : 1);
+}
+
+// The card payloads below are exactly what chat-core hands the adapter after
+// thread.post(<Card …/>) — JSX is flattened to these CardElement objects by
+// toCardElement() before postMessage() runs.
+async function cards() {
+  const a = adapter();
+  const chatId = await bootstrapChat("linq adapter card smoke test 🃏 (1/4)");
+  const threadId = `linq:${chatId}`;
+  console.log("sending cards through the adapter — watch your phone:");
+
+  let ok = true;
+  ok &= await step("2/4 full text card (title/fields/link/divider/buttons)", async () => {
+    const r = await a.postMessage(
+      threadId,
+      Card({
+        title: "Order #1234 (2/4)",
+        subtitle: "Placed today",
+        children: [
+          CardText("Your order has been **received**! _No literal asterisks should show._"),
+          Fields([Field({ label: "Name", value: "Eve" }), Field({ label: "Total", value: "$42" })]),
+          CardLink({ url: "https://chat-sdk.dev/docs/cards", label: "View order" }),
+          Divider(),
+          Actions([
+            Button({ id: "approve", label: "Approve", style: "primary" }),
+            Button({ id: "reject", label: "Reject", style: "danger" }),
+            LinkButton({ url: "https://linqapp.com", label: "Get help" }),
+          ]),
+        ],
+      }),
+    );
+    return `msg ${r.id}`;
+  });
+  ok &= await step("3/4 card with an image element", async () => {
+    const r = await a.postMessage(
+      threadId,
+      Card({
+        title: "Card with image (3/4)",
+        children: [
+          CardText("This card should arrive as text + a real image attachment."),
+          Image({ url: IMAGE_URL, alt: "cat" }),
+        ],
+      }),
+    );
+    return `msg ${r.id}`;
+  });
+  ok &= await step("4/4 regression: image + buttons only (used to vanish)", async () => {
+    const r = await a.postMessage(
+      threadId,
+      Card({
+        children: [
+          Image({ url: IMAGE_URL, alt: "cat" }),
+          Actions([Button({ id: "yes", label: "Yes" }), Button({ id: "no", label: "No" })]),
+        ],
+      }),
+    );
+    return `msg ${r.id}`;
+  });
+
+  console.log(
+    ok
+      ? "\nall card sends accepted by Linq. on the device, check: (2/4) one clean text bubble with no ** or dropped links, (3/4) text + image, (4/4) 'Options: Yes, No' + image."
+      : "\na card send was rejected — the error above is the real Linq response.",
   );
   process.exit(ok ? 0 : 1);
 }
@@ -168,14 +251,17 @@ async function serve() {
     console.log("                (or: ngrok http " + port + ")");
     console.log("  2. register the https tunnel URL as a Linq webhook subscription");
     console.log("     events: message.received, reaction.added, reaction.removed");
-    console.log("  3. text the sandbox number from your phone — watch this log" + (echo ? " (echo on)" : ""));
+    console.log(
+      "  3. text the sandbox number from your phone — watch this log" + (echo ? " (echo on)" : ""),
+    );
   });
 }
 
 const mode = process.argv[2];
 if (mode === "send") await send();
+else if (mode === "cards") await cards();
 else if (mode === "serve") await serve();
 else {
-  console.error("usage: node smoke-live.mjs <send|serve>");
+  console.error("usage: node smoke-live.mjs <send|cards|serve>");
   process.exit(2);
 }

@@ -168,6 +168,11 @@ Get a sandbox number with the [Linq CLI](https://www.npmjs.com/package/@linqapp/
 LINQ_API_KEY=<token> LINQ_FROM=<sandbox number> LINQ_TEST_TO=<your cell> \
   node smoke-live.mjs send
 
+# cards: send Chat SDK cards end-to-end — a full text card, a card with an image,
+# and the image+buttons-only card that used to silently vanish
+LINQ_API_KEY=<token> LINQ_FROM=<sandbox number> LINQ_TEST_TO=<your cell> \
+  node smoke-live.mjs cards
+
 # inbound: receive real webhooks (text + reactions), optionally echo-reply
 LINQ_API_KEY=<token> LINQ_SIGNING_SECRET=<webhook secret> LINQ_ECHO=1 \
   node smoke-live.mjs serve
