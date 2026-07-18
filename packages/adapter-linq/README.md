@@ -78,7 +78,8 @@ Other event types are acknowledged with a `200` and ignored.
 | Sticker reactions                                  | ❌ skipped (no Chat SDK equivalent)                                                                                                |
 | Delete message                                     | ❌ Linq cannot unsend on the recipient's device                                                                                    |
 | `openDM()` / creating chats                        | ❌ Linq creates chats with an initial message, which doesn't match Chat SDK semantics — the adapter only replies to existing chats |
-| Modals, cards, slash commands                      | ❌ no Linq equivalent — cards render as fallback text                                                                              |
+| Cards                                              | ⚠️ rendered natively as plain text + image media parts — buttons/selects show their labels but cannot trigger `onAction()`         |
+| Modals, slash commands                             | ❌ no Linq equivalent                                                                                                              |
 
 ## Thread IDs
 
@@ -91,7 +92,9 @@ Attach media by putting `attachments` or `files` on a message:
 ```ts
 await thread.post({
   markdown: "here's the report 📎",
-  attachments: [{ type: "file", url: "https://example.com/report.pdf", mimeType: "application/pdf" }],
+  attachments: [
+    { type: "file", url: "https://example.com/report.pdf", mimeType: "application/pdf" },
+  ],
 });
 
 // or send raw bytes
@@ -107,6 +110,26 @@ How each attachment is delivered:
 - **Raw bytes, non-HTTPS URLs, or files > 10MB** — uploaded via `POST /v3/attachments` (up to 100MB) and sent by `attachment_id`.
 
 A message can be media-only (no text). Inbound attachments expose `fetchData()` to download, and survive queue serialization via `rehydrateAttachment` (Linq CDN URLs don't expire). Audio is sent as a downloadable file attachment — the dedicated iMessage voice-memo bubble endpoint isn't wired up yet.
+
+## Cards
+
+iMessage/SMS has no rich-card UI, so Chat SDK [cards](https://chat-sdk.dev/docs/cards) are flattened to their closest native equivalent instead of being dropped:
+
+- Title, subtitle, text, fields, links, dividers, and tables render as clean plain text (markdown is stripped — iMessage would show literal `**`).
+- `<Image>` elements and the card's `imageUrl` are sent as real image media parts (public HTTPS URLs only; other URLs stay visible in the text).
+- Buttons and selects render their labels (e.g. `Options: Approve, Reject`) so the recipient sees what the card offers — but there are no tappable buttons on iMessage, so `onAction()` handlers never fire from this adapter. If you need a working action, include a `LinkButton`/`CardLink` URL or handle plain text replies.
+- An explicit `fallbackText` on `{ card, fallbackText }` replaces the generated text; card images are still attached.
+
+```tsx
+await thread.post(
+  <Card title="Order #1234">
+    <Image url="https://example.com/receipt.png" alt="Receipt" />
+    <CardText>Your order has been received!</CardText>
+    <CardLink url="https://example.com/orders/1234" label="Track order" />
+  </Card>,
+);
+// → one iMessage: text bubble + attached receipt image
+```
 
 ## Reactions
 
@@ -151,13 +174,13 @@ LINQ_API_KEY=<token> LINQ_SIGNING_SECRET=<webhook secret> LINQ_ECHO=1 \
 # then tunnel it (cloudflared/ngrok) and register the URL as a Linq webhook subscription
 ```
 
-| Env | Mode | Purpose |
-| --- | ---- | ------- |
-| `LINQ_API_KEY` | both | Linq API token |
-| `LINQ_FROM` / `LINQ_TEST_TO` | send | sender (sandbox) number / your phone — or set `LINQ_TEST_CHAT_ID` to reuse a chat |
-| `LINQ_SIGNING_SECRET` | serve | webhook signing secret (from the subscription) |
-| `LINQ_BASE_URL` | both | override API base URL (optional) |
-| `LINQ_ECHO=1` | serve | reply to inbound messages so you get a round-trip on the device |
+| Env                          | Mode  | Purpose                                                                           |
+| ---------------------------- | ----- | --------------------------------------------------------------------------------- |
+| `LINQ_API_KEY`               | both  | Linq API token                                                                    |
+| `LINQ_FROM` / `LINQ_TEST_TO` | send  | sender (sandbox) number / your phone — or set `LINQ_TEST_CHAT_ID` to reuse a chat |
+| `LINQ_SIGNING_SECRET`        | serve | webhook signing secret (from the subscription)                                    |
+| `LINQ_BASE_URL`              | both  | override API base URL (optional)                                                  |
+| `LINQ_ECHO=1`                | serve | reply to inbound messages so you get a round-trip on the device                   |
 
 ## License
 

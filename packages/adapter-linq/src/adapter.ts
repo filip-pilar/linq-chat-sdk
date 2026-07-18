@@ -16,6 +16,7 @@ import type {
   WebhookOptions,
 } from "chat";
 
+import { collectCardImageUrls, extractCardElement } from "./cards.js";
 import { LinqFormatConverter } from "./format-converter.js";
 import { isRecord } from "./guards.js";
 import {
@@ -159,6 +160,16 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     // consecutive text parts but is fine with a single text part before media.
     if (text) {
       parts.push({ type: "text", value: text });
+    }
+
+    // Card images become real media parts; the rest of the card is already
+    // flattened into the fallback text above.
+    const card = extractCardElement(message);
+
+    if (card) {
+      for (const url of collectCardImageUrls(card)) {
+        parts.push({ type: "media", url });
+      }
     }
 
     parts.push(...mediaParts);

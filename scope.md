@@ -24,6 +24,7 @@ The adapter can already handle the core receive/reply path:
 - Skip typing indicators for known group chats and ignore Linq's expected group-chat typing rejection.
 - Show typing indicators for direct-message chats.
 - Automatically subscribe and respond to inbound Linq group chats received through webhooks.
+- Render Chat SDK cards as a native equivalent: plain text (markdown stripped, links/fields/tables/action labels preserved) plus real image media parts.
 
 ## Work still left
 
@@ -150,11 +151,13 @@ Do not implement channel-level APIs or generic thread listing unless the app has
 
 
 
-### Chat UI surfaces
+### Interactive chat UI surfaces
 
-Linq does not provide equivalents for Chat SDK modals, app home, slash commands, buttons, selects, or interactive cards.
+Linq does not provide equivalents for Chat SDK modals, app home, slash commands, or tappable buttons/selects.
 
 Do not implement modal/action/slash-command/app-home APIs for this adapter.
+
+Cards are the exception: they are **not** dropped. `postMessage()` flattens a card to plain text plus image media parts (see "Current adapter status"), so bots that post cards still show up in chat. The non-interactive parts render faithfully; buttons and selects render their labels only — `onAction()` never fires from Linq, so there is no action dispatch to implement.
 
 
 
