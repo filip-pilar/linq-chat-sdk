@@ -117,7 +117,7 @@ iMessage/SMS has no rich-card UI, so Chat SDK [cards](https://chat-sdk.dev/docs/
 
 - Title, subtitle, text, fields, links, dividers, and tables render as clean plain text (markdown is stripped — iMessage would show literal `**`).
 - `<Image>` elements and the card's `imageUrl` are sent as real image media parts (public HTTPS URLs only; other URLs stay visible in the text).
-- Buttons and selects render their labels (e.g. `Options: Approve, Reject`) so the recipient sees what the card offers — but there are no tappable buttons on iMessage, so `onAction()` handlers never fire from this adapter. If you need a working action, include a `LinkButton`/`CardLink` URL or handle plain text replies.
+- Buttons and selects render their labels (e.g. `Options: Approve, Reject`) so the recipient sees what the card offers — but there are no tappable buttons on iMessage, so `onAction()` handlers never fire from this adapter. The adapter logs a warning on every such send so the degradation is visible instead of silent. If you need a working action, include a `LinkButton`/`CardLink` URL or handle plain text replies.
 - An explicit `fallbackText` on `{ card, fallbackText }` replaces the generated text; card images are still attached.
 
 ```tsx

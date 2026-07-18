@@ -154,3 +154,27 @@ function renderActions(actions: ActionsElement): string | null {
 function renderLabeledUrl(label: string | undefined, url: string): string {
   return label && label !== url ? `${label}: ${url}` : url;
 }
+
+// True when the card declares buttons or selects — interactive elements whose
+// onAction() handlers can never fire over iMessage/SMS.
+export function cardHasInteractiveActions(card: CardElement): boolean {
+  return childrenHaveInteractiveActions(card.children);
+}
+
+function childrenHaveInteractiveActions(children: CardChild[]): boolean {
+  return children.some((child) => {
+    if (child.type === "section") {
+      return childrenHaveInteractiveActions(child.children);
+    }
+
+    return (
+      child.type === "actions" &&
+      child.children.some(
+        (element) =>
+          element.type === "button" ||
+          element.type === "select" ||
+          element.type === "radio_select",
+      )
+    );
+  });
+}

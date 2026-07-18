@@ -236,6 +236,25 @@ describe("LinqAdapter.postMessage with cards", () => {
     });
   });
 
+  it("warns when a card's buttons are flattened so the poster gets feedback", async () => {
+    const { adapter, warn } = createCardTestAdapter();
+
+    await adapter.postMessage(
+      "linq:chat-123",
+      Card({
+        children: [Actions([Button({ id: "approve", label: "Approve" })])],
+      }),
+    );
+
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("onAction"));
+
+    warn.mockClear();
+
+    await adapter.postMessage("linq:chat-123", Card({ title: "No actions here" }));
+
+    expect(warn).not.toHaveBeenCalled();
+  });
+
   it("prefers explicit fallbackText while still attaching card images", async () => {
     const { adapter, send } = createCardTestAdapter();
 
@@ -276,5 +295,9 @@ function createCardTestAdapter() {
       chats: { messages: { send } },
     };
 
-  return { adapter, send };
+  const warn = vi.fn();
+
+  (adapter as unknown as { logger: { warn: typeof warn } }).logger = { warn };
+
+  return { adapter, send, warn };
 }
