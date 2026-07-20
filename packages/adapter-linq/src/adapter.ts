@@ -16,6 +16,7 @@ import type {
   WebhookOptions,
 } from "chat";
 
+import { cardHasInteractiveActions, collectCardImageUrls, extractCardElement } from "./cards.js";
 import { LinqFormatConverter } from "./format-converter.js";
 import { isRecord } from "./guards.js";
 import {
@@ -159,6 +160,25 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     // consecutive text parts but is fine with a single text part before media.
     if (text) {
       parts.push({ type: "text", value: text });
+    }
+
+    // Card images become real media parts; the rest of the card is already
+    // flattened into the fallback text above.
+    const card = extractCardElement(message);
+
+    if (card) {
+      // Feedback instead of silence: the card still sends, but its buttons and
+      // selects are text labels — the poster's onAction() handlers can't fire.
+      if (cardHasInteractiveActions(card)) {
+        this.logger.warn(
+          "Card buttons/selects were flattened to text — onAction() handlers never fire over iMessage/SMS. " +
+            "Use LinkButton/CardLink URLs or handle plain-text replies instead.",
+        );
+      }
+
+      for (const url of collectCardImageUrls(card)) {
+        parts.push({ type: "media", url });
+      }
     }
 
     parts.push(...mediaParts);
