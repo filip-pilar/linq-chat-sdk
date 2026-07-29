@@ -53,11 +53,11 @@ Other event types are acknowledged with a `200` and ignored.
 
 ## Configuration
 
-| Option          | Required | Description                                                                                                              |
-| --------------- | -------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `apiKey`        | yes      | Linq API key used for all outbound API calls.                                                                            |
-| `signingSecret` | yes      | Webhook signing secret. Requests are verified with HMAC-SHA256 over `{timestamp}.{raw_body}`, with replay-window checks. |
-| `baseURL`       | no       | Override the Linq API base URL (e.g. sandbox).                                                                           |
+| Option          | Required | Description                                                                                                                                            |
+| --------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `apiKey`        | yes      | Linq API key used for all outbound API calls.                                                                                                          |
+| `signingSecret` | yes      | Webhook signing secret. Standard Webhooks signatures are verified by the Linq SDK; legacy `X-Webhook-*` signatures remain supported for compatibility. |
+| `baseURL`       | no       | Override the Linq API base URL (e.g. sandbox).                                                                                                         |
 
 ## Supported features
 

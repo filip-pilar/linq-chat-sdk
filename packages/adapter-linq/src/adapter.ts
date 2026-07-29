@@ -52,6 +52,7 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   private readonly apiClient: LinqAPIV3;
   private readonly converter = new LinqFormatConverter();
   private readonly signingSecret: string;
+  private readonly webhooks: LinqAPIV3.Webhooks;
 
   private chat: ChatInstance | null = null;
   private logger: Logger;
@@ -59,8 +60,13 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   private readonly chatKinds = new Map<string, boolean>();
 
   constructor(config: LinqAdapterConfig) {
-    this.apiClient = new LinqAPIV3({ apiKey: config.apiKey, baseURL: config.baseURL });
+    this.apiClient = new LinqAPIV3({
+      apiKey: config.apiKey,
+      baseURL: config.baseURL,
+      webhookSecret: config.signingSecret,
+    });
     this.signingSecret = config.signingSecret;
+    this.webhooks = this.apiClient.webhooks;
     this.logger = new ConsoleLogger();
   }
 
@@ -305,21 +311,13 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
   // handle webhook
   async handleWebhook(request: Request, options?: WebhookOptions): Promise<Response> {
-    type LinqWebhookEvent = LinqAPIV3.EventsWebhookEvent;
-
-    const verification = await verifyLinqWebhookRequest(request, this.signingSecret);
+    const verification = await verifyLinqWebhookRequest(request, this.webhooks, this.signingSecret);
 
     if (!verification.ok) {
       return verification.response;
     }
 
-    let event: LinqWebhookEvent;
-
-    try {
-      event = JSON.parse(new TextDecoder().decode(verification.rawBody)) as LinqWebhookEvent;
-    } catch {
-      return new Response("Invalid JSON", { status: 400 });
-    }
+    const { event } = verification;
 
     if (this.chat && isMessageReceivedWebhookEvent(event) && event.data.direction === "inbound") {
       const chatId = event.data.chat.id;

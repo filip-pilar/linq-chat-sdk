@@ -20,7 +20,7 @@
     "@chat-adapter/telegram": "^4.28.1",
     "@chat-adapter/whatsapp": "^4.28.1",
     "@linqapp/chat-sdk-adapter": "workspace:*",
-    "@linqapp/sdk": "^0.22.1",
+    "@linqapp/sdk": "^0.32.1",
     "ai": "^6.0.184",
     "chat": "^4.28.1",
     "pg": "^8.20.0",
