@@ -61,26 +61,26 @@ The missing work is mostly capability coverage, not file organization.
 
 ## Quick comparison matrix
 
-| Area | Linq adapter | Sendblue | WhatsApp | Telegram |
-|---|---:|---:|---:|---:|
-| Signed webhook verification | ✅ strong HMAC | ⚠️ simpler secret-header style | ✅ HMAC | ✅ secret token |
-| Replay timestamp check | ✅ | ❌ / weak | platform-specific | platform-specific |
-| Inbound messages | ✅ | ✅ | ✅ | ✅ |
-| Inbound reactions | ❌ | ❌ / limited | ✅ | ✅ |
-| Message edits from webhook | ❌ | ❌ | platform-limited | ✅ |
-| Delivery/read/failure events | ❌ | partial/status callback-ish | ✅ delivery/status-ish | partial |
-| Outbound text | ✅ | ✅ | ✅ | ✅ |
-| Outbound edit | ✅ | ❌ / unsupported | ❌ platform limitation | ✅ |
-| Delete message | ❌ throws | ❌ soft/no-op-ish | ❌ limitation | ✅ |
-| Open DM | ❌ | ❌ | ✅ constructs thread | ✅ |
-| File/media send | ❌ | ✅ `sendMediaMessage` helper | ✅ media support | ✅ document/media support |
-| Inbound attachments | ✅ basic | ✅ media URL | ✅ | ✅ |
-| Attachment rehydration | ❌ | ❌ / limited | ✅ | ✅ |
-| Thread/channel helpers | minimal | moderate | DM-focused | broad |
-| Streaming | ⚠️ buffers final text | ✅ paragraph chunks | ⚠️ buffered | ✅ post/edit fallback |
-| Card/actions | ❌ fallback-ish text only | ❌ | ✅ buttons/list-ish | ✅ inline keyboard buttons |
-| Config/env fallback | ❌ | likely ✅/partial | ✅ | ✅ |
-| Tests | ⚠️ one main file | ⚠️ basic | broader | broader |
+| Area                         |              Linq adapter |                       Sendblue |               WhatsApp |                   Telegram |
+| ---------------------------- | ------------------------: | -----------------------------: | ---------------------: | -------------------------: |
+| Signed webhook verification  |            ✅ strong HMAC | ⚠️ simpler secret-header style |                ✅ HMAC |            ✅ secret token |
+| Replay timestamp check       |                        ✅ |                      ❌ / weak |      platform-specific |          platform-specific |
+| Inbound messages             |                        ✅ |                             ✅ |                     ✅ |                         ✅ |
+| Inbound reactions            |                        ❌ |                   ❌ / limited |                     ✅ |                         ✅ |
+| Message edits from webhook   |                        ❌ |                             ❌ |       platform-limited |                         ✅ |
+| Delivery/read/failure events |                        ❌ |    partial/status callback-ish | ✅ delivery/status-ish |                    partial |
+| Outbound text                |                        ✅ |                             ✅ |                     ✅ |                         ✅ |
+| Outbound edit                |                        ✅ |               ❌ / unsupported | ❌ platform limitation |                         ✅ |
+| Delete message               |                 ❌ throws |              ❌ soft/no-op-ish |          ❌ limitation |                         ✅ |
+| Open DM                      |                        ❌ |                             ❌ |   ✅ constructs thread |                         ✅ |
+| File/media send              |                        ❌ |   ✅ `sendMediaMessage` helper |       ✅ media support |  ✅ document/media support |
+| Inbound attachments          |                  ✅ basic |                   ✅ media URL |                     ✅ |                         ✅ |
+| Attachment rehydration       |                        ❌ |                   ❌ / limited |                     ✅ |                         ✅ |
+| Thread/channel helpers       |                   minimal |                       moderate |             DM-focused |                      broad |
+| Streaming                    |     ⚠️ buffers final text |            ✅ paragraph chunks |            ⚠️ buffered |      ✅ post/edit fallback |
+| Card/actions                 | ❌ fallback-ish text only |                             ❌ |    ✅ buttons/list-ish | ✅ inline keyboard buttons |
+| Config/env fallback          |                        ❌ |              likely ✅/partial |                     ✅ |                         ✅ |
+| Tests                        |          ⚠️ one main file |                       ⚠️ basic |                broader |                    broader |
 
 ---
 
@@ -314,7 +314,7 @@ Inbound media parsing exists.
 Outbound `postMessage()` only sends:
 
 ```ts
-parts: [{ type: "text", value: text }]
+parts: [{ type: "text", value: text }];
 ```
 
 ### Missing outbound support
@@ -1052,30 +1052,30 @@ Polling probably does not matter for Linq webhooks.
 
 # Honest current feature matrix
 
-| Feature | Status |
-|---|---|
-| Inbound text messages | ✅ |
-| Outbound text messages | ✅ |
-| Fetch messages | ✅ |
-| Fetch single message | ✅ |
-| Fetch thread | ✅ |
-| Edit message | ✅ text / part 0 only |
-| Delete message | ❌ |
-| Add reaction | ✅ |
-| Remove reaction | ✅ |
-| Inbound reaction events | ❌ |
-| Typing indicator | ✅ start only |
-| Open DM | ❌ |
-| Send files/media | ❌ |
-| Receive files/media | ✅ basic |
-| Rehydrate attachments | ❌ |
-| Streaming | ⚠️ buffered final send |
-| Cards/actions | ❌ fallback text only |
-| Modals | ❌ |
-| Slash commands | ❌ |
-| Webhook verification | ✅ |
-| Webhook replay protection | ✅ |
-| Group chats | ⚠️ partial / identity risk |
+| Feature                   | Status                     |
+| ------------------------- | -------------------------- |
+| Inbound text messages     | ✅                         |
+| Outbound text messages    | ✅                         |
+| Fetch messages            | ✅                         |
+| Fetch single message      | ✅                         |
+| Fetch thread              | ✅                         |
+| Edit message              | ✅ text / part 0 only      |
+| Delete message            | ❌                         |
+| Add reaction              | ✅                         |
+| Remove reaction           | ✅                         |
+| Inbound reaction events   | ❌                         |
+| Typing indicator          | ✅ start only              |
+| Open DM                   | ❌                         |
+| Send files/media          | ❌                         |
+| Receive files/media       | ✅ basic                   |
+| Rehydrate attachments     | ❌                         |
+| Streaming                 | ⚠️ buffered final send     |
+| Cards/actions             | ❌ fallback text only      |
+| Modals                    | ❌                         |
+| Slash commands            | ❌                         |
+| Webhook verification      | ✅                         |
+| Webhook replay protection | ✅                         |
+| Group chats               | ⚠️ partial / identity risk |
 
 ---
 
