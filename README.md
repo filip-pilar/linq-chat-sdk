@@ -17,9 +17,16 @@ pnpm -r typecheck
 
 The adapter package has no runtime dependencies beyond the official [`@linqapp/sdk`](https://www.npmjs.com/package/@linqapp/sdk), with `chat` as a peer dependency.
 
+## Fork maintenance
+
+- `main` is the canonical Forma development branch.
+- `upstream/main` is a read-only source for Linq updates; merge reviewed updates into `main` without rewriting published history.
+- Release tags and assets are immutable. Never move or rebuild an existing release.
+- Use temporary branches only for isolated or concurrent work, then delete them after they are integrated and verified.
+
 ## Credits
 
-Originally created by [Fardeem Munir](https://github.com/fardeem). This project began as his work and is maintained by the [Linq](https://linqapp.com) team — thank you, Fardeem 🙏
+Originally created by [Fardeem Munir](https://github.com/fardeem) and developed by the [Linq](https://linqapp.com) team. This fork is maintained by Forma — thank you, Fardeem and Linq.
 
 ## License
 
