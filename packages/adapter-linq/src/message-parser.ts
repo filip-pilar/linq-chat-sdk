@@ -8,7 +8,7 @@ import { createLinqAttachmentFetcher } from "./inbound-media.js";
 type LinqMessageSendResponse = Awaited<ReturnType<LinqAPIV3["chats"]["messages"]["send"]>>;
 type LinqRetrievedMessage = LinqAPIV3.Message;
 export type LinqRawMessage =
-  | LinqAPIV3.EventsWebhookEvent["data"]
+  | LinqAPIV3.MessageReceivedWebhookEvent["data"]
   | LinqMessageSendResponse
   | LinqRetrievedMessage;
 type LinqMessageEvent = LinqAPIV3.MessageEventV2;
@@ -72,13 +72,13 @@ export function parseLinqMessage(
 }
 
 export function isMessageReceivedWebhookEvent(
-  event: LinqAPIV3.EventsWebhookEvent,
+  event: LinqAPIV3.UnwrapWebhookEvent,
 ): event is LinqAPIV3.Webhooks.MessageReceivedWebhookEvent {
   return event.event_type === "message.received";
 }
 
 export function isReactionWebhookEvent(
-  event: LinqAPIV3.EventsWebhookEvent,
+  event: LinqAPIV3.UnwrapWebhookEvent,
 ): event is
   | LinqAPIV3.Webhooks.ReactionAddedWebhookEvent
   | LinqAPIV3.Webhooks.ReactionRemovedWebhookEvent {

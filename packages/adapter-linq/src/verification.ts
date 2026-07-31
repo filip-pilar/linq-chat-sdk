@@ -1,17 +1,67 @@
-const LINQ_SIGNATURE_HEADER = "x-webhook-signature";
-const LINQ_TIMESTAMP_HEADER = "x-webhook-timestamp";
+import type { LinqAPIV3 } from "@linqapp/sdk";
+
+const STANDARD_ID_HEADER = "webhook-id";
+const STANDARD_SIGNATURE_HEADER = "webhook-signature";
+const STANDARD_TIMESTAMP_HEADER = "webhook-timestamp";
+const LEGACY_SIGNATURE_HEADER = "x-webhook-signature";
+const LEGACY_TIMESTAMP_HEADER = "x-webhook-timestamp";
 const MAX_WEBHOOK_AGE_SECONDS = 5 * 60;
 
 export type LinqWebhookVerificationResult =
-  | { ok: true; rawBody: Uint8Array }
+  | { ok: true; event: LinqAPIV3.UnwrapWebhookEvent }
   | { ok: false; response: Response };
 
 export async function verifyLinqWebhookRequest(
   request: Request,
+  webhooks: Pick<LinqAPIV3.Webhooks, "unwrap">,
   signingSecret: string,
 ): Promise<LinqWebhookVerificationResult> {
-  const timestamp = request.headers.get(LINQ_TIMESTAMP_HEADER)?.trim() || "";
-  const signature = request.headers.get(LINQ_SIGNATURE_HEADER)?.trim() || "";
+  const hasStandardHeader = [
+    STANDARD_ID_HEADER,
+    STANDARD_SIGNATURE_HEADER,
+    STANDARD_TIMESTAMP_HEADER,
+  ].some((header) => request.headers.has(header));
+
+  if (hasStandardHeader) {
+    return verifyStandardWebhook(request, webhooks, signingSecret);
+  }
+
+  return verifyLegacyWebhook(request, signingSecret);
+}
+
+async function verifyStandardWebhook(
+  request: Request,
+  webhooks: Pick<LinqAPIV3.Webhooks, "unwrap">,
+  signingSecret: string,
+): Promise<LinqWebhookVerificationResult> {
+  if (!signingSecret) {
+    return missingSigningSecret();
+  }
+
+  const rawBody = await request.text();
+
+  try {
+    const event = webhooks.unwrap(rawBody, {
+      headers: Object.fromEntries(request.headers),
+      key: signingSecret,
+    });
+
+    return { ok: true, event };
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      return invalidJson();
+    }
+
+    return invalidSignature();
+  }
+}
+
+async function verifyLegacyWebhook(
+  request: Request,
+  signingSecret: string,
+): Promise<LinqWebhookVerificationResult> {
+  const timestamp = request.headers.get(LEGACY_TIMESTAMP_HEADER)?.trim() || "";
+  const signature = request.headers.get(LEGACY_SIGNATURE_HEADER)?.trim() || "";
 
   if (!timestamp || !signature) {
     return {
@@ -28,22 +78,43 @@ export async function verifyLinqWebhookRequest(
   }
 
   if (!signingSecret) {
-    return {
-      ok: false,
-      response: new Response("Linq webhook signing secret is not configured", { status: 503 }),
-    };
+    return missingSigningSecret();
   }
 
   const rawBody = new Uint8Array(await request.arrayBuffer());
 
   if (!(await verifyLinqSignature(timestamp, signature, signingSecret, rawBody))) {
-    return {
-      ok: false,
-      response: new Response("Invalid Linq webhook signature", { status: 401 }),
-    };
+    return invalidSignature();
   }
 
-  return { ok: true, rawBody };
+  try {
+    const event = JSON.parse(new TextDecoder().decode(rawBody)) as LinqAPIV3.UnwrapWebhookEvent;
+
+    return { ok: true, event };
+  } catch {
+    return invalidJson();
+  }
+}
+
+function invalidSignature(): LinqWebhookVerificationResult {
+  return {
+    ok: false,
+    response: new Response("Invalid Linq webhook signature", { status: 401 }),
+  };
+}
+
+function missingSigningSecret(): LinqWebhookVerificationResult {
+  return {
+    ok: false,
+    response: new Response("Linq webhook signing secret is not configured", { status: 503 }),
+  };
+}
+
+function invalidJson(): LinqWebhookVerificationResult {
+  return {
+    ok: false,
+    response: new Response("Invalid JSON", { status: 400 }),
+  };
 }
 
 function isFreshTimestamp(timestamp: string): boolean {

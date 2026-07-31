@@ -2,11 +2,13 @@ import { createHmac } from "node:crypto";
 import type { LinqAPIV3 } from "@linqapp/sdk";
 import { getEmoji } from "chat";
 import type { ChatInstance } from "chat";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
 
 import { createLinqAdapter } from "../src/adapter";
+import type { LinqRawMessage } from "../src/message-parser";
 
-const SIGNING_SECRET = "test_linq_webhook_secret";
+const SIGNING_KEY = "test_linq_webhook_secret";
+const SIGNING_SECRET = `whsec_${Buffer.from(SIGNING_KEY).toString("base64")}`;
 const API_KEY = "test_linq_api_key";
 
 describe("LinqAdapter.handleWebhook", () => {
@@ -22,7 +24,7 @@ describe("LinqAdapter.handleWebhook", () => {
     expect(response.status).toBe(401);
   });
 
-  it("returns 401 when the signature is invalid", async () => {
+  it("returns 401 when the Standard Webhooks signature is invalid", async () => {
     const adapter = createTestAdapter();
     const request = createSignedRequest({ ok: true }, { signature: "00" });
 
@@ -31,13 +33,67 @@ describe("LinqAdapter.handleWebhook", () => {
     expect(response.status).toBe(401);
   });
 
-  it("returns 200 for a valid signed message.received webhook", async () => {
+  it("returns 200 for a valid Standard Webhooks message.received webhook", async () => {
     const adapter = createTestAdapter();
     const request = createSignedRequest(createMessageReceivedPayload());
 
     const response = await adapter.handleWebhook(request);
 
     expect(response.status).toBe(200);
+  });
+
+  it("accepts a valid legacy X-Webhook signature", async () => {
+    const adapter = createTestAdapter();
+    const request = createLegacySignedRequest(createMessageReceivedPayload());
+
+    const response = await adapter.handleWebhook(request);
+
+    expect(response.status).toBe(200);
+  });
+
+  it("does not downgrade partial Standard Webhooks headers to legacy verification", async () => {
+    const adapter = createTestAdapter();
+    const legacyRequest = createLegacySignedRequest(createMessageReceivedPayload());
+    const headers = new Headers(legacyRequest.headers);
+    headers.set("webhook-id", "webhook-test-id");
+    const request = new Request(legacyRequest.url, {
+      method: "POST",
+      headers,
+      body: await legacyRequest.text(),
+    });
+
+    const response = await adapter.handleWebhook(request);
+
+    expect(response.status).toBe(401);
+  });
+
+  it("returns 400 when a valid Standard Webhooks signature contains invalid JSON", async () => {
+    const adapter = createTestAdapter();
+    const request = createStandardRequest("{");
+
+    const response = await adapter.handleWebhook(request);
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toBe("Invalid JSON");
+  });
+
+  it("acknowledges unknown event types without dispatching them", async () => {
+    const adapter = createTestAdapter();
+    const processMessage = vi.fn((..._args: Parameters<ChatInstance["processMessage"]>) => {});
+    const processReaction = vi.fn((..._args: Parameters<ChatInstance["processReaction"]>) => {});
+    (
+      adapter as unknown as {
+        chat: Pick<ChatInstance, "processMessage" | "processReaction">;
+      }
+    ).chat = { processMessage, processReaction };
+    const payload = createMessageReceivedPayload();
+    payload.event_type = "message.sent";
+
+    const response = await adapter.handleWebhook(createSignedRequest(payload));
+
+    expect(response.status).toBe(200);
+    expect(processMessage).not.toHaveBeenCalled();
+    expect(processReaction).not.toHaveBeenCalled();
   });
 
   it("dispatches inbound message.received webhooks to Chat SDK", async () => {
@@ -192,6 +248,12 @@ describe("LinqAdapter.handleWebhook", () => {
 });
 
 describe("LinqAdapter.parseMessage", () => {
+  it("uses the current unwrap webhook data at the raw message boundary", () => {
+    const event = createMessageReceivedPayload() satisfies LinqAPIV3.UnwrapWebhookEvent;
+
+    expectTypeOf(event.data).toMatchTypeOf<LinqRawMessage>();
+  });
+
   it("normalizes text message.received data", () => {
     const adapter = createTestAdapter();
     vi.spyOn(adapter, "encodeThreadId").mockReturnValue("linq:chat-123");
@@ -875,10 +937,39 @@ function createSignedRequest(
   overrides: { signature?: string; timestamp?: string } = {},
 ): Request {
   const body = JSON.stringify(payload);
+  return createStandardRequest(body, overrides);
+}
+
+function createStandardRequest(
+  body: string,
+  overrides: { signature?: string; timestamp?: string } = {},
+): Request {
   const timestamp = overrides.timestamp ?? Math.floor(Date.now() / 1000).toString();
+  const webhookId = "webhook-test-id";
   const signature =
     overrides.signature ??
-    createHmac("sha256", SIGNING_SECRET).update(`${timestamp}.${body}`).digest("hex");
+    `v1,${createHmac("sha256", SIGNING_KEY)
+      .update(`${webhookId}.${timestamp}.${body}`)
+      .digest("base64")}`;
+
+  return new Request("https://example.com/webhooks/linq", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "webhook-id": webhookId,
+      "webhook-signature": signature,
+      "webhook-timestamp": timestamp,
+    },
+    body,
+  });
+}
+
+function createLegacySignedRequest(payload: unknown): Request {
+  const body = JSON.stringify(payload);
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const signature = createHmac("sha256", SIGNING_SECRET)
+    .update(`${timestamp}.${body}`)
+    .digest("hex");
 
   return new Request("https://example.com/webhooks/linq", {
     method: "POST",
@@ -915,7 +1006,7 @@ function createMessageReceivedPayload(): LinqAPIV3.MessageReceivedWebhookEvent {
           joined_at: "2026-04-17T17:26:38.725846Z",
         },
         health_status: {
-          status: "healthy",
+          status: "HEALTHY",
           doc_url: "https://docs.linqapp.com/guides/chats/chat-health#healthy",
           updated_at: "2026-04-25T03:51:55.282Z",
         },
