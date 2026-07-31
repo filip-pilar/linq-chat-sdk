@@ -1,17 +1,17 @@
-# @linqapp/chat-sdk-adapter
+# @forma/linq-chat-sdk-adapter
 
-[Linq](https://linqapp.com) adapter for [Chat SDK](https://www.npmjs.com/package/chat) (`chat`). Build agentic chatbots that talk over iMessage and SMS through Linq, using the same handler code you'd write for Slack, Telegram, or WhatsApp.
+Forma-maintained fork of Linq's adapter for [Chat SDK](https://www.npmjs.com/package/chat) (`chat`). Build agentic chatbots that talk over iMessage and SMS through Linq, using the same handler code you'd write for Slack, Telegram, or WhatsApp.
 
-## Install
+This is not an official Linq package and is not published to npm. Consumers pin
+an exact immutable GitHub Release tarball from this repository.
 
-```bash
-npm install @linqapp/chat-sdk-adapter chat
-```
+The supported root API intentionally matches the official
+`@linqapp/chat-sdk-adapter` package.
 
 ## Quick start
 
 ```ts
-import { createLinqAdapter } from "@linqapp/chat-sdk-adapter";
+import { createLinqAdapter } from "@forma/linq-chat-sdk-adapter";
 import { Chat } from "chat";
 
 const chat = new Chat({
@@ -91,7 +91,9 @@ Attach media by putting `attachments` or `files` on a message:
 ```ts
 await thread.post({
   markdown: "here's the report 📎",
-  attachments: [{ type: "file", url: "https://example.com/report.pdf", mimeType: "application/pdf" }],
+  attachments: [
+    { type: "file", url: "https://example.com/report.pdf", mimeType: "application/pdf" },
+  ],
 });
 
 // or send raw bytes

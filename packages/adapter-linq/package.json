@@ -1,29 +1,27 @@
 {
-  "name": "@linqapp/chat-sdk-adapter",
-  "version": "0.1.0",
-  "description": "Linq adapter for Chat SDK — build chatbots that talk over iMessage and SMS",
+  "name": "@forma/linq-chat-sdk-adapter",
+  "version": "0.1.0-forma.1",
+  "private": true,
+  "description": "Forma-maintained Linq adapter for Chat SDK",
+  "keywords": [
+    "adapter",
+    "chat",
+    "chat-sdk",
+    "chatbot",
+    "imessage",
+    "linq",
+    "sms"
+  ],
+  "homepage": "https://github.com/filip-pilar/linq-chat-sdk/tree/main/packages/adapter-linq#readme",
+  "bugs": {
+    "url": "https://github.com/filip-pilar/linq-chat-sdk/issues"
+  },
   "license": "Apache-2.0",
-  "author": "Linq <support@linq.com>",
+  "author": "Forma",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/linq-team/linq-chat-sdk.git",
+    "url": "git+https://github.com/filip-pilar/linq-chat-sdk.git",
     "directory": "packages/adapter-linq"
-  },
-  "homepage": "https://github.com/linq-team/linq-chat-sdk/tree/main/packages/adapter-linq#readme",
-  "bugs": {
-    "url": "https://github.com/linq-team/linq-chat-sdk/issues"
-  },
-  "keywords": [
-    "linq",
-    "imessage",
-    "sms",
-    "chat",
-    "chatbot",
-    "chat-sdk",
-    "adapter"
-  ],
-  "publishConfig": {
-    "access": "public"
   },
   "files": [
     "dist"

@@ -4,7 +4,7 @@
 
 ## What's in here
 
-- [`packages/adapter-linq`](packages/adapter-linq) — the adapter package (`@linqapp/chat-sdk-adapter`). Start with its [README](packages/adapter-linq/README.md).
+- [`packages/adapter-linq`](packages/adapter-linq) — the Forma-maintained adapter package (`@forma/linq-chat-sdk-adapter`). Start with its [README](packages/adapter-linq/README.md).
 - [`apps/api`](apps/api) — example Nitro app running a single AI bot across Linq, Telegram, and WhatsApp, with webhook routes, setup endpoints, and a small admin UI.
 
 ## Development
