@@ -26,7 +26,7 @@ importers:
       '@chat-adapter/whatsapp':
         specifier: ^4.28.1
         version: 4.28.1
-      '@linqapp/chat-sdk-adapter':
+      '@forma/linq-chat-sdk-adapter':
         specifier: workspace:*
         version: link:../../packages/adapter-linq
       '@linqapp/sdk':

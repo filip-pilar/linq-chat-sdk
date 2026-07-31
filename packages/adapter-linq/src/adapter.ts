@@ -19,6 +19,7 @@ import type {
 import { cardHasInteractiveActions, collectCardImageUrls, extractCardElement } from "./cards.js";
 import { LinqFormatConverter } from "./format-converter.js";
 import { isRecord } from "./guards.js";
+import { createLinqAttachmentFetcher } from "./inbound-media.js";
 import {
   isMessageReceivedWebhookEvent,
   isReactionWebhookEvent,
@@ -405,30 +406,35 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   }
 
   parseMessage(raw: LinqRawMessage): Message<LinqRawMessage> {
-    return parseLinqMessage(raw, (platformData) => this.encodeThreadId(platformData));
+    return parseLinqMessage(
+      raw,
+      (platformData) => this.encodeThreadId(platformData),
+      this.apiClient.attachments,
+    );
   }
 
-  // Rebuild fetchData after an attachment is serialized to the queue and back.
-  // Linq media lives on permanent cdn.linqapp.com URLs, so the stored URL is all
-  // we need to re-download.
+  // Rebuild fetchData from the stable provider attachment ID after queue
+  // serialization. A fresh CDN URL is resolved only when bytes are requested.
   rehydrateAttachment(attachment: Attachment): Attachment {
-    const url = attachment.fetchMetadata?.url ?? attachment.url;
+    const attachmentId = attachment.fetchMetadata?.attachmentId;
 
-    if (!url) {
+    if (
+      !attachmentId ||
+      !attachment.name ||
+      !attachment.mimeType ||
+      attachment.size === undefined
+    ) {
       return attachment;
     }
 
     return {
       ...attachment,
-      fetchData: async () => {
-        const response = await fetch(url);
-
-        if (!response.ok) {
-          throw new Error(`Failed to fetch Linq attachment ${url}: ${response.status}`);
-        }
-
-        return Buffer.from(await response.arrayBuffer());
-      },
+      fetchData: createLinqAttachmentFetcher(this.apiClient.attachments, {
+        attachmentId,
+        filename: attachment.name,
+        mimeType: attachment.mimeType,
+        sizeBytes: attachment.size,
+      }),
     };
   }
 

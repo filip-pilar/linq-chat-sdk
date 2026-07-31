@@ -1,17 +1,17 @@
-# @linqapp/chat-sdk-adapter
+# @forma/linq-chat-sdk-adapter
 
-[Linq](https://linqapp.com) adapter for [Chat SDK](https://www.npmjs.com/package/chat) (`chat`). Build agentic chatbots that talk over iMessage and SMS through Linq, using the same handler code you'd write for Slack, Telegram, or WhatsApp.
+Forma-maintained fork of Linq's adapter for [Chat SDK](https://www.npmjs.com/package/chat) (`chat`). Build agentic chatbots that talk over iMessage and SMS through Linq, using the same handler code you'd write for Slack, Telegram, or WhatsApp.
 
-## Install
+This is not an official Linq package and is not published to npm. Consumers pin
+an exact immutable GitHub Release tarball from this repository.
 
-```bash
-npm install @linqapp/chat-sdk-adapter chat
-```
+The supported root API intentionally matches the official
+`@linqapp/chat-sdk-adapter` package.
 
 ## Quick start
 
 ```ts
-import { createLinqAdapter } from "@linqapp/chat-sdk-adapter";
+import { createLinqAdapter } from "@forma/linq-chat-sdk-adapter";
 import { Chat } from "chat";
 
 const chat = new Chat({
@@ -106,10 +106,18 @@ await thread.post({
 
 How each attachment is delivered:
 
-- **Public HTTPS URL, ≤ 10MB** — sent by reference; Linq downloads it on send. No upload round-trip, so forwarding inbound Linq media (already on `cdn.linqapp.com`) is free.
+- **Public HTTPS URL, ≤ 10MB** — sent by reference; Linq downloads it on send. No upload round-trip is needed.
 - **Raw bytes, non-HTTPS URLs, or files > 10MB** — uploaded via `POST /v3/attachments` (up to 100MB) and sent by `attachment_id`.
 
-A message can be media-only (no text). Inbound attachments expose `fetchData()` to download, and survive queue serialization via `rehydrateAttachment` (Linq CDN URLs don't expire). Audio is sent as a downloadable file attachment — the dedicated iMessage voice-memo bubble endpoint isn't wired up yet.
+A message can be media-only (no text). Inbound attachments persist only their
+stable Linq attachment ID in `fetchMetadata`; `fetchData()` and
+`rehydrateAttachment()` use that ID to request a fresh download URL. Downloads
+require the exact `https://cdn.linqapp.com` origin, reject redirects, enforce a
+30-second timeout, verify the declared metadata and response headers, and
+stream-count the body. Audio is capped at 25MB; other supported media retains
+Linq's 100MB attachment ceiling. Audio is sent as a downloadable file
+attachment — the dedicated iMessage voice-memo bubble endpoint isn't wired up
+yet.
 
 ## Cards
 

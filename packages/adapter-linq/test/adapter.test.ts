@@ -273,12 +273,66 @@ describe("LinqAdapter.parseMessage", () => {
     expect(message.attachments).toHaveLength(1);
     expect(message.attachments[0]).toMatchObject({
       type: "image",
-      url: "https://cdn.linqapp.com/attachments/test/IMG_3389.png",
       name: "IMG_3389.png",
       mimeType: "image/png",
       size: 58500,
+      fetchMetadata: {
+        attachmentId: "006a4826-7700-45e3-8796-39a7e26137e6",
+      },
     });
+    expect(message.attachments[0]?.url).toBeUndefined();
     expect(message.attachments[0]?.fetchData).toEqual(expect.any(Function));
+  });
+
+  it("normalizes native and attached audio through the same stable media contract", () => {
+    const adapter = createTestAdapter();
+    vi.spyOn(adapter, "encodeThreadId").mockReturnValue("linq:chat-123");
+    const payload = createMessageReceivedPayload();
+    const parts = [
+      {
+        id: "006a4826-7700-45e3-8796-39a7e26137e6",
+        url: "https://cdn.linqapp.com/voice-memos/test/memo.m4a?signature=native",
+        type: "media" as const,
+        filename: "memo.m4a",
+        mime_type: "audio/x-m4a",
+        size_bytes: 58500,
+      },
+      {
+        id: "106a4826-7700-45e3-8796-39a7e26137e6",
+        url: "https://cdn.linqapp.com/attachments/test/audio.m4a?signature=attached",
+        type: "media" as const,
+        filename: "audio.m4a",
+        mime_type: "audio/x-m4a",
+        size_bytes: 58500,
+      },
+    ];
+
+    const normalized = parts.map((part) => {
+      payload.data.parts = [part];
+      return adapter.parseMessage(payload.data).attachments[0];
+    });
+
+    expect(normalized).toEqual([
+      expect.objectContaining({
+        type: "audio",
+        name: "memo.m4a",
+        mimeType: "audio/x-m4a",
+        size: 58500,
+        fetchMetadata: {
+          attachmentId: "006a4826-7700-45e3-8796-39a7e26137e6",
+        },
+      }),
+      expect.objectContaining({
+        type: "audio",
+        name: "audio.m4a",
+        mimeType: "audio/x-m4a",
+        size: 58500,
+        fetchMetadata: {
+          attachmentId: "106a4826-7700-45e3-8796-39a7e26137e6",
+        },
+      }),
+    ]);
+    expect(normalized.every((attachment) => attachment?.url === undefined)).toBe(true);
   });
 
   it("preserves Linq reply metadata on raw messages", () => {
@@ -570,21 +624,52 @@ describe("LinqAdapter outbound media", () => {
 });
 
 describe("LinqAdapter.rehydrateAttachment", () => {
-  it("rebuilds fetchData from the stored URL after serialization", async () => {
+  it("resolves a fresh URL from the stable ID after serialization", async () => {
     const adapter = createTestAdapter();
+    const retrieve = vi.fn().mockResolvedValue({
+      id: "006a4826-7700-45e3-8796-39a7e26137e6",
+      filename: "photo.jpg",
+      content_type: "image/jpeg",
+      size_bytes: 3,
+      status: "complete",
+      created_at: "2026-07-31T00:00:00Z",
+      download_url: "https://cdn.linqapp.com/photo.jpg?signature=fresh",
+    });
+    (
+      adapter as unknown as {
+        apiClient: { attachments: { retrieve: typeof retrieve } };
+      }
+    ).apiClient = { attachments: { retrieve } };
     const rehydrated = adapter.rehydrateAttachment({
       type: "image",
-      url: "https://cdn.linqapp.com/photo.jpg",
-      fetchMetadata: { url: "https://cdn.linqapp.com/photo.jpg" },
+      name: "photo.jpg",
+      mimeType: "image/jpeg",
+      size: 3,
+      fetchMetadata: {
+        attachmentId: "006a4826-7700-45e3-8796-39a7e26137e6",
+      },
     });
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(new Response(new Uint8Array([7, 8, 9]), { status: 200 }));
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(new Uint8Array([7, 8, 9]), {
+        status: 200,
+        headers: {
+          "content-length": "3",
+          "content-type": "image/jpeg",
+        },
+      }),
+    );
 
     try {
       const data = await rehydrated.fetchData?.();
 
-      expect(fetchSpy).toHaveBeenCalledWith("https://cdn.linqapp.com/photo.jpg");
+      expect(retrieve).toHaveBeenCalledWith("006a4826-7700-45e3-8796-39a7e26137e6", {
+        signal: expect.any(AbortSignal),
+        timeout: 30_000,
+      });
+      expect(fetchSpy).toHaveBeenCalledWith("https://cdn.linqapp.com/photo.jpg?signature=fresh", {
+        redirect: "manual",
+        signal: expect.any(AbortSignal),
+      });
       expect(data).toEqual(Buffer.from([7, 8, 9]));
     } finally {
       fetchSpy.mockRestore();
