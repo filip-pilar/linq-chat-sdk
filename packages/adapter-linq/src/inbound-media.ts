@@ -64,14 +64,15 @@ export async function downloadLinqAttachment(
       redirect: "manual",
       signal: controller.signal,
     });
+    let responseBytes: number | undefined;
     try {
-      validateDownloadResponse(response, reference, maximumBytes);
+      responseBytes = validateDownloadResponse(response, reference, maximumBytes);
     } catch (error) {
       await response.body?.cancel().catch(() => {});
       throw error;
     }
 
-    return await readBoundedBody(response, reference.sizeBytes, maximumBytes, controller);
+    return await readBoundedBody(response, responseBytes, maximumBytes, controller);
   } catch (error) {
     if (timedOut) {
       throw new LinqAttachmentDownloadError("timeout");
@@ -154,7 +155,7 @@ function validateDownloadResponse(
   response: Response,
   reference: LinqInboundAttachmentReference,
   maximumBytes: number,
-): void {
+): number | undefined {
   if (response.status >= 300 && response.status < 400) {
     throw new LinqAttachmentDownloadError("redirect_rejected");
   }
@@ -176,19 +177,17 @@ function validateDownloadResponse(
       throw new LinqAttachmentDownloadError("invalid_content_length");
     }
     const parsedLength = Number(contentLength);
-    if (
-      !Number.isSafeInteger(parsedLength) ||
-      parsedLength !== reference.sizeBytes ||
-      parsedLength > maximumBytes
-    ) {
+    if (!Number.isSafeInteger(parsedLength) || parsedLength <= 0 || parsedLength > maximumBytes) {
       throw new LinqAttachmentDownloadError("response_size_mismatch");
     }
+    return parsedLength;
   }
+  return undefined;
 }
 
 async function readBoundedBody(
   response: Response,
-  expectedBytes: number,
+  expectedResponseBytes: number | undefined,
   maximumBytes: number,
   controller: AbortController,
 ): Promise<Buffer> {
@@ -205,7 +204,10 @@ async function readBoundedBody(
       const next = await reader.read();
       if (next.done) break;
       byteLength += next.value.byteLength;
-      if (byteLength > expectedBytes || byteLength > maximumBytes) {
+      if (
+        byteLength > maximumBytes ||
+        (expectedResponseBytes !== undefined && byteLength > expectedResponseBytes)
+      ) {
         controller.abort();
         await reader.cancel();
         throw new LinqAttachmentDownloadError("response_too_large");
@@ -216,7 +218,10 @@ async function readBoundedBody(
     reader.releaseLock();
   }
 
-  if (byteLength !== expectedBytes) {
+  if (
+    byteLength === 0 ||
+    (expectedResponseBytes !== undefined && byteLength !== expectedResponseBytes)
+  ) {
     throw new LinqAttachmentDownloadError("truncated_response");
   }
   return Buffer.concat(chunks, byteLength);

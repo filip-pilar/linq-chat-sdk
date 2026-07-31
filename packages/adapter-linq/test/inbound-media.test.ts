@@ -60,7 +60,7 @@ async function expectFailure(promise: Promise<unknown>, code: string): Promise<v
 }
 
 describe("bounded Linq inbound attachment download", () => {
-  it("retrieves a fresh URL and returns exactly the declared bytes", async () => {
+  it("retrieves a fresh URL and returns the bounded response bytes", async () => {
     const attachments = lookup();
     const fetchImpl = vi.fn().mockResolvedValue(audioResponse());
 
@@ -127,6 +127,15 @@ describe("bounded Linq inbound attachment download", () => {
     ).resolves.toEqual(Buffer.from([1, 2, 3, 4]));
   });
 
+  it("accepts a bounded provider response size that differs from stable metadata", async () => {
+    const bytes = new Uint8Array([1, 2, 3, 4, 5, 6]);
+    const fetchImpl = vi.fn().mockResolvedValue(audioResponse(bytes));
+
+    await expect(
+      downloadLinqAttachment(lookup(), reference, { fetch: fetchImpl }),
+    ).resolves.toEqual(Buffer.from(bytes));
+  });
+
   it.each([
     [{ id: "106a4826-7700-45e3-8796-39a7e26137e6" }, "metadata_mismatch"],
     [{ filename: "other.m4a" }, "metadata_mismatch"],
@@ -158,7 +167,7 @@ describe("bounded Linq inbound attachment download", () => {
     [
       new Response(new Uint8Array([1, 2, 3, 4]), {
         headers: {
-          "content-length": "5",
+          "content-length": "0",
           "content-type": reference.mimeType,
         },
       }),
@@ -191,7 +200,23 @@ describe("bounded Linq inbound attachment download", () => {
     );
   });
 
-  it("stream-counts and cancels immediately above the accepted size", async () => {
+  it("rejects a body that is shorter than its response content length", async () => {
+    const response = new Response(new Uint8Array([1, 2, 3, 4]), {
+      headers: {
+        "content-length": "5",
+        "content-type": reference.mimeType,
+      },
+    });
+
+    await expectFailure(
+      downloadLinqAttachment(lookup(), reference, {
+        fetch: vi.fn().mockResolvedValue(response),
+      }),
+      "truncated_response",
+    );
+  });
+
+  it("stream-counts and cancels immediately above the configured maximum", async () => {
     let cancelled = false;
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
@@ -209,14 +234,28 @@ describe("bounded Linq inbound attachment download", () => {
     await expectFailure(
       downloadLinqAttachment(lookup(), reference, {
         fetch: vi.fn().mockResolvedValue(response),
+        maximumBytes: 4,
       }),
       "response_too_large",
     );
     expect(cancelled).toBe(true);
   });
 
-  it("rejects a truncated body when no content length is present", async () => {
-    const response = new Response(new Uint8Array([1, 2, 3]), {
+  it("accepts a non-empty bounded body when no content length is present", async () => {
+    const bytes = new Uint8Array([1, 2, 3]);
+    const response = new Response(bytes, {
+      headers: { "content-type": reference.mimeType },
+    });
+
+    await expect(
+      downloadLinqAttachment(lookup(), reference, {
+        fetch: vi.fn().mockResolvedValue(response),
+      }),
+    ).resolves.toEqual(Buffer.from(bytes));
+  });
+
+  it("rejects an empty body when no content length is present", async () => {
+    const response = new Response(new Uint8Array(), {
       headers: { "content-type": reference.mimeType },
     });
 
