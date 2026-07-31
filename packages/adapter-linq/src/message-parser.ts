@@ -3,6 +3,7 @@ import { Message, NotImplementedError, parseMarkdown } from "chat";
 import type { Attachment, LinkPreview } from "chat";
 
 import { isRecord } from "./guards.js";
+import { createLinqAttachmentFetcher } from "./inbound-media.js";
 
 type LinqMessageSendResponse = Awaited<ReturnType<LinqAPIV3["chats"]["messages"]["send"]>>;
 type LinqRetrievedMessage = LinqAPIV3.Message;
@@ -30,6 +31,7 @@ type LinqThreadId = {
 export function parseLinqMessage(
   raw: LinqRawMessage,
   encodeThreadId: (platformData: LinqThreadId) => string,
+  attachmentLookup?: LinqAPIV3["attachments"],
 ): Message<LinqRawMessage> {
   const message = normalizeMessage(raw);
   const attachments = message.parts.flatMap((part): Attachment[] => {
@@ -37,7 +39,7 @@ export function parseLinqMessage(
       return [];
     }
 
-    return [toAttachment(part)];
+    return [toAttachment(part, attachmentLookup)];
   });
   const text = messageText(message.parts, attachments);
   const links = messageLinks(message.parts);
@@ -199,29 +201,29 @@ function messageLinks(parts: LinqMessagePart[]): LinkPreview[] {
   return [...urls].map((url) => ({ url }));
 }
 
-function toAttachment(part: LinqMediaMessagePart): Attachment {
+function toAttachment(
+  part: LinqMediaMessagePart,
+  attachmentLookup?: LinqAPIV3["attachments"],
+): Attachment {
+  const reference = {
+    attachmentId: part.id,
+    filename: part.filename,
+    mimeType: part.mime_type,
+    sizeBytes: part.size_bytes,
+  };
+
   return {
     type: attachmentType(part.mime_type),
-    url: part.url,
     name: part.filename,
     mimeType: part.mime_type,
     size: part.size_bytes,
     width: part.width ?? part.width_px,
     height: part.height ?? part.height_px,
-    // Linq media URLs are permanent (cdn.linqapp.com), so the URL is enough to
-    // rebuild fetchData after the message is serialized to the queue and back.
-    fetchMetadata: { url: part.url },
-    fetchData: async () => {
-      const response = await fetch(part.url);
-
-      if (!response.ok) {
-        throw new Error(
-          `Failed to fetch Linq attachment ${part.id || part.url}: ${response.status}`,
-        );
-      }
-
-      return Buffer.from(await response.arrayBuffer());
-    },
+    // Persist only the stable provider reference. Webhook media URLs expire.
+    fetchMetadata: { attachmentId: part.id },
+    fetchData: attachmentLookup
+      ? createLinqAttachmentFetcher(attachmentLookup, reference)
+      : undefined,
   };
 }
 

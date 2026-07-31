@@ -105,10 +105,18 @@ await thread.post({
 
 How each attachment is delivered:
 
-- **Public HTTPS URL, ≤ 10MB** — sent by reference; Linq downloads it on send. No upload round-trip, so forwarding inbound Linq media (already on `cdn.linqapp.com`) is free.
+- **Public HTTPS URL, ≤ 10MB** — sent by reference; Linq downloads it on send. No upload round-trip is needed.
 - **Raw bytes, non-HTTPS URLs, or files > 10MB** — uploaded via `POST /v3/attachments` (up to 100MB) and sent by `attachment_id`.
 
-A message can be media-only (no text). Inbound attachments expose `fetchData()` to download, and survive queue serialization via `rehydrateAttachment` (Linq CDN URLs don't expire). Audio is sent as a downloadable file attachment — the dedicated iMessage voice-memo bubble endpoint isn't wired up yet.
+A message can be media-only (no text). Inbound attachments persist only their
+stable Linq attachment ID in `fetchMetadata`; `fetchData()` and
+`rehydrateAttachment()` use that ID to request a fresh download URL. Downloads
+require the exact `https://cdn.linqapp.com` origin, reject redirects, enforce a
+30-second timeout, verify the declared metadata and response headers, and
+stream-count the body. Audio is capped at 25MB; other supported media retains
+Linq's 100MB attachment ceiling. Audio is sent as a downloadable file
+attachment — the dedicated iMessage voice-memo bubble endpoint isn't wired up
+yet.
 
 ## Reactions
 
