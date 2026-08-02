@@ -189,6 +189,7 @@ describe("LinqAdapter.postMessage with cards", () => {
 
     expect(send).toHaveBeenCalledWith("chat-123", {
       message: {
+        idempotency_key: expect.any(String),
         parts: [
           { type: "text", value: "Order #1234\nYour order has been received!" },
           { type: "media", url: "https://example.com/header.png" },
@@ -212,6 +213,7 @@ describe("LinqAdapter.postMessage with cards", () => {
 
     expect(send).toHaveBeenCalledWith("chat-123", {
       message: {
+        idempotency_key: expect.any(String),
         parts: [
           { type: "text", value: "Options: Yes, No" },
           { type: "media", url: "https://example.com/photo.png" },
@@ -231,6 +233,7 @@ describe("LinqAdapter.postMessage with cards", () => {
 
     expect(send).toHaveBeenCalledWith("chat-123", {
       message: {
+        idempotency_key: expect.any(String),
         parts: [{ type: "media", url: "https://example.com/photo.png" }],
       },
     });
@@ -267,6 +270,7 @@ describe("LinqAdapter.postMessage with cards", () => {
 
     expect(send).toHaveBeenCalledWith("chat-123", {
       message: {
+        idempotency_key: expect.any(String),
         parts: [
           { type: "text", value: "Custom fallback" },
           { type: "media", url: "https://example.com/photo.png" },

@@ -46,6 +46,7 @@
     "format:check": "oxfmt . --check"
   },
   "dependencies": {
+    "@chat-adapter/shared": "^4.28.1",
     "@linqapp/sdk": "^0.32.1"
   },
   "devDependencies": {

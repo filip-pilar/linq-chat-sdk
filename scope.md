@@ -10,7 +10,7 @@ The adapter can already handle the core receive/reply path:
 
 - Verify signed Linq webhooks.
 - Convert inbound `message.received` events into Chat SDK messages.
-- Send text replies to an existing Linq chat.
+- Send reliable text/media/card replies through `thread.post()` to an existing Linq chat, with central limits, one UUID idempotency key, SDK-owned message retries, shared errors, and preparation-only attachment cleanup.
 - Fetch thread metadata with `chats.retrieve()`.
 - Fetch recent chat history with `chats.messages.list()`.
 - Fetch a single message with `messages.retrieve()`.
@@ -65,20 +65,24 @@ Still missing:
 
 ### 2. Outbound attachments and media
 
-Status: **implemented**
+Status: **existing-chat send path implemented; full media lifecycle remains partial**
 
 `postMessage()` maps Chat SDK `attachments` and `files` to Linq media parts:
 
 - Public HTTPS URLs ≤ 10MB are sent by reference (Linq downloads on send) — no upload round-trip, so forwarding inbound Linq media is free.
 - Raw bytes, non-HTTPS URLs, and files > 10MB are pre-uploaded via `POST /v3/attachments` (up to 100MB) and sent by `attachment_id`.
 - Messages can be media-only (no text); text leads the parts array so ordering is `[text, media, ...]`.
+- Existing-chat sends centrally enforce non-empty content, 10,000 text characters, 100 total parts, 40 public-URL media parts (including card images), valid HTTPS URL parts, 1–255-character upload filenames, and 1-byte–100MB uploads before Linq side effects where the required data is already available.
+- Each `postMessage()` call generates one UUID `idempotency_key`; the official Linq SDK owns message retries.
+- Attachment creation disables SDK retries. Attachments created during preparation are deleted best-effort only when preparation fails before message sending begins; the primary error is preserved.
+- Linq failures map to standard `@chat-adapter/shared` errors while retaining the original Linq error, provider code, trace ID, and applicable retry-after data.
 
-Inbound attachments survive queue serialization via `rehydrateAttachment` (Linq CDN URLs are permanent).
+Inbound attachments survive queue serialization via `rehydrateAttachment` and a stable Linq attachment ID.
 
 Still missing:
 
 - iMessage voice-memo bubbles (`POST /v3/chats/{chatId}/voicememo`) — audio currently sends as a downloadable file attachment
-- `idempotency_key` on sends to dedupe app-level retries
+- Batch `012` media lifecycle: URL-download security/bounding, streaming, readiness, upload retries, complete format handling, retention, and all send-time cleanup
 
 ### 3. Inbound reaction webhooks
 

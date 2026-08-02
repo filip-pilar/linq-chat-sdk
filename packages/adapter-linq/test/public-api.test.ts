@@ -60,7 +60,10 @@ describe("public adapter foundation", () => {
     await adapter.postMessage("linq:chat-123", "hello");
 
     expect(send).toHaveBeenCalledWith("chat-123", {
-      message: { parts: [{ type: "text", value: "hello" }] },
+      message: {
+        idempotency_key: expect.any(String),
+        parts: [{ type: "text", value: "hello" }],
+      },
     });
   });
 });

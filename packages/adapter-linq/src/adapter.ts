@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { LinqAPIV3 } from "@linqapp/sdk";
 import { ConsoleLogger, Message, NotImplementedError, stringifyMarkdown } from "chat";
 import type {
@@ -17,6 +18,7 @@ import type {
 } from "chat";
 
 import { cardHasInteractiveActions, collectCardImageUrls, extractCardElement } from "./cards.js";
+import { translateLinqError } from "./errors.js";
 import { LinqFormatConverter } from "./format-converter.js";
 import { isRecord } from "./guards.js";
 import { createLinqAttachmentFetcher } from "./inbound-media.js";
@@ -26,14 +28,9 @@ import {
   parseLinqMessage,
   type LinqRawMessage,
 } from "./message-parser.js";
-import { buildLinqMediaParts } from "./outbound-media.js";
+import { planLinqOutboundMessage, prepareLinqOutboundParts } from "./outbound-media.js";
 import { fromLinqReaction, toLinqReaction } from "./reactions.js";
 import { verifyLinqWebhookRequest } from "./verification.js";
-
-type LinqOutboundPart =
-  | { type: "text"; value: string }
-  | { type: "media"; url: string }
-  | { type: "media"; attachment_id: string };
 
 type LinqThreadId = {
   chatId: string;
@@ -162,20 +159,11 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     message: AdapterPostableMessage,
   ): Promise<RawMessage<LinqRawMessage>> {
     const { chatId } = this.decodeThreadId(threadId);
+    const idempotencyKey = randomUUID();
     const text = this.converter.renderPostable(message).trim();
-    const mediaParts = await buildLinqMediaParts(this.apiClient, message);
-
-    const parts: LinqOutboundPart[] = [];
-
-    // Text leads so the message reads as [text, media, ...]; Linq disallows
-    // consecutive text parts but is fine with a single text part before media.
-    if (text) {
-      parts.push({ type: "text", value: text });
-    }
-
-    // Card images become real media parts; the rest of the card is already
-    // flattened into the fallback text above.
     const card = extractCardElement(message);
+    const cardImageUrls = card ? collectCardImageUrls(card) : [];
+    const plan = planLinqOutboundMessage(message, text, cardImageUrls);
 
     if (card) {
       // Feedback instead of silence: the card still sends, but its buttons and
@@ -186,27 +174,50 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
             "Use LinkButton/CardLink URLs or handle plain-text replies instead.",
         );
       }
+    }
 
-      for (const url of collectCardImageUrls(card)) {
-        parts.push({ type: "media", url });
+    const createdAttachmentIds: string[] = [];
+    let messageSendingBegan = false;
+
+    try {
+      const parts = await prepareLinqOutboundParts(this.apiClient, plan, (attachmentId) => {
+        createdAttachmentIds.push(attachmentId);
+      });
+
+      // Once send begins, Linq may have accepted attachment references even if
+      // the client ultimately throws. Batch 012 owns any send-time lifecycle.
+      messageSendingBegan = true;
+      const response = await this.apiClient.chats.messages.send(chatId, {
+        message: {
+          idempotency_key: idempotencyKey,
+          parts,
+        },
+      });
+
+      return {
+        id: response.message.id,
+        threadId: this.encodeThreadId({ chatId: response.chat_id || chatId }),
+        raw: response,
+      };
+    } catch (error) {
+      if (!messageSendingBegan) {
+        await this.cleanupPreparedAttachments(createdAttachmentIds);
       }
+
+      throw translateLinqError(error, {
+        action: messageSendingBegan ? "send messages" : "prepare attachments",
+        resourceId: messageSendingBegan ? chatId : undefined,
+        resourceType: messageSendingBegan ? "chat" : "attachment",
+      });
     }
+  }
 
-    parts.push(...mediaParts);
-
-    if (parts.length === 0) {
-      throw new Error("Linq message must include text or media.");
-    }
-
-    const response = await this.apiClient.chats.messages.send(chatId, {
-      message: { parts },
-    });
-
-    return {
-      id: response.message.id,
-      threadId: this.encodeThreadId({ chatId: response.chat_id || chatId }),
-      raw: response,
-    };
+  private async cleanupPreparedAttachments(attachmentIds: string[]): Promise<void> {
+    await Promise.allSettled(
+      attachmentIds.map(async (attachmentId) => {
+        await this.apiClient.attachments.delete(attachmentId);
+      }),
+    );
   }
 
   async editMessage(

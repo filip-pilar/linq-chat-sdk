@@ -472,6 +472,7 @@ describe("LinqAdapter.postMessage", () => {
 
     expect(send).toHaveBeenCalledWith("3caaf1a0-ef9f-46e0-8c22-31e82c8514dc", {
       message: {
+        idempotency_key: expect.any(String),
         parts: [{ type: "text", value: "hello" }],
       },
     });
@@ -534,6 +535,7 @@ describe("LinqAdapter outbound media", () => {
       expect(fetchSpy).not.toHaveBeenCalled();
       expect(send).toHaveBeenCalledWith("chat-123", {
         message: {
+          idempotency_key: expect.any(String),
           parts: [
             { type: "text", value: "check this out" },
             { type: "media", url: "https://cdn.linqapp.com/photo.jpg" },
@@ -581,17 +583,21 @@ describe("LinqAdapter outbound media", () => {
         ],
       });
 
-      expect(create).toHaveBeenCalledWith({
-        filename: "pic.png",
-        content_type: "image/png",
-        size_bytes: Buffer.from("img-bytes").byteLength,
-      });
+      expect(create).toHaveBeenCalledWith(
+        {
+          filename: "pic.png",
+          content_type: "image/png",
+          size_bytes: Buffer.from("img-bytes").byteLength,
+        },
+        { maxRetries: 0 },
+      );
       expect(fetchSpy).toHaveBeenCalledWith(
         "https://uploads.linqapp.com/put/att-789",
         expect.objectContaining({ method: "PUT", headers: { "content-type": "image/png" } }),
       );
       expect(send).toHaveBeenCalledWith("chat-123", {
         message: {
+          idempotency_key: expect.any(String),
           parts: [
             { type: "text", value: "here" },
             { type: "media", attachment_id: "att-789" },
@@ -623,6 +629,7 @@ describe("LinqAdapter outbound media", () => {
 
     expect(send).toHaveBeenCalledWith("chat-123", {
       message: {
+        idempotency_key: expect.any(String),
         parts: [{ type: "media", url: "https://cdn.linqapp.com/photo.jpg" }],
       },
     });
@@ -677,7 +684,10 @@ describe("LinqAdapter outbound media", () => {
       expect(fetchSpy).toHaveBeenCalledWith("https://cdn.linqapp.com/clip.mp4");
       expect(create).toHaveBeenCalledTimes(1);
       expect(send).toHaveBeenCalledWith("chat-123", {
-        message: { parts: [{ type: "media", attachment_id: "att-big" }] },
+        message: {
+          idempotency_key: expect.any(String),
+          parts: [{ type: "media", attachment_id: "att-big" }],
+        },
       });
     } finally {
       fetchSpy.mockRestore();

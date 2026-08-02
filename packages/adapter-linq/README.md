@@ -141,6 +141,27 @@ Agentcard is not a recipe and remains explicitly out of scope.
 
 Thread IDs are stable and always take the form `linq:{chatId}`, regardless of whether the thread was first seen via webhook or API. Group vs DM identity is tracked internally from webhook payloads and `chats.retrieve()` calls; legacy `linq:{chatId}:group` / `linq:{chatId}:dm` IDs from older versions still decode.
 
+## Reliable existing-chat sends
+
+`thread.post()` is the public send API. Each call creates one UUID
+`idempotency_key`; the official Linq SDK owns message retries and reuses that
+body, so the adapter does not add another retry loop.
+
+The current text/media/card inputs are validated before Linq uploads or message
+sends begin:
+
+- a message must contain text or media;
+- text is limited to 10,000 characters;
+- a message is limited to 100 total parts and 40 public-URL media parts, with card images counted alongside ordinary attachments;
+- every URL sent directly to Linq must be valid HTTPS;
+- upload filenames must contain 1–255 characters; and
+- uploads must contain 1 byte–100MB.
+
+Linq failures use the standard `@chat-adapter/shared` validation, rate-limit,
+authentication, permission, not-found, network, and generic adapter errors. The
+original Linq error is retained as `cause`; provider code and trace ID remain on
+the mapped error for diagnostics, and rate-limit errors retain `retryAfter`.
+
 ## Attachments
 
 Attach media by putting `attachments` or `files` on a message:
@@ -165,6 +186,11 @@ How each attachment is delivered:
 - **Public HTTPS URL, ≤ 10MB** — sent by reference; Linq downloads it on send. No upload round-trip is needed.
 - **Raw bytes, non-HTTPS URLs, or files > 10MB** — uploaded via `POST /v3/attachments` (up to 100MB) and sent by `attachment_id`.
 
+Attachment creation uses `maxRetries: 0`. If preparation fails after the
+adapter created an attachment but before message sending starts, that attachment
+is deleted best-effort without replacing the primary error. Once sending begins,
+the adapter does not delete attachments.
+
 A message can be media-only (no text). Inbound attachments persist only their
 stable Linq attachment ID in `fetchMetadata`; `fetchData()` and
 `rehydrateAttachment()` use that ID to request a fresh download URL. Downloads
@@ -174,6 +200,11 @@ stream-count the body. Audio is capped at 25MB; other supported media retains
 Linq's 100MB attachment ceiling. Audio is sent as a downloadable file
 attachment — the dedicated iMessage voice-memo bubble endpoint isn't wired up
 yet.
+
+Batch `012` retains URL-download security/bounding, streaming upload work,
+readiness, upload retries, complete format handling, retention, and all
+send-time cleanup. The by-reference public-HTTPS behavior above remains
+unchanged until then.
 
 ## Cards
 
