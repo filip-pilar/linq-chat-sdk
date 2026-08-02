@@ -59,6 +59,21 @@ Other event types are acknowledged with a `200` and ignored.
 | `signingSecret` | yes      | Webhook signing secret. Standard Webhooks signatures are verified by the Linq SDK; legacy `X-Webhook-*` signatures remain supported for compatibility. |
 | `baseURL`       | no       | Override the Linq API base URL (e.g. sandbox).                                                                                                         |
 
+The adapter also exposes its configured official Linq client without wrapping or
+renaming endpoint operations:
+
+```ts
+const adapter = createLinqAdapter({
+  apiKey: process.env.LINQ_API_KEY!,
+  signingSecret: process.env.LINQ_WEBHOOK_SECRET!,
+});
+const paymentRequests = await adapter.client.paymentRequests.list();
+```
+
+`adapter.client` is a read-only property referencing the same `LinqAPIV3`
+instance the adapter uses internally. Its native types, validation, and errors follow the
+[official Linq API](https://docs.linqapp.com/).
+
 ## Feature parity
 
 The adapter's parity target is complete, non-lossy Linq chat and messaging
@@ -74,8 +89,8 @@ feature or batch—composed from `adapter.client.paymentRequests`, general rich-
 delivery, and generic typed `onLinqEvent` passthrough. Agentcard is out of scope.
 Experience discovery remains only in the native-client boundary audit.
 
-The full 57-operation audit also records the package boundary. Batch `002` will
-expose the official Linq client through read-only `adapter.client` without
+The full 57-operation audit also records the package boundary. Batch `002`
+exposes the official Linq client through read-only `adapter.client` without
 duplicating its operations with bespoke wrappers.
 
 See [`FEATURE_PARITY.md`](./FEATURE_PARITY.md) for the authoritative inventory
@@ -117,7 +132,8 @@ Create and manage a Payment Request with
 rich-link message capability, and observe `payment.succeeded`,
 `payment.canceled`, or `payment.expired` through generic typed
 `adapter.onLinqEvent(...)`. Application code owns reconciliation and payment
-state. This recipe depends on planned primitives and is not supported yet.
+state. The native client is available now; rich-link delivery and generic event
+passthrough remain planned, so the complete recipe is not supported yet.
 
 Agentcard is not a recipe and remains explicitly out of scope.
 

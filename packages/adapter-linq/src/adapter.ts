@@ -46,7 +46,7 @@ export interface LinqAdapterConfig {
   signingSecret: string;
 }
 
-class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
+export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   readonly name: string = "linq";
   readonly userName: string = "linq";
   readonly persistMessageHistory = true;
@@ -69,6 +69,10 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     this.signingSecret = config.signingSecret;
     this.webhooks = this.apiClient.webhooks;
     this.logger = new ConsoleLogger();
+  }
+
+  get client(): LinqAPIV3 {
+    return this.apiClient;
   }
 
   async initialize(chat: ChatInstance): Promise<void> {
@@ -452,6 +456,6 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   }
 }
 
-export function createLinqAdapter(config: LinqAdapterConfig) {
+export function createLinqAdapter(config: LinqAdapterConfig): LinqAdapter {
   return new LinqAdapter(config);
 }
