@@ -56,8 +56,10 @@ Every inventory row also has exactly one architectural disposition:
 | Recipe                    | A useful workflow composed from `adapter.client` and stable chat primitives; document it without adding a payment- or domain-specific API. |
 | Out of scope              | Inventory-only capability with no planned adapter behavior, recipe, tests, or implementation batch.                                        |
 
-Litmus test: if a proposed adapter method would only rename an official Linq SDK method with
-essentially the same arguments and result, remove it and use `adapter.client`.
+Apply this litmus test to every proposed public method, class, error, option, and exported type: if
+it only renames or reshapes an existing Chat SDK, shared-adapter, or official Linq client surface
+with essentially the same semantics, do not add it. Use the existing standard surface or
+`adapter.client` instead.
 
 ## Target public API shape
 
@@ -100,6 +102,59 @@ Scope terms used throughout this roadmap:
   workflows in which an agent pays on a customer's behalf. If a future official client makes those
   resources transitively reachable through `adapter.client`, they still receive no adapter contract,
   convenience API, examples, or dedicated tests.
+
+## Implementation guardrails
+
+These rules are normative for every implementation plan and change in this package.
+
+### Public API discipline
+
+- Standard Chat SDK APIs and shared adapter primitives are the primary surface. Endpoint-shaped
+  operations remain on `adapter.client`.
+- A Linq-specific export is allowed only for a documented semantic gap that the standard and native
+  surfaces cannot express faithfully. Its proposal must identify those alternatives and explain why
+  each is insufficient.
+- Keep any justified extension minimal and cohesive; do not export provider-shaped aliases, helper
+  types, options, errors, or classes solely for parity or convenience.
+
+### Error policy
+
+- Prefer `ValidationError`, `AdapterRateLimitError`, `AuthenticationError`, `PermissionError`,
+  `ResourceNotFoundError`, `NetworkError`, and `AdapterError` from `@chat-adapter/shared`.
+- Do not create Linq-specific validation, rate-limit, authentication, permission, not-found,
+  network, or generic provider errors merely to rename standard behavior.
+- A Linq-specific error or error type is allowed only when essential Linq metadata cannot be
+  preserved through the standard contract. Document the missing semantic, retained metadata, and
+  consumer need, then contract-test the exception.
+
+### Retry, idempotency, and side-effect safety
+
+- Do not duplicate retry behavior already owned by the official Linq client. Before adding any
+  adapter retry, classify the operation's side effects, idempotency, and replay consequences.
+- Retry only when the operation is safely idempotent or uses a verified idempotency mechanism.
+  Reuse one idempotency value across retries of one logical operation; generate a new value for a
+  distinct operation.
+- Never infer one endpoint's idempotency or retry safety from another endpoint.
+- Cleanup may target only resources definitely created and orphaned by the adapter. It is
+  best-effort, must not broaden the deletion target, and must never replace the primary error.
+
+### Evidence and ambiguity
+
+- Treat current official Linq documentation and the installed official SDK's behavior and types as
+  primary evidence. Record documentation/SDK discrepancies, including the installed version, in
+  the relevant implementation notes or parity row.
+- Do not invent behavior when semantics are ambiguous. Keep the affected capability `Partial`,
+  `Missing`, or explicitly blocked until verified.
+- Distinguish provider-enforced constraints from constraints the adapter can reliably validate
+  locally; do not claim local enforcement without the required evidence and inputs.
+
+### Planning and definition of done
+
+- Every proposed public export must record the standard and native alternatives considered.
+- Every implementation plan must trace each verified constraint or risk to an implementation rule,
+  test, documentation update, or explicit deferral.
+- Update every affected parity row in the same change that alters behavior. Do not mark a broad row
+  `Complete` when only one path, input form, protocol, or other subset is covered.
 
 ## Definition of done by disposition
 
