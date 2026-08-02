@@ -18,8 +18,8 @@ The adapter can already handle the core receive/reply path:
 - Render formatted Chat SDK content as markdown text.
 - Add and remove reactions with `messages.addReaction()`.
 - Route inbound `reaction.added` / `reaction.removed` webhooks into Chat SDK `onReaction()` handlers (tapbacks map to normalized emoji, custom emoji pass through, stickers are skipped).
-- Encode stable Linq thread IDs (`linq:<chatId>`) so webhook and API paths map to the same thread.
-- Track direct-message vs group-chat identity in-memory from webhooks and chat fetches (legacy `linq:<chatId>:dm/group` IDs still decode).
+- Encode stable Linq thread IDs (`linq:{chatId}`) so webhook and API paths map to the same thread.
+- Track direct-message vs group-chat identity in-memory from webhooks and chat fetches (legacy `linq:{chatId}:dm/group` IDs still decode).
 - Resolve unknown chat identity via `chats.retrieve()` before dispatching webhooks that omit `is_group`.
 - Skip typing indicators for known group chats and ignore Linq's expected group-chat typing rejection.
 - Show typing indicators for direct-message chats.
@@ -97,27 +97,39 @@ Linq-specific notes:
 - Sticker reactions are skipped — Chat SDK has no emoji equivalent.
 - Reaction webhooks missing `chat_id` or `message_id` are acknowledged but not dispatched.
 
-## Will not implement
+### 4. Proactive direct-message sending
 
-These are intentional adapter boundaries, not backlog items.
+Status: **unsupported today; assigned to future Batch `004`**
 
+The adapter currently sends only to canonical existing-chat thread IDs (`linq:{chatId}`). Chat SDK
+`openDM()` returns a thread before the caller posts content, while Linq creates or reuses a chat only
+as part of an initial-message send. Batch `004` owns a future standard Chat SDK proactive path, but
+it must not be implemented until that semantic mismatch has a safe design.
 
+Applications that need proactive sending now can use the official client exposed as
+`adapter.client`: use `messages.create()` for an auto-selected sending number or `chats.create()`
+when the application must select the sending number. Those calls retain native Linq semantics and
+do not create a Chat SDK thread automatically. Do not add bespoke adapter `sendMessage()` or
+`createChat()` wrappers.
 
-### Opening new direct messages / creating chats
+Before implementation, Batch `004` must resolve canonical thread identity and compatibility,
+concurrent first-send/idempotency safety, verified initial-message constraints, sender
+selection/failover, pre-send and post-send thread behavior, and contract plus sandbox/device
+coverage. The complete authoritative acceptance gates are in
+[`FEATURE_PARITY.md`](./packages/adapter-linq/FEATURE_PARITY.md#batch-004-proactive-send-design-gate).
 
-Linq creates chats with an initial message.
+## Intentional adapter boundaries
 
-Chat SDK `openDM()` expects to return a thread before posting, so the semantics do not line up cleanly.
+These capabilities remain outside bespoke adapter APIs. Endpoint-shaped operations that the
+official Linq client already exposes stay on read-only `adapter.client`.
 
-This reference adapter will not implement `openDM()` or generic chat creation APIs. It only sends replies to existing Linq chats received through webhooks.
-
-
-
-### Starting new group chats / outbound group messages
+### Starting new group chats
 
 Linq group chats also require chat creation semantics and an initial message.
 
-This reference adapter will not implement APIs for creating group chats or starting outbound group-message conversations.
+Fixed-line group creation remains available through `adapter.client.chats.create()`. Batch `004`
+covers a future standard proactive direct-message path, not a bespoke group `createChat()` API;
+Batch `009` owns typed management of existing groups.
 
 Existing group chats received through webhooks are still parsed, automatically subscribed, replied to with `postMessage()`, and detected as non-DM threads.
 

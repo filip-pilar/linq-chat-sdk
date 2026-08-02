@@ -93,6 +93,11 @@ The full 57-operation audit also records the package boundary. Batch `002`
 exposes the official Linq client through read-only `adapter.client` without
 duplicating its operations with bespoke wrappers.
 
+Proactive sending is not supported by the adapter today: `openDM()` cannot yet bridge Chat SDK's
+thread-before-post contract to Linq's atomic initial-message send without risking split thread
+identity. Future Batch `004` owns that standard adapter path after its documented design gates are
+satisfied. Native-client sending remains available in the meantime.
+
 See [`FEATURE_PARITY.md`](./FEATURE_PARITY.md) for the authoritative inventory
 of every Linq endpoint, message feature, and webhook, including its architectural
 disposition, limitations, priority, definition of done, test coverage, recipes,
@@ -103,10 +108,10 @@ and independently reviewable upstream PR batch.
 | Feature                                            | Status                                                                                                                             |
 | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | Inbound text messages                              | ✅                                                                                                                                 |
-| Outbound text messages                             | ✅                                                                                                                                 |
+| Outbound text messages                             | ✅ to existing chats                                                                                                               |
 | Group chats                                        | ✅ reply to existing groups received via webhook                                                                                   |
 | Inbound media (images, audio, files)               | ✅ parsed as attachments with downloadable data                                                                                    |
-| Outbound media / file sending                      | ✅ `attachments` and `files` on a message become media parts                                                                       |
+| Outbound media / file sending                      | ✅ to existing chats; `attachments` and `files` become media parts                                                                 |
 | Inbound reactions (tapbacks + custom emoji)        | ✅ dispatch to `onReaction()`                                                                                                      |
 | Outbound reactions (add/remove)                    | ✅                                                                                                                                 |
 | Edit message                                       | ✅ text, first part only                                                                                                           |
@@ -116,9 +121,41 @@ and independently reviewable upstream PR batch.
 | Streaming                                          | ⚠️ buffered — recipients see one final message                                                                                     |
 | Sticker reactions                                  | ❌ skipped (no Chat SDK equivalent)                                                                                                |
 | Delete message                                     | ❌ Linq cannot unsend on the recipient's device                                                                                    |
-| `openDM()` / creating chats                        | ❌ Linq creates chats with an initial message, which doesn't match Chat SDK semantics — the adapter only replies to existing chats |
+| `openDM()` / proactive sending                     | ❌ unsupported today; assigned to future Batch `004` after its design gates                                                        |
 | Cards                                              | ⚠️ rendered natively as plain text + image media parts — buttons/selects show their labels but cannot trigger `onAction()`         |
 | Modals, slash commands                             | ❌ no Linq equivalent                                                                                                              |
+
+## Proactive sending
+
+The adapter currently posts only to canonical existing-chat thread IDs (`linq:{chatId}`). It does
+not implement `openDM()` or create a Linq chat behind `thread.post()` yet.
+
+Applications that need proactive sending today can use the configured official client directly.
+Use `messages.create()` when Linq should auto-select the sending number:
+
+```ts
+import { randomUUID } from "node:crypto";
+
+const result = await adapter.client.messages.create({
+  to: ["+15551234567"],
+  message: {
+    parts: [{ type: "text", value: "Hello from Linq" }],
+  },
+  idempotencyKey: randomUUID(),
+});
+```
+
+When the application must choose the sending number explicitly, use
+`adapter.client.chats.create()` and follow the official client's initial-message constraints. These
+calls retain the official client's native request, response, validation, error, and retry behavior;
+they do not create a Chat SDK thread automatically.
+
+Batch `004` is reserved for a future standard Chat SDK proactive path. It must resolve atomic first
+sends, canonical thread identity, existing-chat reuse, concurrency, idempotency, sender
+selection/failover, first-message restrictions, subsequent thread operations, compatibility, and
+sandbox/device coverage before implementation. The adapter will not add bespoke `createChat()` or
+`sendMessage()` wrappers. See the
+[Batch `004` proactive-send design gate](./FEATURE_PARITY.md#batch-004-proactive-send-design-gate).
 
 ## Recipes
 
