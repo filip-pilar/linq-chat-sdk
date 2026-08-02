@@ -1,0 +1,69 @@
+{
+  "api_version": "v3",
+  "webhook_version": "2026-02-03",
+  "event_type": "message.received",
+  "event_id": "ff654877-df18-4384-b3aa-928212533477",
+  "created_at": "2026-05-08T16:21:12.793119775Z",
+  "trace_id": "5619088b713532654fd0e6023b8c98e1",
+  "partner_id": "7ac8224b-c41a-54fb-96ed-e28a94f97ff6",
+  "data": {
+    "id": "e230c922-3e96-4376-9332-67b644d11237",
+    "chat": {
+      "id": "3caaf1a0-ef9f-46e0-8c22-31e82c8514dc",
+      "is_group": false,
+      "owner_handle": {
+        "id": "80e94fbc-df40-4421-807c-71f9ee6b6390",
+        "is_me": true,
+        "handle": "owner@example.com",
+        "status": "active",
+        "left_at": null,
+        "service": "iMessage",
+        "joined_at": "2026-04-17T17:26:38.725846Z"
+      },
+      "health_status": {
+        "status": "HEALTHY",
+        "doc_url": "https://docs.linqapp.com/guides/chats/chat-health#healthy",
+        "updated_at": "2026-04-25T03:51:55.282Z"
+      }
+    },
+    "parts": [
+      {
+        "type": "text",
+        "value": "See attachment",
+        "text_decorations": null
+      },
+      {
+        "type": "media",
+        "id": "b6af28bf-dc20-4700-bf9f-baf352aae51a",
+        "filename": "photo.png",
+        "mime_type": "image/png",
+        "size_bytes": 4321,
+        "url": "https://uploads.example.com/photo.png",
+        "width": 640,
+        "height": 480
+      }
+    ],
+    "effect": null,
+    "read_at": null,
+    "sent_at": "2026-05-08T16:21:12.499Z",
+    "delivered_at": "2026-05-08T16:21:12.599Z",
+    "reconciled_at": "2026-05-08T16:21:12.699Z",
+    "service": "iMessage",
+    "reply_to": {
+      "message_id": "509fdf31-f033-43ab-bf6b-52939fefb8cf",
+      "part_index": 1
+    },
+    "direction": "inbound",
+    "sender_handle": {
+      "id": "1fcfb06a-99d6-4df5-9e26-d8a5b1be24ed",
+      "is_me": false,
+      "handle": "+15550002000",
+      "status": "active",
+      "left_at": null,
+      "service": "iMessage",
+      "joined_at": "2026-04-17T17:26:38.725846Z"
+    },
+    "idempotency_key": null,
+    "preferred_service": null
+  }
+}

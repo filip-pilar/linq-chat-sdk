@@ -5,8 +5,10 @@ Forma-maintained fork of Linq's adapter for [Chat SDK](https://www.npmjs.com/pac
 This is not an official Linq package and is not published to npm. Consumers pin
 an exact immutable GitHub Release tarball from this repository.
 
-The supported root API intentionally matches the official
-`@linqapp/chat-sdk-adapter` package.
+The ordinary Chat SDK API remains compatible with the official
+`@linqapp/chat-sdk-adapter` package. This fork also exports a small typed Linq
+verified-ingress API for applications that need durable work before Chat SDK
+dispatch.
 
 ## Quick start
 
@@ -50,6 +52,74 @@ Point a [Linq webhook subscription](https://docs.linqapp.com) at that route and 
 - `reaction.removed`
 
 Other event types are acknowledged with a `200` and ignored.
+
+## Verified ingress
+
+`chat.webhooks.linq(request)` remains the ordinary one-step path: it verifies
+the request and dispatches supported messages and reactions through Chat SDK.
+
+Applications that must complete durable host work before handler execution can
+use the same adapter in two phases:
+
+```ts
+const verification = await adapter.verifyWebhook(request);
+
+if (!verification.ok) {
+  return new Response(verification.error.message, {
+    status: verification.error.status,
+  });
+}
+
+const webhook = verification.webhook;
+const webhookOptions = {
+  waitUntil: (task: Promise<unknown>) => hostWaitUntil(task),
+};
+
+// Persist or correlate provider observations in the application's own model.
+await eventStore.record({
+  provider: webhook.envelope.provider,
+  eventId: webhook.envelope.eventId,
+  raw: webhook.rawEvent,
+});
+
+if (shouldRunChatHandlers(webhook)) {
+  await adapter.dispatchVerifiedWebhook(webhook, webhookOptions);
+}
+
+return new Response("OK");
+```
+
+`verifyWebhook()` consumes the request body once, verifies its signature once,
+parses it once, and does not dispatch. A successful result is bound to the
+adapter instance that verified it; `dispatchVerifiedWebhook()` rejects forged
+results and results from another adapter. Do not call the one-step handler with
+the same consumed `Request` afterward.
+
+`dispatchVerifiedWebhook()` enters the existing Chat SDK dispatch path and
+forwards `WebhookOptions`. Awaiting it does not guarantee that every Chat SDK
+handler has completed. When `waitUntil` is supplied, Chat SDK registers the
+downstream task with it; task lifetime and completion then follow the host's
+`waitUntil` behavior. Without `waitUntil`, handler execution still follows the
+ordinary `Chat.processMessage()` lifecycle and error handling.
+
+The normalized contract targets Linq webhook version `2026-02-03`. Unsupported
+versions return a typed `unsupported_version` failure from `verifyWebhook()` and
+are never represented as current-version facts. For compatibility, the
+ordinary one-step path continues to acknowledge and structurally dispatch older
+signed payloads it previously accepted.
+
+For `message.received`, the result exposes the event/partner/trace envelope,
+transport verification scheme, provider message and chat IDs, direct/group
+state, receiving and remote endpoints, owner/sender handles, service,
+timestamps, parts, attachments, and reply context. `rawEvent` is a detached,
+immutable snapshot of the complete authenticated envelope, so public
+observation cannot alter later dispatch. Existing Chat SDK `Message.raw`
+remains the mutable Linq message data object, preserving current consumer
+behavior.
+
+These values are authenticated provider observations, not durable application
+identity. Applications remain responsible for identity resolution,
+persistence, deduplication, routing, authorization, and execution policy.
 
 ## Configuration
 
@@ -105,25 +175,26 @@ and independently reviewable upstream PR batch.
 
 ## Supported features
 
-| Feature                                            | Status                                                                                                                             |
-| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| Inbound text messages                              | ✅                                                                                                                                 |
-| Outbound text messages                             | ✅ to existing chats                                                                                                               |
-| Group chats                                        | ✅ reply to existing groups received via webhook                                                                                   |
-| Inbound media (images, audio, files)               | ✅ parsed as attachments with downloadable data                                                                                    |
-| Outbound media / file sending                      | ✅ to existing chats; `attachments` and `files` become media parts                                                                 |
-| Inbound reactions (tapbacks + custom emoji)        | ✅ dispatch to `onReaction()`                                                                                                      |
-| Outbound reactions (add/remove)                    | ✅                                                                                                                                 |
-| Edit message                                       | ✅ text, first part only                                                                                                           |
-| Fetch message / history / thread                   | ✅                                                                                                                                 |
-| Typing indicators                                  | ✅ DMs only (Linq rejects typing in groups)                                                                                        |
-| Webhook signature verification + replay protection | ✅                                                                                                                                 |
-| Streaming                                          | ⚠️ buffered — recipients see one final message                                                                                     |
-| Sticker reactions                                  | ❌ skipped (no Chat SDK equivalent)                                                                                                |
-| Delete message                                     | ❌ Linq cannot unsend on the recipient's device                                                                                    |
-| `openDM()` / proactive sending                     | ❌ unsupported today; assigned to future Batch `004` after its design gates                                                        |
-| Cards                                              | ⚠️ rendered natively as plain text + image media parts — buttons/selects show their labels but cannot trigger `onAction()`         |
-| Modals, slash commands                             | ❌ no Linq equivalent                                                                                                              |
+| Feature                                            | Status                                                                                                                     |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Inbound text messages                              | ✅                                                                                                                         |
+| Outbound text messages                             | ✅ to existing chats                                                                                                       |
+| Group chats                                        | ✅ reply to existing groups received via webhook                                                                           |
+| Inbound media (images, audio, files)               | ✅ parsed as attachments with downloadable data                                                                            |
+| Outbound media / file sending                      | ✅ to existing chats; `attachments` and `files` become media parts                                                         |
+| Inbound reactions (tapbacks + custom emoji)        | ✅ dispatch to `onReaction()`                                                                                              |
+| Outbound reactions (add/remove)                    | ✅                                                                                                                         |
+| Edit message                                       | ✅ text, first part only                                                                                                   |
+| Fetch message / history / thread                   | ✅                                                                                                                         |
+| Typing indicators                                  | ✅ DMs only (Linq rejects typing in groups)                                                                                |
+| Webhook signature verification + replay protection | ✅                                                                                                                         |
+| Two-phase verified webhook ingress                 | ✅ `2026-02-03` typed facts + optional Chat SDK dispatch                                                                   |
+| Streaming                                          | ⚠️ buffered — recipients see one final message                                                                             |
+| Sticker reactions                                  | ❌ skipped (no Chat SDK equivalent)                                                                                        |
+| Delete message                                     | ❌ Linq cannot unsend on the recipient's device                                                                            |
+| `openDM()` / proactive sending                     | ❌ unsupported today; assigned to future Batch `004` after its design gates                                                |
+| Cards                                              | ⚠️ rendered natively as plain text + image media parts — buttons/selects show their labels but cannot trigger `onAction()` |
+| Modals, slash commands                             | ❌ no Linq equivalent                                                                                                      |
 
 ## Proactive sending
 

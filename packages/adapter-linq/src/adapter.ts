@@ -30,7 +30,15 @@ import {
 } from "./message-parser.js";
 import { planLinqOutboundMessage, prepareLinqOutboundParts } from "./outbound-media.js";
 import { fromLinqReaction, toLinqReaction } from "./reactions.js";
-import { verifyLinqWebhookRequest } from "./verification.js";
+import { authenticateLinqWebhookRequest } from "./verification.js";
+import {
+  getVerifiedLinqWebhookEvent,
+  normalizeAuthenticatedLinqWebhook,
+  responseForLinqWebhookFailure,
+  type LinqVerifiedWebhook,
+  type LinqVerifiedWebhookDispatchResult,
+  type LinqWebhookVerificationResult,
+} from "./webhook.js";
 
 type LinqThreadId = {
   chatId: string;
@@ -51,6 +59,7 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   private readonly converter = new LinqFormatConverter();
   private readonly signingSecret: string;
   private readonly webhooks: LinqAPIV3.Webhooks;
+  private readonly webhookVerificationAuthority = {};
 
   private chat: ChatInstance | null = null;
   private logger: Logger;
@@ -325,16 +334,71 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     return this.postMessage(threadId, text.trim() ? { markdown: text } : " ");
   }
 
-  // handle webhook
-  async handleWebhook(request: Request, options?: WebhookOptions): Promise<Response> {
-    const verification = await verifyLinqWebhookRequest(request, this.webhooks, this.signingSecret);
+  /** Verify, parse, and normalize one Linq webhook without dispatching it. */
+  async verifyWebhook(request: Request): Promise<LinqWebhookVerificationResult> {
+    return (await this.verifyWebhookRequest(request)).result;
+  }
 
-    if (!verification.ok) {
-      return verification.response;
+  /**
+   * Enter Chat SDK dispatch for this adapter's verified result. Downstream
+   * completion follows Chat SDK and WebhookOptions.waitUntil semantics.
+   */
+  async dispatchVerifiedWebhook(
+    webhook: LinqVerifiedWebhook,
+    options?: WebhookOptions,
+  ): Promise<LinqVerifiedWebhookDispatchResult> {
+    const event = getVerifiedLinqWebhookEvent(webhook, this.webhookVerificationAuthority);
+    return this.dispatchWebhookEvent(event, options);
+  }
+
+  // Ordinary one-step Chat SDK webhook entry point.
+  async handleWebhook(request: Request, options?: WebhookOptions): Promise<Response> {
+    const verification = await this.verifyWebhookRequest(request);
+
+    if (verification.result.ok) {
+      await this.dispatchVerifiedWebhook(verification.result.webhook, options);
+      return new Response("OK", { status: 200 });
     }
 
-    const { event } = verification;
+    if (
+      verification.result.error.code === "unsupported_version" &&
+      verification.authenticatedEvent !== undefined
+    ) {
+      await this.dispatchCompatibilityWebhook(verification.authenticatedEvent, options);
+      return new Response("OK", { status: 200 });
+    }
 
+    return responseForLinqWebhookFailure(verification.result);
+  }
+
+  private async verifyWebhookRequest(request: Request): Promise<{
+    result: LinqWebhookVerificationResult;
+    authenticatedEvent?: unknown;
+  }> {
+    const authentication = await authenticateLinqWebhookRequest(
+      request,
+      this.webhooks,
+      this.signingSecret,
+    );
+
+    if (!authentication.ok) {
+      return { result: authentication };
+    }
+
+    return {
+      result: normalizeAuthenticatedLinqWebhook(
+        authentication.event,
+        authentication.transport,
+        this.webhookVerificationAuthority,
+      ),
+      authenticatedEvent: authentication.event,
+    };
+  }
+
+  private async dispatchWebhookEvent(
+    event: LinqAPIV3.UnwrapWebhookEvent,
+    options?: WebhookOptions,
+  ): Promise<LinqVerifiedWebhookDispatchResult> {
     if (this.chat && isMessageReceivedWebhookEvent(event) && event.data.direction === "inbound") {
       const chatId = event.data.chat.id;
       const isGroup = event.data.chat.is_group ?? undefined;
@@ -360,11 +424,27 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       };
 
       this.chat.processMessage(this, threadId, factory, options);
+      return { handled: "message" };
     } else if (this.chat && isReactionWebhookEvent(event)) {
       this.processReactionWebhook(this.chat, event, options);
+      return { handled: "reaction" };
     }
 
-    return new Response("OK", { status: 200 });
+    return { handled: "ignored" };
+  }
+
+  private async dispatchCompatibilityWebhook(
+    event: unknown,
+    options?: WebhookOptions,
+  ): Promise<void> {
+    if (isCompatibilityMessageReceivedEvent(event)) {
+      await this.dispatchWebhookEvent(event, options);
+      return;
+    }
+
+    if (isCompatibilityReactionEvent(event)) {
+      await this.dispatchWebhookEvent(event, options);
+    }
   }
 
   private processReactionWebhook(
@@ -469,4 +549,36 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
 export function createLinqAdapter(config: LinqAdapterConfig): LinqAdapter {
   return new LinqAdapter(config);
+}
+
+function isCompatibilityMessageReceivedEvent(
+  event: unknown,
+): event is LinqAPIV3.MessageReceivedWebhookEvent {
+  if (!isRecord(event) || event.event_type !== "message.received" || !isRecord(event.data)) {
+    return false;
+  }
+
+  const data = event.data;
+  return (
+    (data.direction === "inbound" || data.direction === "outbound") &&
+    typeof data.id === "string" &&
+    Array.isArray(data.parts) &&
+    isRecord(data.chat) &&
+    typeof data.chat.id === "string" &&
+    isRecord(data.sender_handle)
+  );
+}
+
+function isCompatibilityReactionEvent(
+  event: unknown,
+): event is
+  | LinqAPIV3.Webhooks.ReactionAddedWebhookEvent
+  | LinqAPIV3.Webhooks.ReactionRemovedWebhookEvent {
+  return (
+    isRecord(event) &&
+    (event.event_type === "reaction.added" || event.event_type === "reaction.removed") &&
+    isRecord(event.data) &&
+    typeof event.data.is_from_me === "boolean" &&
+    typeof event.data.reaction_type === "string"
+  );
 }

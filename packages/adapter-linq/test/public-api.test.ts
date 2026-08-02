@@ -1,8 +1,13 @@
 import { LinqAPIV3 } from "@linqapp/sdk";
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
 
-import { createLinqAdapter, LinqAdapter } from "../src/index.js";
-import type { LinqAdapterConfig } from "../src/index.js";
+import { createLinqAdapter, LINQ_WEBHOOK_VERSION, LinqAdapter } from "../src/index.js";
+import type {
+  LinqAdapterConfig,
+  LinqVerifiedUnhandledWebhook,
+  LinqVerifiedWebhook,
+  LinqWebhookVerificationResult,
+} from "../src/index.js";
 
 const API_KEY = "test_linq_api_key";
 const BASE_URL = "https://sandbox.example.com/api/partner";
@@ -20,6 +25,38 @@ function assertClientCannotBeReassigned(adapter: LinqAdapter): void {
 }
 
 void assertClientCannotBeReassigned;
+
+function assertVerifiedWebhookCannotBeConstructed(adapter: LinqAdapter): void {
+  const structurallyComplete: Pick<
+    LinqVerifiedUnhandledWebhook,
+    "kind" | "envelope" | "transport" | "rawEvent"
+  > = {
+    kind: "unhandled",
+    envelope: {
+      provider: "linq",
+      apiVersion: "v3",
+      webhookVersion: LINQ_WEBHOOK_VERSION,
+      eventType: "message.delivered",
+      eventId: "event-123",
+      createdAt: "2026-08-02T12:00:00.000Z",
+      traceId: "trace-123",
+      partnerId: "partner-123",
+    },
+    transport: {
+      scheme: "standard",
+      webhookId: "webhook-123",
+      timestamp: "1785672000",
+      subscriptionId: null,
+      eventType: null,
+    },
+    rawEvent: {},
+  };
+
+  // @ts-expect-error -- only verifyWebhook() can supply the private verified brand.
+  void adapter.dispatchVerifiedWebhook(structurallyComplete);
+}
+
+void assertVerifiedWebhookCannotBeConstructed;
 
 describe("public adapter foundation", () => {
   it("exports the concrete adapter and preserves the factory return type", () => {
@@ -40,6 +77,16 @@ describe("public adapter foundation", () => {
     expect(client.apiKey).toBe(API_KEY);
     expect(client.baseURL).toBe(BASE_URL);
     expect(client.webhookSecret).toBe(SIGNING_SECRET);
+  });
+
+  it("exports the two-phase verified webhook contract", () => {
+    const adapter = createLinqAdapter(config);
+
+    expect(LINQ_WEBHOOK_VERSION).toBe("2026-02-03");
+    expectTypeOf(
+      adapter.verifyWebhook,
+    ).returns.resolves.toEqualTypeOf<LinqWebhookVerificationResult>();
+    expectTypeOf(adapter.dispatchVerifiedWebhook).parameter(0).toEqualTypeOf<LinqVerifiedWebhook>();
   });
 
   it("uses the exposed client instance for internal adapter operations", async () => {
