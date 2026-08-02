@@ -59,6 +59,30 @@ Other event types are acknowledged with a `200` and ignored.
 | `signingSecret` | yes      | Webhook signing secret. Standard Webhooks signatures are verified by the Linq SDK; legacy `X-Webhook-*` signatures remain supported for compatibility. |
 | `baseURL`       | no       | Override the Linq API base URL (e.g. sandbox).                                                                                                         |
 
+## Feature parity
+
+The adapter's parity target is complete, non-lossy Linq chat and messaging
+coverage. Standard Chat SDK APIs remain primary; provider mechanics stay
+internal; a small typed Linq extension surface is reserved for native chat
+behavior Chat SDK cannot express. Endpoint-shaped account, administration, and
+business operations stay on read-only `adapter.client: LinqAPIV3`.
+
+The contact-card roadmap means sharing the sending number's configured Name and
+Photo card into an iMessage chat; configuration stays on `adapter.client` or in
+the Linq dashboard. Accepting payments over chat is a recipe—not an adapter
+feature or batch—composed from `adapter.client.paymentRequests`, general rich-link
+delivery, and generic typed `onLinqEvent` passthrough. Agentcard is out of scope.
+Experience discovery remains only in the native-client boundary audit.
+
+The full 57-operation audit also records the package boundary. Batch `002` will
+expose the official Linq client through read-only `adapter.client` without
+duplicating its operations with bespoke wrappers.
+
+See [`FEATURE_PARITY.md`](./FEATURE_PARITY.md) for the authoritative inventory
+of every Linq endpoint, message feature, and webhook, including its architectural
+disposition, limitations, priority, definition of done, test coverage, recipes,
+and independently reviewable upstream PR batch.
+
 ## Supported features
 
 | Feature                                            | Status                                                                                                                             |
@@ -80,6 +104,22 @@ Other event types are acknowledged with a `200` and ignored.
 | `openDM()` / creating chats                        | ❌ Linq creates chats with an initial message, which doesn't match Chat SDK semantics — the adapter only replies to existing chats |
 | Cards                                              | ⚠️ rendered natively as plain text + image media parts — buttons/selects show their labels but cannot trigger `onAction()`         |
 | Modals, slash commands                             | ❌ no Linq equivalent                                                                                                              |
+
+## Recipes
+
+Recipes compose the native client with adapter-provided chat primitives; they do
+not add workflow-specific adapter methods or appear in implementation batches.
+
+### Accept payments over chat (planned)
+
+Create and manage a Payment Request with
+`adapter.client.paymentRequests`, send its `checkout_url` through the general
+rich-link message capability, and observe `payment.succeeded`,
+`payment.canceled`, or `payment.expired` through generic typed
+`adapter.onLinqEvent(...)`. Application code owns reconciliation and payment
+state. This recipe depends on planned primitives and is not supported yet.
+
+Agentcard is not a recipe and remains explicitly out of scope.
 
 ## Thread IDs
 
