@@ -28,13 +28,27 @@ export async function authenticateLinqWebhookRequest(
   webhooks: Pick<LinqAPIV3.Webhooks, "unwrap">,
   signingSecret: string,
 ): Promise<LinqWebhookAuthenticationResult> {
-  const hasStandardHeader = [
+  const standardHeaders = [
     STANDARD_ID_HEADER,
     STANDARD_SIGNATURE_HEADER,
     STANDARD_TIMESTAMP_HEADER,
-  ].some((header) => request.headers.has(header));
+  ];
+  const hasAnyStandardHeader = standardHeaders.some((header) => request.headers.has(header));
+  const hasCompleteStandardHeaders = standardHeaders.every((header) => request.headers.has(header));
+  const hasCompleteLegacyHeaders = [LEGACY_SIGNATURE_HEADER, LEGACY_TIMESTAMP_HEADER].every(
+    (header) => request.headers.has(header),
+  );
 
-  if (hasStandardHeader) {
+  // Linq sends both schemes on current deliveries and explicitly permits existing
+  // integrations to keep verifying the legacy headers. Prefer a complete legacy
+  // set only when the Standard set is also complete; this preserves compatibility
+  // with older subscription secrets without allowing partial Standard headers to
+  // downgrade an otherwise legacy request.
+  if (hasCompleteStandardHeaders && hasCompleteLegacyHeaders) {
+    return verifyLegacyWebhook(request, signingSecret);
+  }
+
+  if (hasAnyStandardHeader) {
     return verifyStandardWebhook(request, webhooks, signingSecret);
   }
 

@@ -123,11 +123,11 @@ persistence, deduplication, routing, authorization, and execution policy.
 
 ## Configuration
 
-| Option          | Required | Description                                                                                                                                            |
-| --------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `apiKey`        | yes      | Linq API key used for all outbound API calls.                                                                                                          |
-| `signingSecret` | yes      | Webhook signing secret. Standard Webhooks signatures are verified by the Linq SDK; legacy `X-Webhook-*` signatures remain supported for compatibility. |
-| `baseURL`       | no       | Override the Linq API base URL (e.g. sandbox).                                                                                                         |
+| Option          | Required | Description                                                                                                                                                                                                                                                                                            |
+| --------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `apiKey`        | yes      | Linq API key used for all outbound API calls.                                                                                                                                                                                                                                                          |
+| `signingSecret` | yes      | Webhook signing secret. Standard Webhooks signatures are verified by the Linq SDK; legacy `X-Webhook-*` signatures remain supported for compatibility. When Linq sends both complete header sets, the adapter verifies the legacy set so existing subscription secrets continue to work as documented. |
+| `baseURL`       | no       | Override the Linq API base URL (e.g. sandbox).                                                                                                                                                                                                                                                         |
 
 The adapter also exposes its configured official Linq client without wrapping or
 renaming endpoint operations:

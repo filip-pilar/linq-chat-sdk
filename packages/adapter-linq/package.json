@@ -1,6 +1,6 @@
 {
   "name": "@forma/linq-chat-sdk-adapter",
-  "version": "0.1.0-forma.5",
+  "version": "0.1.0-forma.6",
   "private": true,
   "description": "Forma-maintained Linq adapter for Chat SDK",
   "keywords": [

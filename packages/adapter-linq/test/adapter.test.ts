@@ -51,6 +51,24 @@ describe("LinqAdapter.handleWebhook", () => {
     expect(response.status).toBe(200);
   });
 
+  it("accepts a valid legacy signature when Linq sends both complete header sets", async () => {
+    const adapter = createTestAdapter();
+    const legacyRequest = createLegacySignedRequest(createMessageReceivedPayload());
+    const headers = new Headers(legacyRequest.headers);
+    headers.set("webhook-id", "webhook-test-id");
+    headers.set("webhook-signature", "v1,invalid-for-legacy-subscription-secret");
+    headers.set("webhook-timestamp", headers.get("x-webhook-timestamp")!);
+    const request = new Request(legacyRequest.url, {
+      method: "POST",
+      headers,
+      body: await legacyRequest.text(),
+    });
+
+    const response = await adapter.handleWebhook(request);
+
+    expect(response.status).toBe(200);
+  });
+
   it("does not downgrade partial Standard Webhooks headers to legacy verification", async () => {
     const adapter = createTestAdapter();
     const legacyRequest = createLegacySignedRequest(createMessageReceivedPayload());

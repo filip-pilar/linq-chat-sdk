@@ -54,7 +54,29 @@ describe("LinqAdapter verified webhook ingress", () => {
     }
   });
 
-  it("gives Standard headers precedence and resists downgrade to a valid legacy signature", async () => {
+  it("accepts complete dual headers through the valid legacy signature", async () => {
+    const adapter = createTestAdapter();
+    const dual = createLegacyRequest(fixture, {
+      "webhook-id": "dual-header-event",
+      "webhook-signature": "v1,invalid-for-legacy-subscription-secret",
+      "webhook-timestamp": Math.floor(Date.now() / 1000).toString(),
+      "x-webhook-event": "message.received",
+      "x-webhook-subscription-id": "subscription-123",
+    });
+
+    const result = await adapter.verifyWebhook(dual);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.webhook.transport).toMatchObject({
+        scheme: "legacy",
+        webhookId: "dual-header-event",
+        subscriptionId: "subscription-123",
+      });
+    }
+  });
+
+  it("resists downgrade from partial Standard headers to a valid legacy signature", async () => {
     const adapter = createTestAdapter();
     const legacy = createLegacyRequest(fixture, { "webhook-id": "partial-standard" });
 
