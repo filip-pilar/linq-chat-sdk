@@ -5,6 +5,8 @@ Forma-maintained fork of Linq's adapter for [Chat SDK](https://www.npmjs.com/pac
 This is not an official Linq package and is not published to npm. Consumers pin
 an exact immutable GitHub Release tarball from this repository.
 
+The current Chat SDK dependency baseline requires Node.js 20 or newer.
+
 The ordinary Chat SDK API remains compatible with the official
 `@linqapp/chat-sdk-adapter` package. This fork also exports a small typed Linq
 verified-ingress API for applications that need durable work before Chat SDK
@@ -51,7 +53,8 @@ Point a [Linq webhook subscription](https://docs.linqapp.com) at that route and 
 - `reaction.added`
 - `reaction.removed`
 
-Other event types are acknowledged with a `200` and ignored.
+Other event types are currently acknowledged with a `200` and ignored by the one-step path. Planned
+Batch `005` adds typed generic delivery without adding domain workflows.
 
 ## Verified ingress
 
@@ -159,19 +162,27 @@ feature or batch—composed from `adapter.client.paymentRequests`, general rich-
 delivery, and generic typed `onLinqEvent` passthrough. Agentcard is out of scope.
 Experience discovery remains only in the native-client boundary audit.
 
-The full 57-operation audit also records the package boundary. Batch `002`
-exposes the official Linq client through read-only `adapter.client` without
-duplicating its operations with bespoke wrappers.
+The OpenAPI evidence reverified on 2026-08-13 contains 66 non-webhook operations and 44 event names;
+the installed `@linqapp/sdk@0.32.1` is behind parts of that schema. Batch `013` retains full
+mechanical inventory reconciliation. Batch `002` already exposes the official client through
+read-only `adapter.client` without duplicating its operations with bespoke wrappers.
 
-Proactive sending is not supported by the adapter today: `openDM()` cannot yet bridge Chat SDK's
-thread-before-post contract to Linq's atomic initial-message send without risking split thread
-identity. Future Batch `004` owns that standard adapter path after its documented design gates are
-satisfied. Native-client sending remains available in the meantime.
+Proactive sending is intentionally not adapter behavior: `chat.openDM()` remains unsupported for
+Linq. Reduced Batch `004` documents and validates the native-client create/send operation followed
+by canonical Chat SDK thread construction; it will not add provisional IDs, aliases, locks, or a
+proactive adapter wrapper.
 
-See [`FEATURE_PARITY.md`](./FEATURE_PARITY.md) for the authoritative inventory
+See [`FEATURE_PARITY.md`](./FEATURE_PARITY.md) for the authoritative capability status
 of every Linq endpoint, message feature, and webhook, including its architectural
 disposition, limitations, priority, definition of done, test coverage, recipes,
-and independently reviewable upstream PR batch.
+and independently reviewable batch. Batches `011` and `012` are deferred; Batch `013` is later
+inventory reconciliation and cleanup. A change can be code-complete while capability status remains
+`Partial` until its required Linq sandbox and physical-device checks are recorded.
+
+The planned extension surface is intentionally small: `onLinqEvent()` for verified generic events,
+`linqMessage(content, options)` for shared rich message options, and
+`adapter.conversation(threadOrId)` for native conversation behavior. Endpoint-shaped account and
+administrative behavior remains on `adapter.client`.
 
 ## Supported features
 
@@ -185,21 +196,21 @@ and independently reviewable upstream PR batch.
 | Inbound reactions (tapbacks + custom emoji)        | ✅ dispatch to `onReaction()`                                                                                              |
 | Outbound reactions (add/remove)                    | ✅                                                                                                                         |
 | Edit message                                       | ✅ text, first part only                                                                                                   |
-| Fetch message / history / thread                   | ✅                                                                                                                         |
+| Fetch message / history / thread                   | ⚠️ basic cursor history works; forward direction and rich normalization remain partial                                     |
 | Typing indicators                                  | ✅ DMs only (Linq rejects typing in groups)                                                                                |
 | Webhook signature verification + replay protection | ✅                                                                                                                         |
 | Two-phase verified webhook ingress                 | ✅ `2026-02-03` typed facts + optional Chat SDK dispatch                                                                   |
 | Streaming                                          | ⚠️ buffered — recipients see one final message                                                                             |
 | Sticker reactions                                  | ❌ skipped (no Chat SDK equivalent)                                                                                        |
 | Delete message                                     | ❌ Linq cannot unsend on the recipient's device                                                                            |
-| `openDM()` / proactive sending                     | ❌ unsupported today; assigned to future Batch `004` after its design gates                                                |
+| `openDM()` / proactive adapter sending             | ❌ intentionally unsupported; use the reduced Batch `004` native-client recipe                                             |
 | Cards                                              | ⚠️ rendered natively as plain text + image media parts — buttons/selects show their labels but cannot trigger `onAction()` |
 | Modals, slash commands                             | ❌ no Linq equivalent                                                                                                      |
 
 ## Proactive sending
 
-The adapter currently posts only to canonical existing-chat thread IDs (`linq:{chatId}`). It does
-not implement `openDM()` or create a Linq chat behind `thread.post()` yet.
+The adapter posts only to canonical existing-chat thread IDs (`linq:{chatId}`). It intentionally
+does not implement `openDM()` or create a Linq chat behind `thread.post()`.
 
 Applications that need proactive sending today can use the configured official client directly.
 Use `messages.create()` when Linq should auto-select the sending number:
@@ -207,26 +218,33 @@ Use `messages.create()` when Linq should auto-select the sending number:
 ```ts
 import { randomUUID } from "node:crypto";
 
+const logicalSendId = randomUUID();
 const result = await adapter.client.messages.create({
-  to: ["+15551234567"],
+  to: [recipient],
   message: {
+    idempotency_key: logicalSendId,
     parts: [{ type: "text", value: "Hello from Linq" }],
   },
-  idempotencyKey: randomUUID(),
 });
+
+const thread = chat.thread(`linq:${result.chat_id}`);
+await thread.subscribe();
+await thread.post("A normal follow-up through Chat SDK");
 ```
+
+Retain and reuse `logicalSendId` if that logical initial send must be retried; generate a new value
+for each distinct intentional send.
 
 When the application must choose the sending number explicitly, use
 `adapter.client.chats.create()` and follow the official client's initial-message constraints. These
 calls retain the official client's native request, response, validation, error, and retry behavior;
-they do not create a Chat SDK thread automatically.
+they do not create a Chat SDK thread automatically; construct one only from the returned canonical
+`chat_id`.
 
-Batch `004` is reserved for a future standard Chat SDK proactive path. It must resolve atomic first
-sends, canonical thread identity, existing-chat reuse, concurrency, idempotency, sender
-selection/failover, first-message restrictions, subsequent thread operations, compatibility, and
-sandbox/device coverage before implementation. The adapter will not add bespoke `createChat()` or
-`sendMessage()` wrappers. See the
-[Batch `004` proactive-send design gate](./FEATURE_PARITY.md#batch-004-proactive-send-design-gate).
+Reduced Batch `004` adds recipe/compile-time contracts and sandbox validation for new creation,
+active-chat reuse, same-key retry, failover, and concurrent distinct intentional sends. It adds no
+runtime adapter behavior, first-send lock, identity migration, or Chat SDK change. See
+[Batch `004` proactive native-client recipe](./FEATURE_PARITY.md#batch-004-proactive-native-client-recipe).
 
 ## Recipes
 
@@ -309,10 +327,10 @@ Linq's 100MB attachment ceiling. Audio is sent as a downloadable file
 attachment — the dedicated iMessage voice-memo bubble endpoint isn't wired up
 yet.
 
-Batch `012` retains URL-download security/bounding, streaming upload work,
-readiness, upload retries, complete format handling, retention, and all
-send-time cleanup. The by-reference public-HTTPS behavior above remains
-unchanged until then.
+Batch `012` retains streaming upload work, readiness, upload retries, complete
+format handling, retention, and all send-time cleanup. Existing inbound
+download security/bounding and the by-reference public-HTTPS behavior above
+remain implemented; Batch `012` must not regress them.
 
 ## Cards
 

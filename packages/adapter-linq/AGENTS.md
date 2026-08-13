@@ -1,7 +1,7 @@
 # Linq adapter contributor rules
 
-`FEATURE_PARITY.md` is the authoritative scope, capability inventory, definition of done, and batch
-roadmap for this package. Follow its dispositions; do not turn the adapter into a second Linq SDK.
+`FEATURE_PARITY.md` is authoritative for capability status, disposition, and parity completion.
+Follow it; do not turn the adapter into a second Linq SDK.
 
 Before changing behavior, read:
 
@@ -11,6 +11,10 @@ Before changing behavior, read:
 - Chat SDK's published adapter-authoring, testing, and error guidance plus the installed
   `@chat-adapter/shared` types; and
 - the repository `chat-sdk` and `integrating-linq` skills.
+
+Update every affected parity row in the same change as behavior. Design approval or code-complete
+status alone does not make a capability parity-`Complete`; required sandbox/device evidence must
+also be recorded.
 
 ## Required boundaries
 
@@ -42,3 +46,8 @@ Before changing behavior, read:
   definition of done.
 - Keep batches small, independently reviewable, application-neutral, and upstreamable. Add no
   Forma-specific assumptions, endpoint aliases, speculative APIs, or undocumented provider rules.
+- Preserve the settled Batch `004` boundary: no Linq `openDM()`, provisional IDs, aliases, identity
+  migration, first-send persistence/locking, Chat SDK change, or proactive adapter wrapper. Use the
+  documented native-client recipe and canonical returned `chat_id`.
+- Treat Batches `011` and `012` as deferred and Batch `013` as later inventory reconciliation unless
+  the user explicitly changes scope.

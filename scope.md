@@ -2,6 +2,11 @@
 
 This file tracks what is still left in the Linq Chat SDK adapter.
 
+[`packages/adapter-linq/FEATURE_PARITY.md`](./packages/adapter-linq/FEATURE_PARITY.md) is authoritative
+for capability status. Design approval is not implementation: applicable parity rows remain
+`Partial` or `Missing` until code, contracts, documentation, and required Linq sandbox/device
+validation are complete.
+
 Keep this readable and practical: each item should say what is missing, why it matters, and any Linq-specific caveats.
 
 ## Current adapter status
@@ -15,7 +20,7 @@ The adapter can already handle the core receive/reply path:
 - Fetch recent chat history with `chats.messages.list()`.
 - Fetch a single message with `messages.retrieve()`.
 - Edit text messages with `messages.update()`.
-- Render formatted Chat SDK content as markdown text.
+- Render formatted Chat SDK content as plain text today; Batch `010` owns faithful supported styles.
 - Add and remove reactions with `messages.addReaction()`.
 - Route inbound `reaction.added` / `reaction.removed` webhooks into Chat SDK `onReaction()` handlers (tapbacks map to normalized emoji, custom emoji pass through, stickers are skipped).
 - Encode stable Linq thread IDs (`linq:{chatId}`) so webhook and API paths map to the same thread.
@@ -82,7 +87,9 @@ Inbound attachments survive queue serialization via `rehydrateAttachment` and a 
 Still missing:
 
 - iMessage voice-memo bubbles (`POST /v3/chats/{chatId}/voicememo`) — audio currently sends as a downloadable file attachment
-- Batch `012` media lifecycle: URL-download security/bounding, streaming, readiness, upload retries, complete format handling, retention, and all send-time cleanup
+- Batch `012` media lifecycle: streaming uploads, readiness, upload retries, complete format
+  handling, retention, and all send-time cleanup. Existing inbound download security/bounding is
+  implemented and covered by focused tests.
 
 ### 3. Inbound reaction webhooks
 
@@ -99,24 +106,46 @@ Linq-specific notes:
 
 ### 4. Proactive direct-message sending
 
-Status: **unsupported today; assigned to future Batch `004`**
+Status: **adapter behavior intentionally unsupported; native-client recipe planned in Batch `004`**
 
-The adapter currently sends only to canonical existing-chat thread IDs (`linq:{chatId}`). Chat SDK
-`openDM()` returns a thread before the caller posts content, while Linq creates or reuses a chat only
-as part of an initial-message send. Batch `004` owns a future standard Chat SDK proactive path, but
-it must not be implemented until that semantic mismatch has a safe design.
+Keep `chat.openDM()` unsupported for Linq. Do not add provisional thread IDs, aliases, identity
+migration, persistent mappings, first-send locks, or a Chat SDK dependency change.
 
-Applications that need proactive sending now can use the official client exposed as
-`adapter.client`: use `messages.create()` for an auto-selected sending number or `chats.create()`
-when the application must select the sending number. Those calls retain native Linq semantics and
-do not create a Chat SDK thread automatically. Do not add bespoke adapter `sendMessage()` or
-`createChat()` wrappers.
+For an auto-selected sending line, call `adapter.client.messages.create()` with one idempotency key
+per logical send. After Linq returns its canonical `chat_id`, construct the corresponding Chat SDK
+thread with ``chat.thread(`linq:${result.chat_id}`)``. Subscriptions, history, typing, reactions,
+edits, and subsequent posts then use normal Chat SDK behavior. Explicit fixed-line creation remains
+on `adapter.client.chats.create()`.
 
-Before implementation, Batch `004` must resolve canonical thread identity and compatibility,
-concurrent first-send/idempotency safety, verified initial-message constraints, sender
-selection/failover, pre-send and post-send thread behavior, and contract plus sandbox/device
-coverage. The complete authoritative acceptance gates are in
-[`FEATURE_PARITY.md`](./packages/adapter-linq/FEATURE_PARITY.md#batch-004-proactive-send-design-gate).
+Reduced Batch `004` contains only recipe documentation, compile-time contracts, and sandbox
+validation for creation, active-chat reuse, same-key idempotent retry, failover, and concurrent
+distinct intentional sends. A first-class proactive adapter extension is deferred until real usage
+justifies it.
+
+## Approved remaining implementation
+
+The public extensions are deliberately cohesive:
+
+- Batch `005`: typed one/many/all `onLinqEvent()` registration with unsubscribe, lossless future
+  events, verified-boundary provider/partner/event dedupe, standard message/reaction coexistence,
+  fast acknowledgement, and `WebhookOptions.waitUntil`.
+- Batches `007`/`010`: one `LinqMessageOptions` model created by
+  `linqMessage(content, options)` for rich links, replies/part indexes, service, effects,
+  animations, and manual decorations. The ordinary `AdapterPostableMessage` transport must be
+  contract-tested before it is frozen.
+- Batches `008`/`009`: `adapter.conversation(threadOrId)` with common operations directly on the
+  facade, existing-group operations under `.group`, and location under `.location`.
+
+Explicitly deferred: Batch `011`, Batch `012`, and Batch `013`. Forward history remains partial if
+the provider cannot support or safely emulate it. Outbound sticker reactions wait for unambiguous
+official SDK input. Exact asynchronous group-update correlation must not be promised without a
+provider correlation key.
+
+Physical-device validation is required for iMessage formatting/effects, typing, contact sharing,
+voice memos, groups, and location consent. RCS/SMS routes are required for relevant fallbacks. Linq
+sandbox validation is required for webhook delivery/dedupe and proactive creation/reuse/retry/
+failover/concurrency. Code-complete work remains parity-`Partial` until applicable live evidence is
+recorded.
 
 ## Intentional adapter boundaries
 
@@ -128,12 +157,10 @@ official Linq client already exposes stay on read-only `adapter.client`.
 Linq group chats also require chat creation semantics and an initial message.
 
 Fixed-line group creation remains available through `adapter.client.chats.create()`. Batch `004`
-covers a future standard proactive direct-message path, not a bespoke group `createChat()` API;
-Batch `009` owns typed management of existing groups.
+adds no group or direct-message adapter creation API; Batch `009` owns typed management of existing
+groups only.
 
 Existing group chats received through webhooks are still parsed, automatically subscribed, replied to with `postMessage()`, and detected as non-DM threads.
-
-
 
 ### Delete messages
 
@@ -145,8 +172,6 @@ Because Chat SDK callers usually expect `deleteMessage()` to remove the visible 
 
 Only revisit if product explicitly accepts the narrower Linq semantics.
 
-
-
 ### Native streaming
 
 Linq does not have native streaming message support.
@@ -157,15 +182,11 @@ Chat SDK fallback streaming via edits is technically possible now that `editMess
 
 Do not turn fallback streaming on by default.
 
-
-
 ### Channel and thread listing APIs
 
 Linq does not have the same channel/thread split that platforms like Slack have.
 
 Do not implement channel-level APIs or generic thread listing unless the app has a concrete product need.
-
-
 
 ### Interactive chat UI surfaces
 
@@ -174,8 +195,6 @@ Linq does not provide equivalents for Chat SDK modals, app home, slash commands,
 Do not implement modal/action/slash-command/app-home APIs for this adapter.
 
 Cards are the exception: they are **not** dropped. `postMessage()` flattens a card to plain text plus image media parts (see "Current adapter status"), so bots that post cards still show up in chat. The non-interactive parts render faithfully; buttons and selects render their labels only — `onAction()` never fires from Linq, so there is no action dispatch to implement.
-
-
 
 ### Ephemeral and scheduled messages
 
