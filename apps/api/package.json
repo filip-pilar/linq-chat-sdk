@@ -1,29 +1,32 @@
 {
   "name": "nitro-starter",
   "type": "module",
+  "imports": {
+    "#*": "./*"
+  },
   "scripts": {
     "build": "nitro build",
     "dev": "nitro dev",
     "preview": "nitro preview",
     "typecheck": "tsc --noEmit"
   },
-  "imports": {
-    "#*": "./*"
+  "dependencies": {
+    "@chat-adapter/state-pg": "^4.37.0",
+    "@chat-adapter/telegram": "^4.37.0",
+    "@chat-adapter/whatsapp": "^4.37.0",
+    "@forma/linq-chat-sdk-adapter": "workspace:*",
+    "@linqapp/sdk": "^0.32.1",
+    "ai": "^6.0.184",
+    "chat": "^4.37.0",
+    "pg": "^8.20.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
     "@types/pg": "^8.20.0",
     "nitro": "latest"
   },
-  "dependencies": {
-    "@chat-adapter/state-pg": "^4.28.1",
-    "@chat-adapter/telegram": "^4.28.1",
-    "@chat-adapter/whatsapp": "^4.28.1",
-    "@forma/linq-chat-sdk-adapter": "workspace:*",
-    "@linqapp/sdk": "^0.32.1",
-    "ai": "^6.0.184",
-    "chat": "^4.28.1",
-    "pg": "^8.20.0",
-    "zod": "^4.4.3"
+  "engines": {
+    "node": ">=20"
   }
 }
