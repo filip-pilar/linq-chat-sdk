@@ -1,77 +1,91 @@
-# Linq Webhook Notes
+# Linq webhook checklist
 
-## Current repo behavior
+Provider facts here were reverified on **2026-08-13**. Start with the current
+[`docs.linqapp.com` index](https://docs.linqapp.com/llms.txt),
+[webhook guide](https://docs.linqapp.com/guides/webhooks/), and
+[canonical OpenAPI](https://cdn.linqapp.com/openapi/linq-api-v3.yaml). Then inspect the resolved
+`@linqapp/sdk` types and current repository tests. Record disagreements; do not resolve them from
+this summary alone.
 
-- `POST /api/linq/setup/webhook` creates the minimal Linq subscription for `message.received`
-- `POST /api/webhooks/linq?version=2026-02-03` verifies Linq signatures and stores the raw payload in Postgres
-- `apps/api/server/lib/database.ts` stores:
-  - `linq_webhook_secret` in `app_runtime_settings`
-  - `linq_webhook_subscription_id` in `app_runtime_settings`
-  - raw deliveries in `linq_webhook_events`
+## Verification checklist
 
-## Subscription checklist
+Always preserve the raw request body until authentication succeeds.
 
-1. Set `LINQ_API_TOKEN` in the API app environment.
-2. Ensure `POSTGRES_URL` or `DATABASE_URL` is set.
-3. Call:
+### Standard Webhooks — recommended
 
-```bash
-curl -X POST http://localhost:3000/api/linq/setup/webhook \
-  -H 'content-type: application/json' \
-  -H 'x-setup-token: <BOT_SETUP_ACCESS_TOKEN-if-configured>' \
-  -d '{"publicBaseUrl":"https://your-public-app.example/"}'
-```
+- Read `webhook-id`, `webhook-timestamp`, and `webhook-signature`.
+- Verify `{webhook-id}.{webhook-timestamp}.{raw_body}` using the subscription secret.
+- Standard secrets use `whsec_` plus base64 key material; signatures contain `v1,{base64}` values.
+- Reject timestamps outside five minutes and compare signatures in constant time.
+- Prefer the official SDK's `webhooks.unwrap()` unless adapter compatibility requirements dictate
+  otherwise.
 
-4. Linq creates the subscription and returns a one-time `signing_secret`.
-5. The setup route persists that secret so the webhook route can verify future deliveries.
+### Legacy compatibility
 
-## Delivery rules from Linq docs
+- Linq still sends deprecated `X-Webhook-Event`, `X-Webhook-Subscription-ID`,
+  `X-Webhook-Timestamp`, and `X-Webhook-Signature` headers.
+- The legacy signature is hex HMAC-SHA256 over `{timestamp}.{raw_body}`.
+- The adapter accepts legacy-only requests. When both complete header sets are present, it currently
+  verifies the legacy signature to preserve existing subscription-secret compatibility.
+- Any partial Standard header set takes the Standard path and must not downgrade to legacy.
 
-- Deliveries are HTTP `POST`
-- Headers:
-  - `X-Webhook-Event`
-  - `X-Webhook-Subscription-ID`
-  - `X-Webhook-Timestamp`
-  - `X-Webhook-Signature`
-- Signature input:
+Both behaviors are contract-tested in `packages/adapter-linq/test/verified-webhook.test.ts` and
+`packages/adapter-linq/test/adapter.test.ts`. Do not infer a provider requirement from the adapter's
+compatibility policy.
 
-```text
-{timestamp}.{raw_body}
-```
+## Delivery checklist
 
-- Use constant-time comparison when checking the HMAC
-- Reject timestamps older than 5 minutes
-- `message.received` is the minimal inbound event to subscribe to
-- `target_url` can only be used once per account, so change the URL if you need a second subscription
+- Deliveries are HTTP `POST` and at-least-once.
+- Pin the target URL to `?version=2026-02-03` while that remains current.
+- Return `2xx` quickly; the provider timeout is 10 seconds.
+- Use host background-lifetime support such as `WebhookOptions.waitUntil` where applicable.
+- Deduplicate using authenticated event identity and make callbacks idempotent.
+- Linq retries `5xx`, `429`, connection timeout, and connection refusal up to 10 times over roughly
+  25 minutes. Ordinary `4xx` responses except `429`, DNS failures, and invalid hosts are not retried.
 
-## Latest webhook envelope
+## Current adapter ingress
 
-The latest documented webhook version is `2026-02-03`.
+`packages/adapter-linq` already implements signature verification, message/reaction parsing,
+existing-chat sends, and two ingress forms:
 
-Common envelope fields:
-- `api_version`
-- `webhook_version`
-- `event_type`
-- `event_id`
-- `created_at`
-- `trace_id`
-- `partner_id`
-- `data`
+- `chat.webhooks.linq(request, options?)` / adapter `handleWebhook()` is the ordinary one-step path:
+  verify, normalize, dispatch supported standard events, and acknowledge.
+- `adapter.verifyWebhook(request)` verifies and normalizes once without dispatch. Applications may
+  persist the authenticated observation before calling
+  `adapter.dispatchVerifiedWebhook(webhook, options?)` for standard Chat SDK dispatch.
 
-For `message.received` on `2026-02-03`, `data` follows `MessageEventV2`:
-- `direction`
-- `sender_handle`
-- `chat`
-- `id`
-- `parts`
-- `sent_at`
-- `delivered_at`
-- `read_at`
+The typed path targets `2026-02-03` and preserves an immutable snapshot of the complete verified raw
+envelope. The ordinary path retains compatibility dispatch for older signed payloads already
+accepted by the adapter. Consult `packages/adapter-linq/FEATURE_PARITY.md` before describing generic
+event callbacks, deduplication, or other planned behavior as implemented.
 
-## Good next step for the adapter package
+The installed `@linqapp/sdk@0.32.1` webhook union lags the current OpenAPI event enum. Do not use it
+as a closed-world event list; verified unknown/future events must remain lossless.
 
-Once raw payload storage is stable, add parsing in `packages/adapter-linq` for:
-- `message.received`
-- text `parts`
-- thread identity from `data.chat.id`
-- outbound text replies via the Linq messages API
+## Repository setup and storage
+
+These current application entry points are separate from the reusable adapter package:
+
+- `apps/api/server/api/linq/setup/webhook.post.ts` creates the minimal `message.received`
+  subscription after setup authorization.
+- `apps/api/server/lib/linq-api.ts` builds the version-pinned webhook URL and uses the official SDK.
+- `apps/api/server/api/webhooks/linq.post.ts` clones the request for storage, invokes the ordinary
+  Chat SDK webhook path, and stores successful verified deliveries using host `waitUntil` when
+  available.
+- `apps/api/server/lib/database.ts` stores the subscription secret/ID in application settings and
+  raw deliveries in `linq_webhook_events`.
+
+The setup route requires the application's Linq token and database configuration. Never place API
+tokens, signing secrets, real participant identifiers, or environment-specific credentials in
+tracked documentation or fixtures.
+
+## Versioned envelope
+
+The `2026-02-03` envelope includes `api_version`, `webhook_version`, `event_type`, `event_id`,
+`created_at`, `trace_id`, `partner_id`, and event-specific `data`. Message events use
+`MessageEventV2`: `direction`, `sender_handle`, nested `chat`, and top-level message fields such as
+`id`, `parts`, `sent_at`, `delivered_at`, and `read_at`.
+
+Before changing parsing, compare the official event guide/OpenAPI, installed SDK declarations,
+`packages/adapter-linq/src/webhook.ts`, and current fixtures. Preserve provider facts that cannot be
+normalized faithfully in the verified raw envelope.

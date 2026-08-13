@@ -9,19 +9,23 @@ Unified TypeScript SDK for building chat bots across Slack, Teams, Google Chat, 
 
 ## Start with published sources
 
-When Chat SDK is installed in a user project, inspect the published files that ship in `node_modules`:
+Resolve the installed `chat` package root for the current workspace and inspect the files that
+actually ship there. Installed types/runtime and bundled docs are authoritative over this skill's
+examples.
 
 ```
 node_modules/chat/docs/                    # bundled docs
 node_modules/chat/dist/index.d.ts          # core API types
 node_modules/chat/dist/jsx-runtime.d.ts    # JSX runtime types
 node_modules/chat/docs/contributing/       # adapter-authoring docs
-node_modules/chat/docs/guides/             # framework/platform guides
 ```
 
-If one of the paths below does not exist, that package is not installed in the project yet.
+Read only relevant paths that exist in the resolved package version. A missing individual document
+or directory does not mean the package itself is absent; confirm installation from its package root
+and `package.json`.
 
 Read these before writing code:
+
 - `node_modules/chat/docs/getting-started.mdx` — install and setup
 - `node_modules/chat/docs/usage.mdx` — `Chat` config and lifecycle
 - `node_modules/chat/docs/handling-events.mdx` — event routing and handlers
@@ -34,7 +38,7 @@ Read these before writing code:
 - `node_modules/chat/docs/slash-commands.mdx` — slash command routing
 - `node_modules/chat/docs/direct-messages.mdx` — DM behavior and `openDM()`
 - `node_modules/chat/docs/files.mdx` — attachments/uploads
-- `node_modules/chat/docs/state.mdx` — persistence, locking, dedupe
+- `node_modules/chat/docs/state-adapters.mdx` — persistence, locking, dedupe
 - `node_modules/chat/docs/adapters.mdx` — cross-platform feature matrix
 - `node_modules/chat/docs/api/chat.mdx` — exact `Chat` API
 - `node_modules/chat/docs/api/thread.mdx` — exact `Thread` API
@@ -80,21 +84,21 @@ bot.onSubscribedMessage(async (thread, message) => {
 
 ## Event handlers
 
-| Handler | Trigger |
-|---------|---------|
-| `onNewMention` | Bot @-mentioned in an unsubscribed thread |
-| `onDirectMessage` | New DM in an unsubscribed DM thread |
-| `onSubscribedMessage` | Any message in a subscribed thread |
-| `onNewMessage(regex)` | Regex match in an unsubscribed thread |
-| `onReaction(emojis?)` | Emoji added or removed |
-| `onAction(actionIds?)` | Button clicks and select/radio interactions |
-| `onModalSubmit(callbackId?)` | Modal form submitted |
-| `onModalClose(callbackId?)` | Modal dismissed/cancelled |
-| `onSlashCommand(commands?)` | Slash command invocation |
-| `onAssistantThreadStarted` | Slack assistant thread opened |
-| `onAssistantContextChanged` | Slack assistant context changed |
-| `onAppHomeOpened` | Slack App Home opened |
-| `onMemberJoinedChannel` | Slack member joined channel event |
+| Handler                      | Trigger                                     |
+| ---------------------------- | ------------------------------------------- |
+| `onNewMention`               | Bot @-mentioned in an unsubscribed thread   |
+| `onDirectMessage`            | New DM in an unsubscribed DM thread         |
+| `onSubscribedMessage`        | Any message in a subscribed thread          |
+| `onNewMessage(regex)`        | Regex match in an unsubscribed thread       |
+| `onReaction(emojis?)`        | Emoji added or removed                      |
+| `onAction(actionIds?)`       | Button clicks and select/radio interactions |
+| `onModalSubmit(callbackId?)` | Modal form submitted                        |
+| `onModalClose(callbackId?)`  | Modal dismissed/cancelled                   |
+| `onSlashCommand(commands?)`  | Slash command invocation                    |
+| `onAssistantThreadStarted`   | Slack assistant thread opened               |
+| `onAssistantContextChanged`  | Slack assistant context changed             |
+| `onAppHomeOpened`            | Slack App Home opened                       |
+| `onMemberJoinedChannel`      | Slack member joined channel event           |
 
 Read `node_modules/chat/docs/handling-events.mdx`, `node_modules/chat/docs/actions.mdx`, `node_modules/chat/docs/modals.mdx`, and `node_modules/chat/docs/slash-commands.mdx` before wiring handlers. `onDirectMessage` behavior is documented in `node_modules/chat/docs/direct-messages.mdx`.
 
@@ -114,6 +118,7 @@ bot.onNewMention(async (thread, message) => {
 ```
 
 Key details:
+
 - `streamingUpdateIntervalMs` controls post+edit fallback cadence
 - `fallbackStreamingPlaceholderText` defaults to `"..."`; set `null` to disable
 - Structured `StreamChunk` support is Slack-only; other adapters ignore non-text chunks
@@ -123,9 +128,11 @@ Key details:
 Set `jsxImportSource: "chat"` in `tsconfig.json`.
 
 Card components:
+
 - `Card`, `CardText`, `Section`, `Fields`, `Field`, `Button`, `CardLink`, `LinkButton`, `Actions`, `Select`, `SelectOption`, `RadioSelect`, `Table`, `Image`, `Divider`
 
 Modal components:
+
 - `Modal`, `TextInput`, `Select`, `SelectOption`, `RadioSelect`
 
 ```tsx
@@ -133,10 +140,14 @@ await thread.post(
   <Card title="Order #1234">
     <CardText>Your order has been received.</CardText>
     <Actions>
-      <Button id="approve" style="primary">Approve</Button>
-      <Button id="reject" style="danger">Reject</Button>
+      <Button id="approve" style="primary">
+        Approve
+      </Button>
+      <Button id="reject" style="danger">
+        Reject
+      </Button>
     </Actions>
-  </Card>
+  </Card>,
 );
 ```
 
@@ -147,11 +158,13 @@ See [chat-sdk.dev/adapters](https://chat-sdk.dev/adapters) for the current list 
 ## Building a custom adapter
 
 Read these published docs first:
+
 - `node_modules/chat/docs/contributing/building.mdx`
 - `node_modules/chat/docs/contributing/testing.mdx`
 - `node_modules/chat/docs/contributing/publishing.mdx`
 
 Also inspect:
+
 - `node_modules/chat/dist/index.d.ts` — `Adapter` and related interfaces
 - `node_modules/@chat-adapter/shared/dist/index.d.ts` — shared errors and utilities
 - Installed official adapter `dist/index.d.ts` files — reference implementations for config and APIs
@@ -160,4 +173,5 @@ A custom adapter needs request verification, webhook parsing, message/thread/cha
 
 ## Webhook setup
 
-Each registered adapter exposes `bot.webhooks.<name>`. Wire those directly to your HTTP framework routes. See `node_modules/chat/docs/guides/slack-nextjs.mdx` and `node_modules/chat/docs/guides/discord-nuxt.mdx` for framework-specific route patterns.
+Each registered adapter exposes `bot.webhooks.<name>`. Wire it to a fetch-compatible framework route
+according to the bundled docs and types present in the resolved package version.
