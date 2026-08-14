@@ -3,4 +3,5 @@ export type {
   LinqAdapterConfig,
   LinqCredentialProvider,
   LinqCredentials,
+  LinqWebhookVerifier,
 } from "./adapter.js";

@@ -19,6 +19,22 @@ describe("LinqAdapter.handleWebhook", () => {
     expect(credentials).toHaveBeenCalledOnce();
   });
 
+  it("uses a trusted webhook verifier instead of requiring a direct signing secret", async () => {
+    const webhookVerifier = vi.fn(async (_request: Request, rawBody: Uint8Array) => {
+      expect(new TextDecoder().decode(rawBody)).toContain('"event_type":"message.received"');
+    });
+    const adapter = createLinqAdapter({ apiKey: API_KEY, webhookVerifier });
+    const response = await adapter.handleWebhook(
+      new Request("https://example.com/webhooks/linq", {
+        method: "POST",
+        body: JSON.stringify(createMessageReceivedPayload()),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(webhookVerifier).toHaveBeenCalledOnce();
+  });
+
   it("returns 401 when signature headers are missing", async () => {
     const adapter = createTestAdapter();
     const request = new Request("https://example.com/webhooks/linq", {

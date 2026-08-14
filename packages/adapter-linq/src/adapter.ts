@@ -48,14 +48,25 @@ export interface LinqCredentials {
 /** Resolves credentials lazily, including from a managed credential store. */
 export type LinqCredentialProvider = () => LinqCredentials | Promise<LinqCredentials>;
 
+/**
+ * Verifies a trusted, forwarded webhook. Throw (or return `false`) to reject
+ * the request. It takes precedence over Linq's direct HMAC verification.
+ */
+export type LinqWebhookVerifier = (
+  request: Request,
+  rawBody: Uint8Array,
+) => unknown | Promise<unknown>;
+
 export interface LinqAdapterConfig {
   /** Direct API key. Use with `signingSecret`, or prefer lazy `credentials`. */
   apiKey?: string;
   baseURL?: string;
   /** Lazy credentials, for example a Vercel Connect credential provider. */
   credentials?: LinqCredentialProvider;
-  /** Direct webhook signing secret. */
+  /** Direct webhook signing secret. Ignored when `webhookVerifier` is supplied. */
   signingSecret?: string;
+  /** Trusted webhook verifier for managed webhook forwarding. */
+  webhookVerifier?: LinqWebhookVerifier;
 }
 
 class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
@@ -69,6 +80,7 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   private readonly converter = new LinqFormatConverter();
   private readonly credentials: LinqCredentialProvider | undefined;
   private readonly signingSecret: string | undefined;
+  private readonly webhookVerifier: LinqWebhookVerifier | undefined;
 
   private chat: ChatInstance | null = null;
   private logger: Logger;
@@ -79,8 +91,8 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     if (!config.credentials && !config.apiKey) {
       throw new Error("Linq requires apiKey or a credentials provider.");
     }
-    if (!config.credentials && !config.signingSecret) {
-      throw new Error("Linq requires signingSecret or a credentials provider.");
+    if (!config.webhookVerifier && !config.credentials && !config.signingSecret) {
+      throw new Error("Linq requires signingSecret or a webhookVerifier.");
     }
 
     this.apiClient = config.apiKey
@@ -89,6 +101,7 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     this.baseURL = config.baseURL;
     this.credentials = config.credentials;
     this.signingSecret = config.signingSecret;
+    this.webhookVerifier = config.webhookVerifier;
     this.logger = new ConsoleLogger();
   }
 
@@ -357,7 +370,9 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   async handleWebhook(request: Request, options?: WebhookOptions): Promise<Response> {
     type LinqWebhookEvent = LinqAPIV3.EventsWebhookEvent;
 
-    const verification = await verifyLinqWebhookRequest(request, await this.getSigningSecret());
+    const verification = this.webhookVerifier
+      ? await this.verifyTrustedWebhook(request)
+      : await verifyLinqWebhookRequest(request, await this.getSigningSecret());
 
     if (!verification.ok) {
       return verification.response;
@@ -401,6 +416,24 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     }
 
     return new Response("OK", { status: 200 });
+  }
+
+  private async verifyTrustedWebhook(request: Request): Promise<
+    | { ok: true; rawBody: Uint8Array }
+    | { ok: false; response: Response }
+  > {
+    const rawBody = new Uint8Array(await request.arrayBuffer());
+
+    try {
+      const result = await this.webhookVerifier?.(request, rawBody);
+      if (result === false) {
+        return { ok: false, response: new Response("Invalid Linq webhook", { status: 401 }) };
+      }
+    } catch {
+      return { ok: false, response: new Response("Invalid Linq webhook", { status: 401 }) };
+    }
+
+    return { ok: true, rawBody };
   }
 
   private processReactionWebhook(
