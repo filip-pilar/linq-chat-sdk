@@ -61,7 +61,7 @@ export interface LinqAdapterConfig {
   /** Direct API key. Use with `signingSecret`, or prefer lazy `credentials`. */
   apiKey?: string;
   baseURL?: string;
-  /** Lazy credentials, for example a Vercel Connect credential provider. */
+  /** Lazy credentials, for example from an externally managed credential store. */
   credentials?: LinqCredentialProvider;
   /** Direct webhook signing secret. Ignored when `webhookVerifier` is supplied. */
   signingSecret?: string;
