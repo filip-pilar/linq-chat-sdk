@@ -10,6 +10,15 @@ const SIGNING_SECRET = "test_linq_webhook_secret";
 const API_KEY = "test_linq_api_key";
 
 describe("LinqAdapter.handleWebhook", () => {
+  it("accepts a lazy credential provider for managed credential stores", async () => {
+    const credentials = vi.fn(async () => ({ apiKey: API_KEY, signingSecret: SIGNING_SECRET }));
+    const adapter = createLinqAdapter({ credentials });
+    const response = await adapter.handleWebhook(createSignedRequest(createMessageReceivedPayload()));
+
+    expect(response.status).toBe(200);
+    expect(credentials).toHaveBeenCalledOnce();
+  });
+
   it("returns 401 when signature headers are missing", async () => {
     const adapter = createTestAdapter();
     const request = new Request("https://example.com/webhooks/linq", {

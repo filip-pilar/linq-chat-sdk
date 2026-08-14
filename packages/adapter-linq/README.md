@@ -53,11 +53,15 @@ Other event types are acknowledged with a `200` and ignored.
 
 ## Configuration
 
-| Option          | Required | Description                                                                                                              |
-| --------------- | -------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `apiKey`        | yes      | Linq API key used for all outbound API calls.                                                                            |
-| `signingSecret` | yes      | Webhook signing secret. Requests are verified with HMAC-SHA256 over `{timestamp}.{raw_body}`, with replay-window checks. |
-| `baseURL`       | no       | Override the Linq API base URL (e.g. sandbox).                                                                           |
+| Option            | Required | Description                                                                                                              |
+| ----------------- | -------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `apiKey`          | direct   | Linq API key used for all outbound API calls.                                                                            |
+| `signingSecret`   | direct   | Webhook signing secret. Requests are verified with HMAC-SHA256 over `{timestamp}.{raw_body}`, with replay-window checks. |
+| `credentials`     | managed  | Lazy function returning `{ apiKey, signingSecret }`; use this for rotated or externally managed credentials.             |
+| `baseURL`         | no       | Override the Linq API base URL (e.g. sandbox).                                                                           |
+
+Use either the direct `apiKey` + `signingSecret` pair or `credentials`. Credential
+providers are resolved lazily, so credential rotation remains outside the adapter.
 
 ## Supported features
 
