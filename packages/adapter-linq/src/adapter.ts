@@ -72,9 +72,6 @@ export interface LinqAdapterConfig {
 class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   readonly name: string = "linq";
   readonly userName: string = "linq";
-  readonly persistThreadHistory = true;
-  /** @deprecated Use `persistThreadHistory`. */
-  readonly persistMessageHistory = true;
   private apiClient: LinqAPIV3 | null;
   private readonly baseURL: string | undefined;
   private readonly converter = new LinqFormatConverter();
