@@ -42,7 +42,8 @@ type LinqThreadId = {
 /** Credentials for Linq's outbound API and direct signed webhooks. */
 export interface LinqCredentials {
   apiKey: string;
-  signingSecret: string;
+  /** Required only when direct Linq HMAC verification is in use. */
+  signingSecret?: string;
 }
 
 /** Resolves credentials lazily, including from a managed credential store. */
