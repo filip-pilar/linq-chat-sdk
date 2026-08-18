@@ -10,8 +10,22 @@ export async function verifyLinqWebhookRequest(
   request: Request,
   signingSecret: string,
 ): Promise<LinqWebhookVerificationResult> {
-  const timestamp = request.headers.get(LINQ_TIMESTAMP_HEADER)?.trim() || "";
-  const signature = request.headers.get(LINQ_SIGNATURE_HEADER)?.trim() || "";
+  const rawBody = new Uint8Array(await request.arrayBuffer());
+
+  return verifyLinqWebhookBody(request.headers, signingSecret, rawBody);
+}
+
+/**
+ * Verifies a Linq signature against an already-read body. This lets adapters
+ * support a trusted webhook forwarder without reading the request body twice.
+ */
+export async function verifyLinqWebhookBody(
+  headers: Headers,
+  signingSecret: string,
+  rawBody: Uint8Array,
+): Promise<LinqWebhookVerificationResult> {
+  const timestamp = headers.get(LINQ_TIMESTAMP_HEADER)?.trim() || "";
+  const signature = headers.get(LINQ_SIGNATURE_HEADER)?.trim() || "";
 
   if (!timestamp || !signature) {
     return {
@@ -33,8 +47,6 @@ export async function verifyLinqWebhookRequest(
       response: new Response("Linq webhook signing secret is not configured", { status: 503 }),
     };
   }
-
-  const rawBody = new Uint8Array(await request.arrayBuffer());
 
   if (!(await verifyLinqSignature(timestamp, signature, signingSecret, rawBody))) {
     return {

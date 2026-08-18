@@ -10,6 +10,43 @@ const SIGNING_SECRET = "test_linq_webhook_secret";
 const API_KEY = "test_linq_api_key";
 
 describe("LinqAdapter.handleWebhook", () => {
+  it("accepts a lazy credential provider for managed credential stores", async () => {
+    const credentials = vi.fn(async () => ({ apiKey: API_KEY, signingSecret: SIGNING_SECRET }));
+    const adapter = createLinqAdapter({ credentials });
+    const response = await adapter.handleWebhook(createSignedRequest(createMessageReceivedPayload()));
+
+    expect(response.status).toBe(200);
+    expect(credentials).toHaveBeenCalledOnce();
+  });
+
+  it("uses a trusted webhook verifier with API-key-only managed credentials", async () => {
+    const credentials = vi.fn(async () => ({ apiKey: API_KEY }));
+    const webhookVerifier = vi.fn(async (_request: Request, rawBody: Uint8Array) => {
+      expect(new TextDecoder().decode(rawBody)).toContain('"event_type":"message.received"');
+    });
+    const adapter = createLinqAdapter({ credentials, webhookVerifier });
+    const response = await adapter.handleWebhook(
+      new Request("https://example.com/webhooks/linq", {
+        method: "POST",
+        body: JSON.stringify(createMessageReceivedPayload()),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(credentials).not.toHaveBeenCalled();
+    expect(webhookVerifier).toHaveBeenCalledOnce();
+  });
+
+  it("rejects API-key-only credentials when direct webhook verification needs a signing secret", async () => {
+    const credentials = vi.fn(async () => ({ apiKey: API_KEY }));
+    const adapter = createLinqAdapter({ credentials });
+
+    await expect(adapter.handleWebhook(createSignedRequest(createMessageReceivedPayload()))).rejects.toThrow(
+      "Linq credentials did not provide a webhook signing secret.",
+    );
+    expect(credentials).toHaveBeenCalledOnce();
+  });
+
   it("returns 401 when signature headers are missing", async () => {
     const adapter = createTestAdapter();
     const request = new Request("https://example.com/webhooks/linq", {
