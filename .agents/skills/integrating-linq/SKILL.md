@@ -48,13 +48,19 @@ Inspect these local files before changing Linq behavior:
 - Create subscriptions with `POST /v3/webhook-subscriptions`
 - `target_url` must be unique per account
 - The response includes `signing_secret` exactly once, so persist it immediately
-- Webhook headers to expect:
-  - `X-Webhook-Event`
-  - `X-Webhook-Subscription-ID`
-  - `X-Webhook-Timestamp`
-  - `X-Webhook-Signature`
-- Signature verification is HMAC-SHA256 over `{timestamp}.{raw_body}` using the raw request bytes
-- Reject stale webhook timestamps older than 5 minutes to limit replay risk
+- Deliveries are signed with [Standard Webhooks](https://www.standardwebhooks.com). Expect:
+  - `webhook-id`
+  - `webhook-timestamp`
+  - `webhook-signature`
+- Verify with `client.webhooks.unwrap(rawBody, { headers })`, which checks the
+  signature, enforces the replay window, and parses the envelope in one call.
+  Do not hand-roll the HMAC: the signed content is
+  `{webhook-id}.{webhook-timestamp}.{raw_body}`, the key is the
+  **base64-decoded** secret, and the signature is compared base64. Signing the
+  body alone, or keying on the raw secret bytes, rejects every real delivery.
+- Linq also still sends the older `X-Webhook-Event`, `X-Webhook-Subscription-ID`,
+  `X-Webhook-Timestamp`, and `X-Webhook-Signature` headers. Its API docs mark
+  them deprecated, so do not verify against them.
 - Return `2xx` quickly; Linq retries `5xx`, `429`, and network failures up to 10 times over about 25 minutes
 - `4xx` responses except `429` are not retried
 - Pin the latest payload version by appending `?version=2026-02-03` to the webhook URL

@@ -28,19 +28,21 @@ curl -X POST http://localhost:3000/api/linq/setup/webhook \
 ## Delivery rules from Linq docs
 
 - Deliveries are HTTP `POST`
-- Headers:
-  - `X-Webhook-Event`
-  - `X-Webhook-Subscription-ID`
-  - `X-Webhook-Timestamp`
-  - `X-Webhook-Signature`
+- Signed with [Standard Webhooks](https://www.standardwebhooks.com). Headers:
+  - `webhook-id`
+  - `webhook-timestamp`
+  - `webhook-signature`
 - Signature input:
 
 ```text
-{timestamp}.{raw_body}
+{webhook-id}.{webhook-timestamp}.{raw_body}
 ```
 
-- Use constant-time comparison when checking the HMAC
-- Reject timestamps older than 5 minutes
+- The key is the base64-decoded signing secret; signatures are compared base64
+- Verify with `client.webhooks.unwrap(rawBody, { headers })` rather than
+  reimplementing the scheme — it handles the replay window and constant-time
+  comparison
+- The older `X-Webhook-*` headers are still sent but are deprecated
 - `message.received` is the minimal inbound event to subscribe to
 - `target_url` can only be used once per account, so change the URL if you need a second subscription
 
