@@ -19,8 +19,17 @@
     },
     "typecheck": {
       "dependsOn": [
-        "^typecheck"
+        "^build"
       ],
+      "outputs": []
+    },
+    "test": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": []
+    },
+    "lint": {
       "outputs": []
     }
   }
