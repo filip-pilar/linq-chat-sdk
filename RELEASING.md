@@ -1,43 +1,51 @@
 # Releasing
 
-Only one package is published from this repo: [`@linqapp/chat-sdk-adapter`](packages/adapter-linq)
-(`apps/api` is an example app and stays private).
+Releases are proposed by [changesets](https://github.com/changesets/changesets)
+and published by `publish.yml` over OIDC. Nothing reads commit messages; the
+version that ships is the one in `packages/adapter-linq/package.json`.
 
-Publishing is driven by the `version` field in
-`packages/adapter-linq/package.json`. Changing that field on `main` is what
-triggers a release — there is no separate "publish" button to remember.
+## Normal flow
 
-## Cutting a release
-
-1. Bump the version on a branch:
+1. **Add a changeset in the PR that makes the change.**
 
    ```bash
-   pnpm version:adapter minor   # or patch / major / 0.2.0
+   pnpm changeset
    ```
 
-2. Open a PR with just that bump (or fold it into the last feature PR — either
-   works) and get it merged into `main`.
+   Pick the package, pick `patch` / `minor` / `major`, and write the line users
+   will read in the changelog. Commit the generated file under `.changeset/`.
+   A PR with no user-visible change needs no changeset.
 
-3. That's it. The [Publish adapter](.github/workflows/publish.yml) workflow runs
-   on merge and:
-   - re-runs lint, format, typecheck, test, and build;
-   - publishes to npm with [provenance](https://docs.npmjs.com/generating-provenance-statements);
-   - pushes a `v<version>` tag;
-   - creates a GitHub release with auto-generated notes.
+2. **Merge to `main`.** The Version workflow opens or updates a
+   **Version Packages** PR that applies every accumulated changeset: it bumps
+   `packages/adapter-linq/package.json` and writes `CHANGELOG.md`. Changesets
+   accumulate, so several merges produce one release PR rather than several.
 
-Watch it under
-[Actions → Publish adapter](https://github.com/linq-team/linq-chat-sdk/actions/workflows/publish.yml).
-The job is a no-op if that version is already on npm, so re-running it or
-merging an unrelated `package.json` change is safe.
+3. **Merge the Version Packages PR.** That edits the adapter's `package.json`,
+   which is what `publish.yml` triggers on — it publishes to npm, tags the
+   commit, and cuts a GitHub release.
 
-## Versioning
+Nothing publishes until step 3, so the Version Packages PR is the release gate:
+review the version and the changelog there.
 
-The adapter is pre-1.0, so we use `0.MINOR.PATCH`:
+### Why changesets does not publish
 
-- **minor** (`0.1.0` → `0.2.0`) — new adapter capabilities, or a change to
-  `LinqAdapterConfig` / exported types that callers may need to react to.
-- **patch** (`0.2.0` → `0.2.1`) — bug fixes and internal changes that keep the
-  public surface identical.
+`changesets/action` can publish, but it spawns the publish command as a child
+process without passing the OIDC request token through, so `npm publish` fails
+`ENEEDAUTH` ([npm/cli#8976](https://github.com/npm/cli/issues/8976)). Publishing
+stays in `publish.yml`, where `npm publish` runs as a top-level step and
+inherits the OIDC environment cleanly.
+
+### Bumping by hand
+
+The version is just a field, so nothing stops you editing it directly — useful
+for a one-off or if changesets is unavailable:
+
+```bash
+pnpm version:adapter patch   # or minor / major
+```
+
+Open that as a PR. Merging it publishes exactly as above.
 
 ## One-time setup
 

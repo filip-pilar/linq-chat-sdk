@@ -10,9 +10,12 @@
     "lint": "turbo lint",
     "format": "turbo format",
     "format:check": "turbo format:check",
-    "version:adapter": "pnpm --filter @linqapp/chat-sdk-adapter exec npm version --no-git-tag-version"
+    "version:adapter": "pnpm --filter @linqapp/chat-sdk-adapter exec npm version --no-git-tag-version",
+    "changeset": "changeset",
+    "version:packages": "changeset version"
   },
   "devDependencies": {
+    "@changesets/cli": "^3.0.0",
     "turbo": "^2.5.0",
     "typescript": "^5.8.3"
   },

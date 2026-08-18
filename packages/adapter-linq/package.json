@@ -23,7 +23,8 @@
     "directory": "packages/adapter-linq"
   },
   "files": [
-    "dist"
+    "dist",
+    "CHANGELOG.md"
   ],
   "type": "module",
   "main": "./dist/index.js",
