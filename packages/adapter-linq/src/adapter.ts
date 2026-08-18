@@ -425,6 +425,12 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     }
   }
 
+  /** Marks all messages in the Linq chat as read. */
+  async markRead(threadId: string, _messageId: string): Promise<void> {
+    const { chatId } = this.decodeThreadId(threadId);
+    await (await this.getApiClient()).chats.markAsRead(chatId);
+  }
+
   async stream(
     threadId: string,
     textStream: AsyncIterable<string | StreamChunk>,
