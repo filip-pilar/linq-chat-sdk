@@ -1,5 +1,12 @@
 # @linqapp/chat-sdk-adapter
 
+## 0.2.1
+
+### Patch Changes
+
+- 36ed580: Ship `CHANGELOG.md` inside the published package, so the release notes are
+  visible on npm rather than only in the repository.
+
 ## 0.2.0
 
 Released before this package adopted changesets, so this entry is written by
