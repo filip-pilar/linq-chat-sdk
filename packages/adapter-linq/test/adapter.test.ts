@@ -1,12 +1,13 @@
-import { createHmac } from "node:crypto";
 import type { LinqAPIV3 } from "@linqapp/sdk";
+import { Webhook } from "standardwebhooks";
 import { getEmoji } from "chat";
 import type { ChatInstance } from "chat";
 import { describe, expect, it, vi } from "vitest";
 
 import { createLinqAdapter } from "../src/adapter";
 
-const SIGNING_SECRET = "test_linq_webhook_secret";
+// Standard Webhooks secrets are base64. Linq issues them `whsec_`-prefixed.
+const SIGNING_SECRET = "whsec_c2hoaC10aGlzLWlzLWEtdGVzdC1zZWNyZXQtdmFsdWU=";
 const API_KEY = "test_linq_api_key";
 
 describe("LinqAdapter.handleWebhook", () => {
@@ -824,20 +825,21 @@ async function* createTestStream() {
 
 function createSignedRequest(
   payload: unknown,
-  overrides: { signature?: string; timestamp?: string } = {},
+  overrides: { signature?: string; timestamp?: Date; messageId?: string } = {},
 ): Request {
   const body = JSON.stringify(payload);
-  const timestamp = overrides.timestamp ?? Math.floor(Date.now() / 1000).toString();
+  const messageId = overrides.messageId ?? "msg_2abc";
+  const timestamp = overrides.timestamp ?? new Date();
   const signature =
-    overrides.signature ??
-    createHmac("sha256", SIGNING_SECRET).update(`${timestamp}.${body}`).digest("hex");
+    overrides.signature ?? new Webhook(SIGNING_SECRET).sign(messageId, timestamp, body);
 
   return new Request("https://example.com/webhooks/linq", {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-webhook-signature": signature,
-      "x-webhook-timestamp": timestamp,
+      "webhook-id": messageId,
+      "webhook-timestamp": Math.floor(timestamp.getTime() / 1000).toString(),
+      "webhook-signature": signature,
     },
     body,
   });

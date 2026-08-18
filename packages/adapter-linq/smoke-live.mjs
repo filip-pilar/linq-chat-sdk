@@ -1,9 +1,12 @@
 // Live smoke test against the REAL Linq API, through the real adapter.
 // Whatever lands on your phone is exactly what ships.
 //
-//   send  — bootstrap a chat (or reuse one) and send text + two images
-//   cards — send Chat SDK cards (incl. the image+buttons card that used to vanish)
-//   serve — receive real webhooks (text/reactions) and optionally echo-reply
+//   send   — bootstrap a chat (or reuse one) and send text + two images
+//   cards  — send Chat SDK cards (incl. the image+buttons card that used to vanish)
+//   serve  — receive real webhooks (text/reactions) and optionally echo-reply
+//   verify — sign a delivery with a REAL Linq signing secret and run it through
+//            the adapter. Sends no messages, so it needs no phone and no tunnel.
+//   opendm — openDM() a handle with no existing chat, then post to it
 //
 // Run from packages/adapter-linq so deps + ./dist resolve.
 //
@@ -19,6 +22,7 @@ import { createServer } from "node:http";
 import { Buffer } from "node:buffer";
 
 import { LinqAPIV3 } from "@linqapp/sdk";
+import { Webhook } from "standardwebhooks";
 import {
   Actions,
   Button,
@@ -257,11 +261,198 @@ async function serve() {
   });
 }
 
+// Verifies the signing path against a secret Linq actually issued, rather than
+// one a test invented. Creates a throwaway subscription, signs a synthetic
+// delivery with its secret, runs it through the real adapter, and deletes the
+// subscription. No messages are sent.
+async function verify() {
+  const sdk = new LinqAPIV3({ apiKey: API_KEY, baseURL: BASE_URL });
+  const targetUrl =
+    process.env.LINQ_PROBE_URL || `https://example.com/linq-adapter-verify-${Date.now()}`;
+
+  console.log("creating a throwaway webhook subscription …");
+  const sub = await sdk.webhookSubscriptions.create({
+    subscribed_events: ["message.received"],
+    target_url: targetUrl,
+  });
+  console.log(`subscription ${sub.id}\n`);
+
+  let failures = 0;
+  try {
+    const secret = sub.signing_secret;
+    const body = secret.startsWith("whsec_") ? secret.slice(6) : secret;
+    const keyBytes = Buffer.from(body, "base64").length;
+
+    if (!(await step(`secret is whsec_ + base64 of ${keyBytes} bytes`, async () => {
+      if (!secret.startsWith("whsec_")) throw new Error("no whsec_ prefix");
+      if (keyBytes !== 32) throw new Error(`expected a 32-byte key, got ${keyBytes}`);
+      return "matches Standard Webhooks";
+    }))) failures += 1;
+
+    const a = adapter(secret);
+    let dispatched = null;
+    a.chat = {
+      processMessage: async (_adapter, threadId, factory) => {
+        const msg = await factory();
+        dispatched = { threadId, text: msg.text };
+      },
+      processReaction: () => {},
+    };
+
+    const payload = JSON.stringify(deliveryFixture());
+
+    if (!(await step("a correctly signed delivery verifies and dispatches", async () => {
+      dispatched = null;
+      const res = await a.handleWebhook(signedDelivery(secret, payload));
+      if (res.status !== 200) throw new Error(`expected 200, got ${res.status}`);
+      // Give the adapter's dispatch a turn to run.
+      await new Promise((r) => setTimeout(r, 50));
+      if (!dispatched) throw new Error("verified, but nothing reached the Chat SDK handler");
+      return `thread=${dispatched.threadId} text=${JSON.stringify(dispatched.text)}`;
+    }))) failures += 1;
+
+    if (!(await step("a tampered body is rejected", async () => {
+      const req = signedDelivery(secret, payload);
+      const tampered = new Request(req.url, {
+        method: "POST",
+        headers: req.headers,
+        body: payload.replace("hello from the smoke test", "tampered"),
+      });
+      const res = await a.handleWebhook(tampered);
+      if (res.status !== 401) throw new Error(`expected 401, got ${res.status}`);
+      return "401";
+    }))) failures += 1;
+
+    if (!(await step("a delivery signed with a different secret is rejected", async () => {
+      const other = "whsec_" + Buffer.from("0".repeat(32)).toString("base64");
+      const res = await a.handleWebhook(signedDelivery(other, payload));
+      if (res.status !== 401) throw new Error(`expected 401, got ${res.status}`);
+      return "401";
+    }))) failures += 1;
+
+    if (!(await step("the deprecated X-Webhook-* scheme no longer verifies", async () => {
+      const req = new Request("https://example.com/webhooks/linq", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-webhook-timestamp": Math.floor(Date.now() / 1000).toString(),
+          "x-webhook-signature": "sha256=deadbeef",
+        },
+        body: payload,
+      });
+      const res = await a.handleWebhook(req);
+      if (res.status !== 401) throw new Error(`expected 401, got ${res.status}`);
+      return "401 as intended";
+    }))) failures += 1;
+  } finally {
+    await sdk.webhookSubscriptions.delete(sub.id);
+    console.log(`\ncleaned up subscription ${sub.id}`);
+  }
+
+  if (failures) {
+    console.error(`\n${failures} check(s) failed`);
+    process.exit(1);
+  }
+  console.log("\nsigning path verified against a real Linq secret ✓");
+}
+
+function signedDelivery(secret, payload) {
+  const messageId = "msg_smoke_1";
+  const timestamp = new Date();
+  const signature = new Webhook(secret).sign(messageId, timestamp, payload);
+
+  return new Request("https://example.com/webhooks/linq", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "webhook-id": messageId,
+      "webhook-timestamp": Math.floor(timestamp.getTime() / 1000).toString(),
+      "webhook-signature": signature,
+    },
+    body: payload,
+  });
+}
+
+function deliveryFixture() {
+  return {
+    api_version: "v3",
+    webhook_version: "2026-02-03",
+    event_type: "message.received",
+    event_id: "smoke-" + Date.now(),
+    created_at: new Date().toISOString(),
+    trace_id: "smoke-trace",
+    partner_id: "smoke-partner",
+    data: {
+      id: "smoke-message-id",
+      direction: "inbound",
+      chat: { id: "00000000-0000-4000-8000-000000000000", is_group: false },
+      sender_handle: { handle: "+12025550147", service: "iMessage" },
+      service: "iMessage",
+      parts: [{ type: "text", value: "hello from the smoke test" }],
+      sent_at: new Date().toISOString(),
+    },
+  };
+}
+
+// Proves the proactive path: address a handle with no existing chat, then post.
+async function opendm() {
+  const to = need("LINQ_TEST_TO");
+  const a = adapter();
+
+  const threadId = await a.openDM(to);
+  console.log(`openDM(${to}) → ${threadId}`);
+
+  if (threadId !== `linq:pending:${to}`) {
+    console.error(`unexpected pending thread ID: ${threadId}`);
+    process.exit(1);
+  }
+
+  console.log("posting to the pending thread — watch your phone:");
+  let realThreadId = null;
+  const ok = await step("first post creates the chat", async () => {
+    const sent = await a.postMessage(threadId, "linq openDM smoke test 👋 — this chat did not exist a second ago");
+    realThreadId = sent.threadId;
+    if (!/^linq:[0-9a-f-]{36}$/.test(sent.threadId)) {
+      throw new Error(`expected a real chat thread ID, got ${sent.threadId}`);
+    }
+    return sent.threadId;
+  });
+
+  if (!ok) process.exit(1);
+
+  await step("a second post reuses that chat rather than forking one", async () => {
+    const again = await a.postMessage(threadId, "…and this one reused it");
+    if (again.threadId !== realThreadId) {
+      throw new Error(`forked a second chat: ${again.threadId} != ${realThreadId}`);
+    }
+    return again.threadId;
+  });
+
+  await step("operations needing a chat fail clearly on a pending thread", async () => {
+    await a
+      .openDM("+19999999999")
+      .then((pending) => a.fetchMessages(pending))
+      .then(
+        () => {
+          throw new Error("expected a throw");
+        },
+        (err) => {
+          if (!/has no chat yet/.test(err.message)) throw err;
+        },
+      );
+    return "throws with the remedy";
+  });
+
+  console.log(`\nopenDM verified — chat ${realThreadId}`);
+}
+
 const mode = process.argv[2];
 if (mode === "send") await send();
 else if (mode === "cards") await cards();
 else if (mode === "serve") await serve();
+else if (mode === "verify") await verify();
+else if (mode === "opendm") await opendm();
 else {
-  console.error("usage: node smoke-live.mjs <send|cards|serve>");
+  console.error("usage: node smoke-live.mjs <send|cards|serve|verify|opendm>");
   process.exit(2);
 }

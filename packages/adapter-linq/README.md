@@ -56,7 +56,7 @@ Other event types are acknowledged with a `200` and ignored.
 | Option            | Required | Description                                                                                                              |
 | ----------------- | -------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `apiKey`          | direct   | Linq API key used for all outbound API calls.                                                                            |
-| `signingSecret`   | direct   | Webhook signing secret. Requests are verified with HMAC-SHA256 over `{timestamp}.{raw_body}`, with replay-window checks. |
+| `signingSecret`   | direct   | Webhook signing secret. Deliveries are verified with [Standard Webhooks](https://www.standardwebhooks.com), including replay-window checks. |
 | `credentials`     | managed  | Lazy function returning `{ apiKey, signingSecret }`; use this for rotated or externally managed credentials.             |
 | `webhookVerifier` | no       | Verifies a trusted forwarded webhook using the unmodified raw body. Takes precedence over `signingSecret`.               |
 | `baseURL`         | no       | Override the Linq API base URL (e.g. sandbox).                                                                           |
@@ -92,13 +92,29 @@ createLinqAdapter({
 | Streaming                                          | ⚠️ buffered — recipients see one final message                                                                                     |
 | Sticker reactions                                  | ❌ skipped (no Chat SDK equivalent)                                                                                                |
 | Delete message                                     | ❌ Linq cannot unsend on the recipient's device                                                                                    |
-| `openDM()` / creating chats                        | ❌ Linq creates chats with an initial message, which doesn't match Chat SDK semantics — the adapter only replies to existing chats |
+| `openDM()` / creating chats                        | ✅ returns a pending thread; the chat is created on its first message                                                              |
 | Cards                                              | ⚠️ rendered natively as plain text + image media parts — buttons/selects show their labels but cannot trigger `onAction()`         |
 | Modals, slash commands                             | ❌ no Linq equivalent                                                                                                              |
 
 ## Thread IDs
 
 Thread IDs are stable and always take the form `linq:{chatId}`, regardless of whether the thread was first seen via webhook or API. Group vs DM identity is tracked internally from webhook payloads and `chats.retrieve()` calls; legacy `linq:{chatId}:group` / `linq:{chatId}:dm` IDs from older versions still decode.
+
+`openDM()` returns a **pending** thread ID, `linq:pending:{handle}`, for someone
+you have no chat with yet. Linq has no empty-chat primitive — a chat is created
+by its first message — so the target handle rides in the ID and the chat is
+created when you post:
+
+```ts
+const threadId = await adapter.openDM("+12025550147");
+const sent = await adapter.postMessage(threadId, "hey, following up on your order");
+sent.threadId; // "linq:9c1f0a2e-..." — the real chat, from here on
+```
+
+The ID is deterministic, so you can address a handle without a round trip.
+Posting reuses an existing chat with the same recipients rather than forking a
+second conversation. Any other operation on a pending thread — fetching
+messages, typing, reactions — throws, because there is nothing to act on yet.
 
 ## Attachments
 
@@ -179,6 +195,13 @@ A full example app (Nitro server wiring Linq, Telegram, and WhatsApp adapters in
 Get a sandbox number with the [Linq CLI](https://www.npmjs.com/package/@linqapp/cli): `linq signup --phone <your cell>`, then grab the token from `~/.linq/config.json`.
 
 ```bash
+# signing: create a throwaway webhook subscription, sign a delivery with the
+# secret Linq actually issued, and run it through the adapter. Sends nothing.
+LINQ_API_KEY=<token> node smoke-live.mjs verify
+
+# proactive: openDM a handle with no existing chat, then post to it
+LINQ_API_KEY=<token> LINQ_TEST_TO=<your cell> node smoke-live.mjs opendm
+
 # outbound: bootstrap a chat and send text + two images (one by URL, one pre-uploaded)
 LINQ_API_KEY=<token> LINQ_FROM=<sandbox number> LINQ_TEST_TO=<your cell> \
   node smoke-live.mjs send

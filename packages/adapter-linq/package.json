@@ -48,7 +48,8 @@
     "format:check": "oxfmt . --check"
   },
   "dependencies": {
-    "@linqapp/sdk": "^0.40.0"
+    "@linqapp/sdk": "^0.40.0",
+    "standardwebhooks": "^1.0.0"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
