@@ -110,5 +110,5 @@ function messageReceivedPayload(): LinqAPIV3.MessageReceivedWebhookEvent {
       parts: [{ type: "text", value: "hello" }],
       sent_at: "2026-05-08T16:21:12.000Z",
     },
-  } as LinqAPIV3.MessageReceivedWebhookEvent;
+  };
 }
