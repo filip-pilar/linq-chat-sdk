@@ -53,13 +53,13 @@ Other event types are acknowledged with a `200` and ignored.
 
 ## Configuration
 
-| Option            | Required | Description                                                                                                              |
-| ----------------- | -------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `apiKey`          | direct   | Linq API key used for all outbound API calls.                                                                            |
+| Option            | Required | Description                                                                                                                                 |
+| ----------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apiKey`          | direct   | Linq API key used for all outbound API calls.                                                                                               |
 | `signingSecret`   | direct   | Webhook signing secret. Deliveries are verified with [Standard Webhooks](https://www.standardwebhooks.com), including replay-window checks. |
-| `credentials`     | managed  | Lazy function returning `{ apiKey, signingSecret }`; use this for rotated or externally managed credentials.             |
-| `webhookVerifier` | no       | Verifies a trusted forwarded webhook using the unmodified raw body. Takes precedence over `signingSecret`.               |
-| `baseURL`         | no       | Override the Linq API base URL (e.g. sandbox).                                                                           |
+| `credentials`     | managed  | Lazy function returning `{ apiKey, signingSecret }`; use this for rotated or externally managed credentials.                                |
+| `webhookVerifier` | no       | Verifies a trusted forwarded webhook using the unmodified raw body. Takes precedence over `signingSecret`.                                  |
+| `baseURL`         | no       | Override the Linq API base URL (e.g. sandbox).                                                                                              |
 
 Use either the direct `apiKey` + `signingSecret` pair or `credentials`. A trusted
 webhook forwarder can use `webhookVerifier` instead of Linq's direct signature:
@@ -76,25 +76,25 @@ createLinqAdapter({
 
 ## Supported features
 
-| Feature                                            | Status                                                                                                                             |
-| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| Inbound text messages                              | ✅                                                                                                                                 |
-| Outbound text messages                             | ✅                                                                                                                                 |
-| Group chats                                        | ✅ reply to existing groups received via webhook                                                                                   |
-| Inbound media (images, audio, files)               | ✅ parsed as attachments with downloadable data                                                                                    |
-| Outbound media / file sending                      | ✅ `attachments` and `files` on a message become media parts                                                                       |
-| Inbound reactions (tapbacks + custom emoji)        | ✅ dispatch to `onReaction()`                                                                                                      |
-| Outbound reactions (add/remove)                    | ✅                                                                                                                                 |
-| Edit message                                       | ✅ text, first part only                                                                                                           |
-| Fetch message / history / thread                   | ✅                                                                                                                                 |
-| Typing indicators                                  | ✅ DMs only (Linq rejects typing in groups)                                                                                        |
-| Webhook signature verification + replay protection | ✅                                                                                                                                 |
-| Streaming                                          | ⚠️ buffered — recipients see one final message                                                                                     |
-| Sticker reactions                                  | ❌ skipped (no Chat SDK equivalent)                                                                                                |
-| Delete message                                     | ❌ Linq cannot unsend on the recipient's device                                                                                    |
-| `openDM()` / creating chats                        | ✅ returns a pending thread; the chat is created on its first message                                                              |
-| Cards                                              | ⚠️ rendered natively as plain text + image media parts — buttons/selects show their labels but cannot trigger `onAction()`         |
-| Modals, slash commands                             | ❌ no Linq equivalent                                                                                                              |
+| Feature                                            | Status                                                                                                                     |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Inbound text messages                              | ✅                                                                                                                         |
+| Outbound text messages                             | ✅                                                                                                                         |
+| Group chats                                        | ✅ reply to existing groups received via webhook                                                                           |
+| Inbound media (images, audio, files)               | ✅ parsed as attachments with downloadable data                                                                            |
+| Outbound media / file sending                      | ✅ `attachments` and `files` on a message become media parts                                                               |
+| Inbound reactions (tapbacks + custom emoji)        | ✅ dispatch to `onReaction()`                                                                                              |
+| Outbound reactions (add/remove)                    | ✅                                                                                                                         |
+| Edit message                                       | ✅ text, first part only                                                                                                   |
+| Fetch message / history / thread                   | ✅                                                                                                                         |
+| Typing indicators                                  | ✅ DMs only (Linq rejects typing in groups)                                                                                |
+| Webhook signature verification + replay protection | ✅                                                                                                                         |
+| Streaming                                          | ⚠️ buffered — recipients see one final message                                                                             |
+| Sticker reactions                                  | ❌ skipped (no Chat SDK equivalent)                                                                                        |
+| Delete message                                     | ❌ Linq cannot unsend on the recipient's device                                                                            |
+| `openDM()` / creating chats                        | ✅ returns a pending thread; the chat is created on its first message                                                      |
+| Cards                                              | ⚠️ rendered natively as plain text + image media parts — buttons/selects show their labels but cannot trigger `onAction()` |
+| Modals, slash commands                             | ❌ no Linq equivalent                                                                                                      |
 
 ## Thread IDs
 

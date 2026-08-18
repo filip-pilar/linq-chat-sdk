@@ -11,11 +11,19 @@
 
 ```bash
 pnpm install
-pnpm -r test
-pnpm -r typecheck
+pnpm lint
+pnpm format      # or format:check
+pnpm typecheck
+pnpm test
 ```
 
-The adapter package has no runtime dependencies beyond the official [`@linqapp/sdk`](https://www.npmjs.com/package/@linqapp/sdk), with `chat` as a peer dependency.
+The same checks run in CI on every pull request.
+
+The adapter package depends on the official [`@linqapp/sdk`](https://www.npmjs.com/package/@linqapp/sdk) and [`standardwebhooks`](https://www.npmjs.com/package/standardwebhooks) at runtime, with `chat` as a peer dependency.
+
+## Releasing
+
+Bump the adapter version and merge to `main` — publishing to npm is automated from there. See [RELEASING.md](RELEASING.md).
 
 ## Credits
 

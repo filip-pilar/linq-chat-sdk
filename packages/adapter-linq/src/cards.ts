@@ -171,9 +171,7 @@ function childrenHaveInteractiveActions(children: CardChild[]): boolean {
       child.type === "actions" &&
       child.children.some(
         (element) =>
-          element.type === "button" ||
-          element.type === "select" ||
-          element.type === "radio_select",
+          element.type === "button" || element.type === "select" || element.type === "radio_select",
       )
     );
   });

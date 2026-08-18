@@ -27,10 +27,7 @@ import {
 } from "./message-parser.js";
 import { buildLinqMediaParts } from "./outbound-media.js";
 import { fromLinqReaction, toLinqReaction } from "./reactions.js";
-import {
-  verifyLinqWebhookRequest,
-  type LinqWebhookVerificationResult,
-} from "./verification.js";
+import { verifyLinqWebhookRequest, type LinqWebhookVerificationResult } from "./verification.js";
 
 type LinqOutboundPart =
   | { type: "text"; value: string }
@@ -194,7 +191,9 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     options?: FetchOptions,
   ): Promise<FetchResult<LinqRawMessage>> {
     const chatId = this.requireChatId(threadId);
-    const page = await (await this.getApiClient()).chats.messages.list(chatId, {
+    const page = await (
+      await this.getApiClient()
+    ).chats.messages.list(chatId, {
       cursor: options?.cursor,
       limit: options?.limit,
     });
@@ -346,7 +345,9 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       throw new Error("Linq message text cannot be empty.");
     }
 
-    const response = await (await this.getApiClient()).messages.update(messageId, {
+    const response = await (
+      await this.getApiClient()
+    ).messages.update(messageId, {
       text,
       part_index: 0,
     });
@@ -368,7 +369,9 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     messageId: string,
     emoji: EmojiValue | string,
   ): Promise<void> {
-    await (await this.getApiClient()).messages.addReaction(messageId, {
+    await (
+      await this.getApiClient()
+    ).messages.addReaction(messageId, {
       operation: "add",
       ...toLinqReaction(emoji),
     });
@@ -379,7 +382,9 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     messageId: string,
     emoji: EmojiValue | string,
   ): Promise<void> {
-    await (await this.getApiClient()).messages.addReaction(messageId, {
+    await (
+      await this.getApiClient()
+    ).messages.addReaction(messageId, {
       operation: "remove",
       ...toLinqReaction(emoji),
     });

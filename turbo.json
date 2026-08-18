@@ -31,6 +31,13 @@
     },
     "lint": {
       "outputs": []
+    },
+    "format": {
+      "cache": false,
+      "outputs": []
+    },
+    "format:check": {
+      "outputs": []
     }
   }
 }

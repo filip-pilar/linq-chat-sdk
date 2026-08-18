@@ -15,7 +15,9 @@ describe("LinqAdapter.handleWebhook", () => {
   it("accepts a lazy credential provider for managed credential stores", async () => {
     const credentials = vi.fn(async () => ({ apiKey: API_KEY, signingSecret: SIGNING_SECRET }));
     const adapter = createLinqAdapter({ credentials });
-    const response = await adapter.handleWebhook(createSignedRequest(createMessageReceivedPayload()));
+    const response = await adapter.handleWebhook(
+      createSignedRequest(createMessageReceivedPayload()),
+    );
 
     expect(response.status).toBe(200);
     expect(credentials).toHaveBeenCalledOnce();
@@ -43,9 +45,9 @@ describe("LinqAdapter.handleWebhook", () => {
     const credentials = vi.fn(async () => ({ apiKey: API_KEY }));
     const adapter = createLinqAdapter({ credentials });
 
-    await expect(adapter.handleWebhook(createSignedRequest(createMessageReceivedPayload()))).rejects.toThrow(
-      "Linq credentials did not provide a webhook signing secret.",
-    );
+    await expect(
+      adapter.handleWebhook(createSignedRequest(createMessageReceivedPayload())),
+    ).rejects.toThrow("Linq credentials did not provide a webhook signing secret.");
     expect(credentials).toHaveBeenCalledOnce();
   });
 

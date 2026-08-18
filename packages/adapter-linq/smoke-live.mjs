@@ -286,11 +286,14 @@ async function verify() {
     const body = secret.startsWith("whsec_") ? secret.slice(6) : secret;
     const keyBytes = Buffer.from(body, "base64").length;
 
-    if (!(await step(`secret is whsec_ + base64 of ${keyBytes} bytes`, async () => {
-      if (!secret.startsWith("whsec_")) throw new Error("no whsec_ prefix");
-      if (keyBytes !== 32) throw new Error(`expected a 32-byte key, got ${keyBytes}`);
-      return "matches Standard Webhooks";
-    }))) failures += 1;
+    if (
+      !(await step(`secret is whsec_ + base64 of ${keyBytes} bytes`, async () => {
+        if (!secret.startsWith("whsec_")) throw new Error("no whsec_ prefix");
+        if (keyBytes !== 32) throw new Error(`expected a 32-byte key, got ${keyBytes}`);
+        return "matches Standard Webhooks";
+      }))
+    )
+      failures += 1;
 
     const a = adapter(secret);
     let dispatched = null;
@@ -304,49 +307,61 @@ async function verify() {
 
     const payload = JSON.stringify(deliveryFixture());
 
-    if (!(await step("a correctly signed delivery verifies and dispatches", async () => {
-      dispatched = null;
-      const res = await a.handleWebhook(signedDelivery(secret, payload));
-      if (res.status !== 200) throw new Error(`expected 200, got ${res.status}`);
-      // Give the adapter's dispatch a turn to run.
-      await new Promise((r) => setTimeout(r, 50));
-      if (!dispatched) throw new Error("verified, but nothing reached the Chat SDK handler");
-      return `thread=${dispatched.threadId} text=${JSON.stringify(dispatched.text)}`;
-    }))) failures += 1;
+    if (
+      !(await step("a correctly signed delivery verifies and dispatches", async () => {
+        dispatched = null;
+        const res = await a.handleWebhook(signedDelivery(secret, payload));
+        if (res.status !== 200) throw new Error(`expected 200, got ${res.status}`);
+        // Give the adapter's dispatch a turn to run.
+        await new Promise((r) => setTimeout(r, 50));
+        if (!dispatched) throw new Error("verified, but nothing reached the Chat SDK handler");
+        return `thread=${dispatched.threadId} text=${JSON.stringify(dispatched.text)}`;
+      }))
+    )
+      failures += 1;
 
-    if (!(await step("a tampered body is rejected", async () => {
-      const req = signedDelivery(secret, payload);
-      const tampered = new Request(req.url, {
-        method: "POST",
-        headers: req.headers,
-        body: payload.replace("hello from the smoke test", "tampered"),
-      });
-      const res = await a.handleWebhook(tampered);
-      if (res.status !== 401) throw new Error(`expected 401, got ${res.status}`);
-      return "401";
-    }))) failures += 1;
+    if (
+      !(await step("a tampered body is rejected", async () => {
+        const req = signedDelivery(secret, payload);
+        const tampered = new Request(req.url, {
+          method: "POST",
+          headers: req.headers,
+          body: payload.replace("hello from the smoke test", "tampered"),
+        });
+        const res = await a.handleWebhook(tampered);
+        if (res.status !== 401) throw new Error(`expected 401, got ${res.status}`);
+        return "401";
+      }))
+    )
+      failures += 1;
 
-    if (!(await step("a delivery signed with a different secret is rejected", async () => {
-      const other = "whsec_" + Buffer.from("0".repeat(32)).toString("base64");
-      const res = await a.handleWebhook(signedDelivery(other, payload));
-      if (res.status !== 401) throw new Error(`expected 401, got ${res.status}`);
-      return "401";
-    }))) failures += 1;
+    if (
+      !(await step("a delivery signed with a different secret is rejected", async () => {
+        const other = "whsec_" + Buffer.from("0".repeat(32)).toString("base64");
+        const res = await a.handleWebhook(signedDelivery(other, payload));
+        if (res.status !== 401) throw new Error(`expected 401, got ${res.status}`);
+        return "401";
+      }))
+    )
+      failures += 1;
 
-    if (!(await step("the deprecated X-Webhook-* scheme no longer verifies", async () => {
-      const req = new Request("https://example.com/webhooks/linq", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-webhook-timestamp": Math.floor(Date.now() / 1000).toString(),
-          "x-webhook-signature": "sha256=deadbeef",
-        },
-        body: payload,
-      });
-      const res = await a.handleWebhook(req);
-      if (res.status !== 401) throw new Error(`expected 401, got ${res.status}`);
-      return "401 as intended";
-    }))) failures += 1;
+    if (
+      !(await step("the deprecated X-Webhook-* scheme no longer verifies", async () => {
+        const req = new Request("https://example.com/webhooks/linq", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-webhook-timestamp": Math.floor(Date.now() / 1000).toString(),
+            "x-webhook-signature": "sha256=deadbeef",
+          },
+          body: payload,
+        });
+        const res = await a.handleWebhook(req);
+        if (res.status !== 401) throw new Error(`expected 401, got ${res.status}`);
+        return "401 as intended";
+      }))
+    )
+      failures += 1;
   } finally {
     await sdk.webhookSubscriptions.delete(sub.id);
     console.log(`\ncleaned up subscription ${sub.id}`);
@@ -413,7 +428,10 @@ async function opendm() {
   console.log("posting to the pending thread — watch your phone:");
   let realThreadId = null;
   const ok = await step("first post creates the chat", async () => {
-    const sent = await a.postMessage(threadId, "linq openDM smoke test 👋 — this chat did not exist a second ago");
+    const sent = await a.postMessage(
+      threadId,
+      "linq openDM smoke test 👋 — this chat did not exist a second ago",
+    );
     realThreadId = sent.threadId;
     if (!/^linq:[0-9a-f-]{36}$/.test(sent.threadId)) {
       throw new Error(`expected a real chat thread ID, got ${sent.threadId}`);
