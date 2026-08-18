@@ -366,7 +366,7 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
   // handle webhook
   async handleWebhook(request: Request, options?: WebhookOptions): Promise<Response> {
-    type LinqWebhookEvent = LinqAPIV3.EventsWebhookEvent;
+    type LinqWebhookEvent = LinqAPIV3.UnwrapWebhookEvent;
 
     const verification = this.webhookVerifier
       ? await this.verifyTrustedWebhook(request)
