@@ -12,6 +12,7 @@ import type {
   FormattedContent,
   Logger,
   RawMessage,
+  StateAdapter,
   StreamChunk,
   ThreadInfo,
   WebhookOptions,
@@ -20,6 +21,7 @@ import type {
 import { cardHasInteractiveActions, collectCardImageUrls, extractCardElement } from "./cards.js";
 import { translateLinqError } from "./errors.js";
 import {
+  createLinqEvent,
   isLinqKnownEventType,
   LinqEventRegistry,
   type LinqAnyEvent,
@@ -57,6 +59,8 @@ type LinqThreadId = {
   isGroup?: boolean;
 };
 
+const LINQ_EVENT_DEDUPE_TTL_MS = 60 * 60 * 1000;
+
 export interface LinqAdapterConfig {
   apiKey: string;
   baseURL?: string;
@@ -76,6 +80,7 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   private readonly linqEvents = new LinqEventRegistry();
 
   private chat: ChatInstance | null = null;
+  private state: StateAdapter | null = null;
   private logger: Logger;
   // chatId -> isGroup, learned from webhooks, fetchThread, and legacy thread IDs.
   private readonly chatKinds = new Map<string, boolean>();
@@ -104,6 +109,7 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
   async initialize(chat: ChatInstance): Promise<void> {
     this.chat = chat;
+    this.state = chat.getState();
     this.logger = chat.getLogger("linq");
   }
 
@@ -440,16 +446,67 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     options?: WebhookOptions,
   ): Promise<LinqVerifiedWebhookDispatchResult> {
     const event = getVerifiedLinqWebhookEvent(webhook, this.webhookVerificationAuthority);
+    const includeNamed = webhook.envelope.versionStatus === "current";
+    const genericHandlers = this.linqEvents.handlersFor(webhook.envelope.eventType, includeNamed);
+
+    if (this.state) {
+      const claimed = await this.state.setIfNotExists(
+        `dedupe:linq:event:${webhook.envelope.partnerId}:${webhook.envelope.eventId}`,
+        true,
+        LINQ_EVENT_DEDUPE_TTL_MS,
+      );
+
+      if (!claimed) {
+        this.logger.debug("Skipping duplicate Linq event", {
+          eventType: webhook.envelope.eventType,
+        });
+        return { handled: "ignored" };
+      }
+    } else if (genericHandlers.length > 0) {
+      throw new Error("Linq event handlers require an initialized Chat instance");
+    }
+
+    const genericDispatch = this.dispatchGenericLinqEvent(webhook, genericHandlers);
+    let standardDispatch: Promise<LinqVerifiedWebhookDispatchResult>;
 
     if (webhook.envelope.versionStatus === "older") {
-      return this.dispatchCompatibilityWebhook(event, options);
+      standardDispatch = this.dispatchCompatibilityWebhook(event, options);
+    } else if (webhook.envelope.versionStatus === "current") {
+      standardDispatch = this.dispatchWebhookEvent(event, options);
+    } else {
+      standardDispatch = Promise.resolve({ handled: "ignored" });
     }
 
-    if (webhook.envelope.versionStatus !== "current") {
-      return { handled: "ignored" };
+    const [standardResult] = await Promise.allSettled([standardDispatch, genericDispatch]);
+
+    if (standardResult.status === "rejected") {
+      throw standardResult.reason;
     }
 
-    return this.dispatchWebhookEvent(event, options);
+    return standardResult.value;
+  }
+
+  private async dispatchGenericLinqEvent(
+    webhook: LinqVerifiedWebhook,
+    handlers: readonly LinqEventHandler[],
+  ): Promise<void> {
+    if (handlers.length === 0) {
+      return;
+    }
+
+    const event = createLinqEvent(webhook);
+    const results = await Promise.allSettled(
+      handlers.map((handler) => Promise.resolve().then(() => handler(event))),
+    );
+
+    for (const result of results) {
+      if (result.status === "rejected") {
+        this.logger.error("Linq event handler failed", {
+          error: result.reason,
+          eventType: webhook.envelope.eventType,
+        });
+      }
+    }
   }
 
   // Ordinary one-step Chat SDK webhook entry point.

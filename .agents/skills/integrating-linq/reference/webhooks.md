@@ -59,9 +59,12 @@ existing-chat sends, and two ingress forms:
 The typed path targets `2026-02-03` and preserves immutable parsed JSON, decoded request text, and
 exact authenticated bytes as base64. It returns lossless `unsupported_version` observations for older, future, and unknown
 non-empty versions. The ordinary path retains narrow compatibility dispatch for older signed
-payloads and acknowledges future/unknown versions without current-schema dispatch. Consult
-`packages/adapter-linq/FEATURE_PARITY.md` before describing generic
-event callbacks, deduplication, or other planned behavior as implemented.
+payloads and acknowledges future/unknown versions without current-schema dispatch. Verified
+generic callbacks and atomic provider/partner/event deduplication are implemented through
+`adapter.onLinqEvent(...)`. They are at-most-once attempted after claim; callback failures are
+isolated and logged. One-step generic callbacks still block acknowledgement until Batch `005C`
+adds `WebhookOptions.waitUntil` scheduling. Consult `packages/adapter-linq/FEATURE_PARITY.md` before
+describing scheduling or other planned behavior as implemented.
 
 The checked-in inventory records 68 callable operations, 56 webhook examples, and 45 event names.
 Run `pnpm openapi:check` to detect canonical schema drift. `@linqapp/sdk@0.42.0` has no unwrap union;

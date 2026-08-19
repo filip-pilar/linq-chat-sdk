@@ -1,0 +1,267 @@
+import { createHmac } from "node:crypto";
+
+import type { ChatInstance, Logger, StateAdapter } from "chat";
+import { describe, expect, it, vi } from "vitest";
+
+import { createLinqAdapter, type LinqAdapter } from "../src/index.js";
+import fixture from "./fixtures/message-received-2026-02-03.json";
+
+const SIGNING_KEY = "test_linq_webhook_secret";
+const SIGNING_SECRET = `whsec_${Buffer.from(SIGNING_KEY).toString("base64")}`;
+const EVENT_DEDUPE_TTL_MS = 60 * 60 * 1000;
+
+describe("verified generic Linq event dispatch", () => {
+  it("atomically claims before standard and generic message dispatch", async () => {
+    const context = await createContext();
+    const named = vi.fn();
+    const all = vi.fn();
+    context.adapter.onLinqEvent("message.received", named);
+    context.adapter.onLinqEvent(all);
+
+    const response = await context.adapter.handleWebhook(createStandardRequest(fixture));
+
+    expect(response.status).toBe(200);
+    expect(context.setIfNotExists).toHaveBeenCalledWith(
+      `dedupe:linq:event:${fixture.partner_id}:${fixture.event_id}`,
+      true,
+      EVENT_DEDUPE_TTL_MS,
+    );
+    expect(context.processMessage).toHaveBeenCalledTimes(1);
+    expect(named).toHaveBeenCalledTimes(1);
+    expect(all).toHaveBeenCalledTimes(1);
+    expect(named.mock.calls[0]?.[0]).toMatchObject({
+      type: "message.received",
+      data: { id: fixture.data.id },
+      envelope: { eventId: fixture.event_id, partnerId: fixture.partner_id },
+      rawEvent: fixture,
+    });
+  });
+
+  it("suppresses concurrent duplicate standard and generic attempts", async () => {
+    const context = await createContext();
+    const handler = vi.fn();
+    context.adapter.onLinqEvent(handler);
+
+    const responses = await Promise.all([
+      context.adapter.handleWebhook(createStandardRequest(fixture, { "webhook-id": "attempt-1" })),
+      context.adapter.handleWebhook(createStandardRequest(fixture, { "webhook-id": "attempt-2" })),
+    ]);
+
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    expect(context.setIfNotExists).toHaveBeenCalledTimes(2);
+    expect(context.processMessage).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("isolates generic callback failures from siblings and standard dispatch", async () => {
+    const context = await createContext();
+    const failure = new Error("consumer callback failed");
+    const failed = vi.fn(async () => {
+      throw failure;
+    });
+    const sibling = vi.fn();
+    context.adapter.onLinqEvent("message.received", failed);
+    context.adapter.onLinqEvent("message.received", sibling);
+
+    const response = await context.adapter.handleWebhook(createStandardRequest(fixture));
+
+    expect(response.status).toBe(200);
+    expect(context.processMessage).toHaveBeenCalledTimes(1);
+    expect(failed).toHaveBeenCalledTimes(1);
+    expect(sibling).toHaveBeenCalledTimes(1);
+    expect(context.logger.error).toHaveBeenCalledWith("Linq event handler failed", {
+      error: failure,
+      eventType: "message.received",
+    });
+
+    const duplicateResponse = await context.adapter.handleWebhook(
+      createStandardRequest(fixture, { "webhook-id": "retry-after-handler-failure" }),
+    );
+    expect(duplicateResponse.status).toBe(200);
+    expect(failed).toHaveBeenCalledTimes(1);
+    expect(sibling).toHaveBeenCalledTimes(1);
+    expect(context.processMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("attempts generic siblings when standard dispatch fails", async () => {
+    const context = await createContext();
+    const handler = vi.fn();
+    const failure = new Error("standard dispatch failed");
+    context.processMessage.mockImplementationOnce(() => {
+      throw failure;
+    });
+    context.adapter.onLinqEvent("message.received", handler);
+
+    await expect(context.adapter.handleWebhook(createStandardRequest(fixture))).rejects.toThrow(
+      failure,
+    );
+
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("coexists with standard reaction dispatch", async () => {
+    const context = await createContext();
+    const handler = vi.fn();
+    context.adapter.onLinqEvent(["reaction.added", "reaction.removed"], handler);
+    const reaction = reactionPayload();
+
+    const response = await context.adapter.handleWebhook(createStandardRequest(reaction));
+
+    expect(response.status).toBe(200);
+    expect(context.processReaction).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "reaction.added",
+        data: expect.objectContaining({ reaction_type: "like" }),
+      }),
+    );
+  });
+
+  it("delivers current unknown names losslessly only to all-event handlers", async () => {
+    const context = await createContext();
+    const all = vi.fn();
+    context.adapter.onLinqEvent(all);
+    const payload = {
+      ...fixture,
+      event_type: "future.provider_event",
+      data: ["opaque", { nested: true }],
+    };
+
+    const response = await context.adapter.handleWebhook(createStandardRequest(payload));
+
+    expect(response.status).toBe(200);
+    expect(all).toHaveBeenCalledTimes(1);
+    const event = all.mock.calls[0]?.[0];
+    expect(event).toMatchObject({
+      type: "future.provider_event",
+      data: ["opaque", { nested: true }],
+      rawEvent: payload,
+    });
+    expect(Object.isFrozen(event)).toBe(true);
+    expect(Object.isFrozen(event.rawEvent)).toBe(true);
+    expect(context.processMessage).not.toHaveBeenCalled();
+    expect(context.processReaction).not.toHaveBeenCalled();
+  });
+
+  it("keeps older/future versions out of schema-specific handlers", async () => {
+    for (const webhookVersion of ["2025-01-01", "2099-01-01"]) {
+      const context = await createContext();
+      const named = vi.fn();
+      const all = vi.fn();
+      context.adapter.onLinqEvent("message.received", named);
+      context.adapter.onLinqEvent(all);
+      const payload = { ...fixture, webhook_version: webhookVersion };
+
+      const response = await context.adapter.handleWebhook(createStandardRequest(payload));
+
+      expect(response.status).toBe(200);
+      expect(named).not.toHaveBeenCalled();
+      expect(all).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "message.received",
+          envelope: expect.objectContaining({ webhookVersion }),
+          rawEvent: payload,
+        }),
+      );
+      expect(context.processMessage).toHaveBeenCalledTimes(webhookVersion < "2026" ? 1 : 0);
+    }
+  });
+
+  it("does not collide across authenticated partner identities", async () => {
+    const context = await createContext();
+    const handler = vi.fn();
+    context.adapter.onLinqEvent(handler);
+    const otherPartner = { ...fixture, partner_id: "other-partner-id" };
+
+    await context.adapter.handleWebhook(createStandardRequest(fixture));
+    await context.adapter.handleWebhook(createStandardRequest(otherPartner));
+
+    expect(handler).toHaveBeenCalledTimes(2);
+    expect(context.processMessage).toHaveBeenCalledTimes(2);
+  });
+});
+
+async function createContext(): Promise<{
+  adapter: LinqAdapter;
+  logger: Logger & { error: ReturnType<typeof vi.fn> };
+  processMessage: ReturnType<typeof vi.fn>;
+  processReaction: ReturnType<typeof vi.fn>;
+  setIfNotExists: ReturnType<typeof vi.fn>;
+}> {
+  const claimed = new Set<string>();
+  const setIfNotExists = vi.fn(async (key: string) => {
+    if (claimed.has(key)) {
+      return false;
+    }
+
+    claimed.add(key);
+    return true;
+  });
+  const state = { setIfNotExists } as unknown as StateAdapter;
+  const logger = createLogger();
+  const processMessage = vi.fn(async () => {});
+  const processReaction = vi.fn();
+  const chat = {
+    getLogger: () => logger,
+    getState: () => state,
+    processMessage,
+    processReaction,
+  } as unknown as ChatInstance;
+  const adapter = createLinqAdapter({
+    apiKey: "test_linq_api_key",
+    signingSecret: SIGNING_SECRET,
+  });
+
+  await adapter.initialize(chat);
+  return { adapter, logger, processMessage, processReaction, setIfNotExists };
+}
+
+function createLogger(): Logger & { error: ReturnType<typeof vi.fn> } {
+  const logger = {
+    child: () => logger,
+    debug: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+  };
+
+  return logger;
+}
+
+function reactionPayload(): Record<string, unknown> {
+  return {
+    ...fixture,
+    event_type: "reaction.added",
+    data: {
+      is_from_me: false,
+      reaction_type: "like",
+      chat_id: fixture.data.chat.id,
+      message_id: fixture.data.id,
+      part_index: 0,
+      custom_emoji: null,
+      reacted_at: "2026-05-08T16:22:00.000Z",
+      service: "iMessage",
+      from_handle: fixture.data.sender_handle,
+    },
+  };
+}
+
+function createStandardRequest(payload: unknown, overrides: Record<string, string> = {}): Request {
+  const body = JSON.stringify(payload);
+  const timestamp = overrides["webhook-timestamp"] ?? Math.floor(Date.now() / 1000).toString();
+  const webhookId = overrides["webhook-id"] ?? "webhook-test-id";
+  const signature = `v1,${createHmac("sha256", SIGNING_KEY)
+    .update(`${webhookId}.${timestamp}.${body}`)
+    .digest("base64")}`;
+
+  return new Request("https://example.com/webhooks/linq", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "webhook-id": webhookId,
+      "webhook-signature": signature,
+      "webhook-timestamp": timestamp,
+    },
+    body,
+  });
+}

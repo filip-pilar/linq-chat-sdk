@@ -7,6 +7,7 @@ import type {
   LinqWebhookRawEvent,
   LinqWebhookRawValue,
   LinqWebhookTransportObservation,
+  LinqVerifiedWebhook,
 } from "./webhook.js";
 
 export interface LinqEventBase<TType extends string, TData> {
@@ -17,15 +18,9 @@ export interface LinqEventBase<TType extends string, TData> {
   readonly rawEvent: LinqWebhookRawEvent;
 }
 
-type LinqMessageEventType =
-  | "message.sent"
-  | "message.received"
-  | "message.read"
-  | "message.delivered";
-
 type LinqReactionEventType = "reaction.added" | "reaction.removed";
 
-type LinqEventData<TType extends LinqKnownEventType> = TType extends LinqMessageEventType
+type LinqEventData<TType extends LinqKnownEventType> = TType extends "message.received"
   ? LinqAPIV3.MessageEventV2
   : TType extends LinqReactionEventType
     ? LinqReactionWebhookData
@@ -57,6 +52,16 @@ const KNOWN_EVENT_TYPES = new Set<string>(LINQ_KNOWN_EVENT_TYPES);
 
 export function isLinqKnownEventType(value: string): value is LinqKnownEventType {
   return KNOWN_EVENT_TYPES.has(value);
+}
+
+export function createLinqEvent(webhook: LinqVerifiedWebhook): LinqAnyEvent {
+  return Object.freeze({
+    type: webhook.envelope.eventType,
+    data: webhook.rawEvent.data ?? null,
+    envelope: webhook.envelope,
+    transport: webhook.transport,
+    rawEvent: webhook.rawEvent,
+  }) as LinqAnyEvent;
 }
 
 /** Instance-local callback registry. Batch 005B owns verified dispatch into it. */
@@ -114,10 +119,10 @@ export class LinqEventRegistry {
     };
   }
 
-  handlersFor(type: string): readonly RegisteredHandler[] {
+  handlersFor(type: string, includeNamed = true): readonly RegisteredHandler[] {
     const handlers = [...this.all].map((registration) => registration.handler);
 
-    if (isLinqKnownEventType(type)) {
+    if (includeNamed && isLinqKnownEventType(type)) {
       for (const registration of this.byType.get(type) ?? []) {
         handlers.push(registration.handler);
       }

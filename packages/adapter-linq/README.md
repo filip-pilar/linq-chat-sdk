@@ -53,17 +53,22 @@ Point a [Linq webhook subscription](https://docs.linqapp.com) at that route and 
 - `reaction.added`
 - `reaction.removed`
 
-Other event types are currently acknowledged with a `200` and ignored by the one-step path. Typed
-one/many/all `adapter.onLinqEvent()` registration and unsubscribe are available, but verified
-callback delivery, deduplication, and scheduling remain Batches `005B`/`005C`.
+Other verified event types can be observed with typed one/many/all `adapter.onLinqEvent()`
+registration. Standard message/reaction dispatch still runs where applicable. The adapter
+atomically deduplicates both paths by partner and provider event ID before callbacks.
 
 ```ts
 const unsubscribe = adapter.onLinqEvent(["message.delivered", "message.failed"], async (event) => {
-  // Narrowed to the selected event names. Delivery begins in Batch 005B.
+  // Narrowed to these names; data stays lossless until Batch 006 curates lifecycle types.
 });
 
 unsubscribe();
 ```
+
+Generic callbacks are currently awaited by the one-step webhook response. A claimed callback is
+at-most-once attempted: failure is logged and isolated, and a duplicate delivery will not invoke it
+again. Persist the result of `verifyWebhook()` before `dispatchVerifiedWebhook()` when application
+work needs its own durable retry policy. Batch `005C` adds non-blocking `waitUntil` scheduling.
 
 ## Verified ingress
 
@@ -225,7 +230,7 @@ administrative behavior remains on `adapter.client`.
 | Typing indicators                                  | ✅ DMs only (Linq rejects typing in groups)                                                                                |
 | Webhook signature verification + replay protection | ✅                                                                                                                         |
 | Two-phase verified webhook ingress                 | ✅ `2026-02-03` typed facts + optional Chat SDK dispatch                                                                   |
-| Generic Linq event registration                    | ⚠️ typed one/many/all registration + unsubscribe; verified callback delivery remains `005B`                                |
+| Generic Linq event registration                    | ⚠️ verified one/many/all delivery + atomic dedupe; non-blocking `waitUntil` scheduling remains `005C`                      |
 | Streaming                                          | ⚠️ buffered — recipients see one final message                                                                             |
 | Sticker reactions                                  | ❌ skipped (no Chat SDK equivalent)                                                                                        |
 | Delete message                                     | ❌ Linq cannot unsend on the recipient's device                                                                            |

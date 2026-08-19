@@ -86,11 +86,7 @@ function assertTypedEventRegistration(adapter: LinqAdapter): void {
       expectTypeOf(event).toEqualTypeOf<
         LinqEventMap["message.delivered"] | LinqEventMap["message.failed"]
       >();
-      if (event.type === "message.delivered") {
-        expectTypeOf(event.data).toEqualTypeOf<LinqAPIV3.MessageEventV2>();
-      } else {
-        expectTypeOf(event.data).toEqualTypeOf<import("../src/index.js").LinqWebhookRawValue>();
-      }
+      expectTypeOf(event.data).toEqualTypeOf<import("../src/index.js").LinqWebhookRawValue>();
     },
   );
   const unsubscribeAll = adapter.onLinqEvent((event) => {
