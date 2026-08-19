@@ -20,7 +20,6 @@ import { resolve } from "node:path";
 import { promisify } from "node:util";
 
 import { LinqAPIV3 } from "@linqapp/sdk";
-import { createLinqAdapter } from "./dist/index.js";
 
 const CURRENT_WEBHOOK_VERSION = "2026-02-03";
 const SEND_CONFIRMATION = "SEND_ONE_REAL_TEXT";
@@ -70,6 +69,11 @@ function apiConfig() {
     apiKey: need("LINQ_API_KEY", "LINQ_API_TOKEN"),
     baseURL: optional("LINQ_BASE_URL", "LINQ_API_BASE_URL"),
   };
+}
+
+async function createAdapter(config) {
+  const { createLinqAdapter } = await import("./dist/index.js");
+  return createLinqAdapter(config);
 }
 
 function lineAndRecipient() {
@@ -255,7 +259,7 @@ async function serve() {
 
   requireConfirmation(RECEIVE_CONFIRMATION);
   const signingSecret = need("LINQ_SIGNING_SECRET", "LINQ_WEBHOOK_SIGNING_SECRET");
-  const adapter = createLinqAdapter({ ...apiConfig(), signingSecret });
+  const adapter = await createAdapter({ ...apiConfig(), signingSecret });
   attachChat(adapter);
   const server = createServer(requestHandler(() => adapter, receiverPort));
 
@@ -361,7 +365,7 @@ async function live() {
       LINQ_WEBHOOK_SIGNING_SECRET: subscription.signing_secret,
       LINQ_WEBHOOK_TARGET_URL: target.toString(),
     });
-    adapter = createLinqAdapter({ ...apiConfig(), signingSecret: subscription.signing_secret });
+    adapter = await createAdapter({ ...apiConfig(), signingSecret: subscription.signing_secret });
     attachChat(adapter);
 
     await sdk.messages.create({
