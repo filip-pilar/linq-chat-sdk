@@ -1,5 +1,14 @@
 export { createLinqAdapter, LinqAdapter } from "./adapter.js";
 export type { LinqAdapterConfig } from "./adapter.js";
+export type {
+  LinqAnyEvent,
+  LinqEventBase,
+  LinqEventHandler,
+  LinqEventMap,
+  LinqFutureEvent,
+  LinqKnownEvent,
+  LinqKnownEventType,
+} from "./events.js";
 export { LINQ_WEBHOOK_VERSION } from "./webhook.js";
 export type {
   LinqAttachmentObservation,

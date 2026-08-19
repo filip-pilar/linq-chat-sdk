@@ -3,7 +3,11 @@ import { describe, expect, expectTypeOf, it, vi } from "vitest";
 
 import { createLinqAdapter, LINQ_WEBHOOK_VERSION, LinqAdapter } from "../src/index.js";
 import type {
+  LinqAnyEvent,
   LinqAdapterConfig,
+  LinqEventMap,
+  LinqFutureEvent,
+  LinqKnownEventType,
   LinqVerifiedUnhandledWebhook,
   LinqVerifiedWebhook,
   LinqWebhookVerificationResult,
@@ -70,6 +74,80 @@ function assertAutoVerificationModeDoesNotCompile(): void {
 
 void assertAutoVerificationModeDoesNotCompile;
 
+function assertTypedEventRegistration(adapter: LinqAdapter): void {
+  const unsubscribeMessage = adapter.onLinqEvent("message.received", (event) => {
+    expectTypeOf(event.type).toEqualTypeOf<"message.received">();
+    expectTypeOf(event.data).toEqualTypeOf<LinqAPIV3.MessageEventV2>();
+    expectTypeOf(event.rawEvent).not.toBeAny();
+  });
+  const unsubscribeLifecycle = adapter.onLinqEvent(
+    ["message.delivered", "message.failed"] as const,
+    (event) => {
+      expectTypeOf(event).toEqualTypeOf<
+        LinqEventMap["message.delivered"] | LinqEventMap["message.failed"]
+      >();
+      if (event.type === "message.delivered") {
+        expectTypeOf(event.data).toEqualTypeOf<LinqAPIV3.MessageEventV2>();
+      } else {
+        expectTypeOf(event.data).toEqualTypeOf<import("../src/index.js").LinqWebhookRawValue>();
+      }
+    },
+  );
+  const unsubscribeAll = adapter.onLinqEvent((event) => {
+    expectTypeOf(event).toEqualTypeOf<LinqAnyEvent>();
+  });
+
+  expectTypeOf(unsubscribeMessage).toEqualTypeOf<() => void>();
+  expectTypeOf(unsubscribeLifecycle).toEqualTypeOf<() => void>();
+  expectTypeOf(unsubscribeAll).toEqualTypeOf<() => void>();
+
+  // @ts-expect-error -- named registrations use the checked-in current event inventory.
+  adapter.onLinqEvent("future.provider_event", () => {});
+}
+
+void assertTypedEventRegistration;
+
+type Assert<T extends true> = T;
+type Equal<Left, Right> =
+  (<T>() => T extends Left ? 1 : 2) extends <T>() => T extends Right ? 1 : 2 ? true : false;
+
+type _KnownEventMapIsComplete = Assert<Equal<keyof LinqEventMap, LinqKnownEventType>>;
+
+const futureEventContract = {
+  type: "future.provider_event",
+  data: { nested: ["lossless", 1, true, null] },
+  envelope: {
+    provider: "linq",
+    apiVersion: "v3",
+    webhookVersion: "2099-01-01",
+    versionStatus: "future",
+    eventType: "future.provider_event",
+    eventId: "future-event-id",
+    createdAt: "2099-01-01T00:00:00.000Z",
+    traceId: "future-trace-id",
+    partnerId: "future-partner-id",
+  },
+  transport: {
+    scheme: "standard",
+    webhookId: "future-webhook-id",
+    timestamp: "4070908800",
+    subscriptionId: null,
+    eventType: null,
+  },
+  rawEvent: {
+    api_version: "v3",
+    webhook_version: "2099-01-01",
+    event_type: "future.provider_event",
+    event_id: "future-event-id",
+    created_at: "2099-01-01T00:00:00.000Z",
+    trace_id: "future-trace-id",
+    partner_id: "future-partner-id",
+    data: { nested: ["lossless", 1, true, null] },
+  },
+} as const satisfies LinqFutureEvent;
+
+expectTypeOf(futureEventContract).toMatchTypeOf<LinqAnyEvent>();
+
 describe("public adapter foundation", () => {
   it("exports the concrete adapter and preserves the factory return type", () => {
     const adapter = createLinqAdapter(config);
@@ -123,6 +201,22 @@ describe("public adapter foundation", () => {
       adapter.verifyWebhook,
     ).returns.resolves.toEqualTypeOf<LinqWebhookVerificationResult>();
     expectTypeOf(adapter.dispatchVerifiedWebhook).parameter(0).toEqualTypeOf<LinqVerifiedWebhook>();
+  });
+
+  it("registers typed Linq event handlers and validates runtime forms", () => {
+    const adapter = createLinqAdapter(config);
+    const unsubscribe = adapter.onLinqEvent("message.sent", vi.fn());
+
+    expect(unsubscribe).toBeTypeOf("function");
+    expect(() => adapter.onLinqEvent([] as never, vi.fn())).toThrow(
+      "onLinqEvent requires at least one event type",
+    );
+    expect(() => adapter.onLinqEvent("future.provider_event" as never, vi.fn())).toThrow(
+      "Unsupported Linq event type",
+    );
+    expect(() => adapter.onLinqEvent("message.sent" as never)).toThrow(
+      "onLinqEvent requires a handler",
+    );
   });
 
   it("uses the exposed client instance for internal adapter operations", async () => {

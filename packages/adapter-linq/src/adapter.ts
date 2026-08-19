@@ -19,6 +19,14 @@ import type {
 
 import { cardHasInteractiveActions, collectCardImageUrls, extractCardElement } from "./cards.js";
 import { translateLinqError } from "./errors.js";
+import {
+  isLinqKnownEventType,
+  LinqEventRegistry,
+  type LinqAnyEvent,
+  type LinqEventHandler,
+  type LinqEventMap,
+  type LinqKnownEventType,
+} from "./events.js";
 import { LinqFormatConverter } from "./format-converter.js";
 import { isRecord } from "./guards.js";
 import { createLinqAttachmentFetcher } from "./inbound-media.js";
@@ -65,6 +73,7 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   private readonly signingSecret: string;
   private readonly webhookVerificationMode: LinqWebhookVerificationScheme;
   private readonly webhookVerificationAuthority = {};
+  private readonly linqEvents = new LinqEventRegistry();
 
   private chat: ChatInstance | null = null;
   private logger: Logger;
@@ -96,6 +105,41 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   async initialize(chat: ChatInstance): Promise<void> {
     this.chat = chat;
     this.logger = chat.getLogger("linq");
+  }
+
+  onLinqEvent<TType extends LinqKnownEventType>(
+    type: TType,
+    handler: LinqEventHandler<LinqEventMap[TType]>,
+  ): () => void;
+  onLinqEvent<TType extends LinqKnownEventType>(
+    types: readonly TType[],
+    handler: LinqEventHandler<LinqEventMap[TType]>,
+  ): () => void;
+  onLinqEvent(handler: LinqEventHandler<LinqAnyEvent>): () => void;
+  onLinqEvent(
+    typeOrHandler: LinqKnownEventType | readonly LinqKnownEventType[] | LinqEventHandler,
+    handler?: LinqEventHandler,
+  ): () => void {
+    if (typeof typeOrHandler === "function") {
+      if (handler !== undefined) {
+        throw new TypeError("onLinqEvent all-event registration accepts one handler");
+      }
+
+      return this.linqEvents.subscribe(null, typeOrHandler);
+    }
+
+    if (typeof handler !== "function") {
+      throw new TypeError("onLinqEvent requires a handler");
+    }
+
+    const types = typeof typeOrHandler === "string" ? [typeOrHandler] : typeOrHandler;
+    for (const type of types) {
+      if (!isLinqKnownEventType(type)) {
+        throw new TypeError(`Unsupported Linq event type: ${type}`);
+      }
+    }
+
+    return this.linqEvents.subscribe(types, handler);
   }
 
   // Thread ID

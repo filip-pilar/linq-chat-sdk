@@ -53,8 +53,17 @@ Point a [Linq webhook subscription](https://docs.linqapp.com) at that route and 
 - `reaction.added`
 - `reaction.removed`
 
-Other event types are currently acknowledged with a `200` and ignored by the one-step path. Planned
-Batch `005` adds typed generic delivery without adding domain workflows.
+Other event types are currently acknowledged with a `200` and ignored by the one-step path. Typed
+one/many/all `adapter.onLinqEvent()` registration and unsubscribe are available, but verified
+callback delivery, deduplication, and scheduling remain Batches `005B`/`005C`.
+
+```ts
+const unsubscribe = adapter.onLinqEvent(["message.delivered", "message.failed"], async (event) => {
+  // Narrowed to the selected event names. Delivery begins in Batch 005B.
+});
+
+unsubscribe();
+```
 
 ## Verified ingress
 
@@ -193,8 +202,8 @@ and independently reviewable batch. Batches `011` and `012` are deferred; Batch 
 inventory reconciliation and cleanup. A change can be code-complete while capability status remains
 `Partial` until its required Linq sandbox and physical-device checks are recorded.
 
-The planned extension surface is intentionally small: `onLinqEvent()` for verified generic events,
-`linqMessage(content, options)` for provider-only rich message options, and
+The extension surface is intentionally small: `onLinqEvent()` registration for verified generic
+events, planned `linqMessage(content, options)` for provider-only rich message options, and
 `adapter.conversation(threadOrId)` for native conversation behavior. Endpoint-shaped account and
 administrative behavior remains on `adapter.client`.
 
@@ -216,6 +225,7 @@ administrative behavior remains on `adapter.client`.
 | Typing indicators                                  | ✅ DMs only (Linq rejects typing in groups)                                                                                |
 | Webhook signature verification + replay protection | ✅                                                                                                                         |
 | Two-phase verified webhook ingress                 | ✅ `2026-02-03` typed facts + optional Chat SDK dispatch                                                                   |
+| Generic Linq event registration                    | ⚠️ typed one/many/all registration + unsubscribe; verified callback delivery remains `005B`                                |
 | Streaming                                          | ⚠️ buffered — recipients see one final message                                                                             |
 | Sticker reactions                                  | ❌ skipped (no Chat SDK equivalent)                                                                                        |
 | Delete message                                     | ❌ Linq cannot unsend on the recipient's device                                                                            |
