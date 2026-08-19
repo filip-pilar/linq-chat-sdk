@@ -6,7 +6,7 @@ description: Integrates the Linq Partner API for webhook intake, subscription se
 # Integrating Linq
 
 Use this workflow when changing Linq integration or `packages/adapter-linq`. Provider facts below
-were reverified on **2026-08-13**; recheck current sources before relying on versioned schemas,
+were reverified on **2026-08-19**; recheck current sources before relying on versioned schemas,
 operations, event names, limits, or delivery behavior.
 
 ## Evidence precedence
@@ -77,9 +77,10 @@ The signed content is:
 {webhook-id}.{webhook-timestamp}.{raw_body}
 ```
 
-The official SDK's `webhooks.unwrap()` verifies this scheme. Standard secrets use the `whsec_`
-format, and signatures use `v1,{base64}` values. Reject timestamps outside the five-minute replay
-window and use constant-time signature comparison when implementing verification manually.
+The current adapter verifies this scheme directly with `standardwebhooks@1.0.0`. Standard secrets
+use the `whsec_` format, and signatures use `v1,{base64}` values. The current Linq documentation
+still describes SDK `webhooks.unwrap()`, but `@linqapp/sdk@0.41.1` removes that method and its wrapper
+event types at runtime and in declarations. Treat that as a provider documentation/SDK discrepancy.
 
 ### Legacy compatibility
 
@@ -91,9 +92,10 @@ Linq still sends deprecated `X-Webhook-*` headers for existing integrations:
 - `X-Webhook-Signature`
 
 Their legacy signature is hex HMAC-SHA256 over `{timestamp}.{raw_body}`. Treat this only as
-compatibility behavior. The current adapter accepts legacy-only deliveries and deliberately verifies
-complete dual-header deliveries with the legacy scheme for compatibility with existing subscription
-secrets. A partial Standard header set must not downgrade to legacy verification.
+compatibility behavior. The adapter accepts it only with explicit
+`webhookVerificationMode: "legacy"` for a known existing subscription. Standard is the default;
+legacy-only requests fail there. A partial Standard header set always fails. Complete dual headers
+use the configured mode, and failure of that authoritative scheme never falls back to the other.
 
 Both paths preserve raw bytes and enforce a five-minute timestamp window. Follow the adapter tests
 when changing compatibility behavior; do not silently remove or broaden it.
@@ -116,9 +118,10 @@ identifies the sender, `chat` contains canonical chat facts including `id`, `is_
 `owner_handle`, and message fields such as `id`, `parts`, `sent_at`, `delivered_at`, and `read_at`
 live directly on `data`.
 
-The installed `@linqapp/sdk@0.32.1` `UnwrapWebhookEvent` union currently has 18 variants, while the
-OpenAPI enum reverified on 2026-08-13 has 44 event names. Recount from current sources when this
-matters. Never treat `UnwrapWebhookEvent` as exhaustive or discard a verified unknown/future event;
-preserve the complete authenticated envelope.
+The canonical OpenAPI currently has 68 callable operations, 56 webhook example operation IDs, and
+45 event names. `@linqapp/sdk@0.41.1` exposes the 45-name subscription enum and useful lower-level
+resource types, but no exhaustive webhook envelope union or unwrap runtime. The adapter therefore
+owns a stable envelope, a checked-in OpenAPI-derived event-name inventory, curated normalized
+message/reaction observations, and a lossless raw form for unknown/future events.
 
 Read `reference/webhooks.md` for the repository-specific ingress and setup checklist.

@@ -5,8 +5,8 @@ Create your API and deploy it anywhere with this Nitro starter.
 ## Getting started
 
 ```bash
-npm install
-npm run dev
+pnpm install
+pnpm --filter nitro-starter dev
 ```
 
 ## WhatsApp webhook
@@ -35,7 +35,15 @@ WHATSAPP_API_URL=...      # optional, overrides Meta Graph API URL
 ## Deploying
 
 ```bash
-npm run build
+pnpm --filter nitro-starter build
 ```
 
 Then checkout the [Nitro documentation](https://v3.nitro.build/deploy) to learn more about the different deployment presets.
+
+## Linq webhook and read receipts
+
+New Linq subscriptions use Standard Webhooks verification by default. The example application calls
+the standard Chat SDK `thread.markAsRead(message)` API; Linq implements this as a chat-wide read
+acknowledgement. Legacy Linq subscriptions require explicit adapter
+`webhookVerificationMode: "legacy"` while they are migrated to a Standard `whsec_` subscription
+secret. The application never falls back from failed Standard verification to legacy verification.

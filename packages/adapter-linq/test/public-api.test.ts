@@ -36,6 +36,7 @@ function assertVerifiedWebhookCannotBeConstructed(adapter: LinqAdapter): void {
       provider: "linq",
       apiVersion: "v3",
       webhookVersion: LINQ_WEBHOOK_VERSION,
+      versionStatus: "current",
       eventType: "message.delivered",
       eventId: "event-123",
       createdAt: "2026-08-02T12:00:00.000Z",
@@ -58,6 +59,17 @@ function assertVerifiedWebhookCannotBeConstructed(adapter: LinqAdapter): void {
 
 void assertVerifiedWebhookCannotBeConstructed;
 
+function assertAutoVerificationModeDoesNotCompile(): void {
+  createLinqAdapter({
+    apiKey: API_KEY,
+    signingSecret: SIGNING_SECRET,
+    // @ts-expect-error -- ambiguous automatic scheme inference is intentionally unsupported.
+    webhookVerificationMode: "auto",
+  });
+}
+
+void assertAutoVerificationModeDoesNotCompile;
+
 describe("public adapter foundation", () => {
   it("exports the concrete adapter and preserves the factory return type", () => {
     const adapter = createLinqAdapter(config);
@@ -65,6 +77,16 @@ describe("public adapter foundation", () => {
     expect(adapter).toBeInstanceOf(LinqAdapter);
     expectTypeOf(adapter).toEqualTypeOf<LinqAdapter>();
     expectTypeOf(createLinqAdapter).returns.toEqualTypeOf<LinqAdapter>();
+  });
+
+  it("rejects unsupported verification modes at runtime", () => {
+    expect(() =>
+      createLinqAdapter({
+        apiKey: API_KEY,
+        signingSecret: SIGNING_SECRET,
+        webhookVerificationMode: "auto" as never,
+      }),
+    ).toThrow('webhookVerificationMode must be "standard" or "legacy"');
   });
 
   it("exposes the configured LinqAPIV3 client", () => {
@@ -76,7 +98,21 @@ describe("public adapter foundation", () => {
     expectTypeOf(client).toEqualTypeOf<LinqAPIV3>();
     expect(client.apiKey).toBe(API_KEY);
     expect(client.baseURL).toBe(BASE_URL);
-    expect(client.webhookSecret).toBe(SIGNING_SECRET);
+    expect(client.webhookSecret).toBeNull();
+    expectTypeOf(client.blockedHandles.list).toBeFunction();
+    expectTypeOf(client.chats.background.set).toBeFunction();
+    expectTypeOf(client.chats.polls.create).toBeFunction();
+    expectTypeOf(client.messages.poll.retrieve).toBeFunction();
+    expectTypeOf(client.phoneNumbers.startReputationAudit).toBeFunction();
+    expectTypeOf(client.experiences.list).toBeFunction();
+  });
+
+  it("implements Chat SDK standard reply/read without enabling local history", () => {
+    const adapter = createLinqAdapter(config);
+
+    expectTypeOf(adapter.reply).toBeFunction();
+    expectTypeOf(adapter.markAsRead).toBeFunction();
+    expect(adapter).not.toHaveProperty("persistMessageHistory");
   });
 
   it("exports the two-phase verified webhook contract", () => {

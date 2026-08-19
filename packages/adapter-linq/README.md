@@ -105,18 +105,19 @@ downstream task with it; task lifetime and completion then follow the host's
 `waitUntil` behavior. Without `waitUntil`, handler execution still follows the
 ordinary `Chat.processMessage()` lifecycle and error handling.
 
-The normalized contract targets Linq webhook version `2026-02-03`. Unsupported
-versions return a typed `unsupported_version` failure from `verifyWebhook()` and
-are never represented as current-version facts. For compatibility, the
-ordinary one-step path continues to acknowledge and structurally dispatch older
-signed payloads it previously accepted.
+The normalized contract targets Linq webhook version `2026-02-03`. Authenticated older, future, and
+unknown non-empty versions are preserved losslessly as `kind: "unsupported_version"` with a
+`versionStatus`; future and unknown versions are acknowledged without current-schema dispatch.
+Older signed payloads retain the narrow structural compatibility dispatch the adapter previously
+accepted. Missing or empty version fields remain invalid payloads.
 
 For `message.received`, the result exposes the event/partner/trace envelope,
 transport verification scheme, provider message and chat IDs, direct/group
 state, receiving and remote endpoints, owner/sender handles, service,
 timestamps, parts, attachments, and reply context. `rawEvent` is a detached,
 immutable snapshot of the complete authenticated envelope, so public
-observation cannot alter later dispatch. Existing Chat SDK `Message.raw`
+observation cannot alter later dispatch. `rawBody` preserves the decoded authenticated JSON text and
+`rawBodyBase64` preserves the exact authenticated bytes for durable ingress. Existing Chat SDK `Message.raw`
 remains the mutable Linq message data object, preserving current consumer
 behavior.
 
@@ -126,11 +127,23 @@ persistence, deduplication, routing, authorization, and execution policy.
 
 ## Configuration
 
-| Option          | Required | Description                                                                                                                                                                                                                                                                                            |
-| --------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `apiKey`        | yes      | Linq API key used for all outbound API calls.                                                                                                                                                                                                                                                          |
-| `signingSecret` | yes      | Webhook signing secret. Standard Webhooks signatures are verified by the Linq SDK; legacy `X-Webhook-*` signatures remain supported for compatibility. When Linq sends both complete header sets, the adapter verifies the legacy set so existing subscription secrets continue to work as documented. |
-| `baseURL`       | no       | Override the Linq API base URL (e.g. sandbox).                                                                                                                                                                                                                                                         |
+| Option                    | Required | Description                                                                                      |
+| ------------------------- | -------- | ------------------------------------------------------------------------------------------------ |
+| `apiKey`                  | yes      | Linq API key used for outbound/native API calls.                                                 |
+| `signingSecret`           | yes      | Subscription signing secret used only by the adapter-owned inbound verifier.                     |
+| `webhookVerificationMode` | no       | `"standard"` (default) or deprecated explicit `"legacy"` mode for a known existing subscription. |
+| `baseURL`                 | no       | Override the Linq API base URL (for example, sandbox).                                           |
+
+Standard mode requires all three Standard headers. Legacy-only requests fail. Legacy mode requires
+the legacy signature headers. Any partial Standard header set fails in both modes. When both sets
+are complete, the configured mode is authoritative; a failed authoritative signature never falls
+back to the other scheme.
+
+To migrate an existing legacy subscription, create or rotate to a Standard Webhooks subscription,
+store its one-time `whsec_` secret, switch the adapter to the default Standard mode, and verify real
+provider deliveries before deleting the old subscription. Legacy support can be removed after all
+known deployments have migrated and Linq documents or confirms that no active subscription still
+requires the deprecated headers.
 
 The adapter also exposes its configured official Linq client without wrapping or
 renaming endpoint operations:
@@ -162,10 +175,11 @@ feature or batch—composed from `adapter.client.paymentRequests`, general rich-
 delivery, and generic typed `onLinqEvent` passthrough. Agentcard is out of scope.
 Experience discovery remains only in the native-client boundary audit.
 
-The OpenAPI evidence reverified on 2026-08-13 contains 66 non-webhook operations and 44 event names;
-the installed `@linqapp/sdk@0.32.1` is behind parts of that schema. Batch `013` retains full
-mechanical inventory reconciliation. Batch `002` already exposes the official client through
-read-only `adapter.client` without duplicating its operations with bespoke wrappers.
+The canonical OpenAPI evidence reverified on 2026-08-19 contains 68 callable operations, 56 webhook
+example operation IDs, and 45 event names (124 operation IDs total). The checked-in inventory and
+`pnpm openapi:check` detect drift. The installed `@linqapp/sdk@0.41.1` covers native operations but
+its empty generated `Webhooks` resource contradicts documentation that still describes
+`webhooks.unwrap()`; inbound authentication and envelopes therefore remain adapter-owned.
 
 Proactive sending is intentionally not adapter behavior: `chat.openDM()` remains unsupported for
 Linq. Reduced Batch `004` documents and validates the native-client create/send operation followed
@@ -180,7 +194,7 @@ inventory reconciliation and cleanup. A change can be code-complete while capabi
 `Partial` until its required Linq sandbox and physical-device checks are recorded.
 
 The planned extension surface is intentionally small: `onLinqEvent()` for verified generic events,
-`linqMessage(content, options)` for shared rich message options, and
+`linqMessage(content, options)` for provider-only rich message options, and
 `adapter.conversation(threadOrId)` for native conversation behavior. Endpoint-shaped account and
 administrative behavior remains on `adapter.client`.
 
@@ -195,6 +209,8 @@ administrative behavior remains on `adapter.client`.
 | Outbound media / file sending                      | ✅ to existing chats; `attachments` and `files` become media parts                                                         |
 | Inbound reactions (tapbacks + custom emoji)        | ✅ dispatch to `onReaction()`                                                                                              |
 | Outbound reactions (add/remove)                    | ✅                                                                                                                         |
+| Standard replies                                   | ✅ `thread.reply(messageOrId, content)`; Linq part-index targeting remains planned                                         |
+| Mark as read                                       | ✅ `thread.markAsRead(messageOrId)`; Linq marks the whole chat                                                             |
 | Edit message                                       | ✅ text, first part only                                                                                                   |
 | Fetch message / history / thread                   | ⚠️ basic cursor history works; forward direction and rich normalization remain partial                                     |
 | Typing indicators                                  | ✅ DMs only (Linq rejects typing in groups)                                                                                |

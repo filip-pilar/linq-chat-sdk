@@ -4,11 +4,16 @@ import type { Attachment, LinkPreview } from "chat";
 
 import { isRecord } from "./guards.js";
 import { createLinqAttachmentFetcher } from "./inbound-media.js";
+import type {
+  LinqMessageReceivedWebhookEvent,
+  LinqReactionWebhookEvent,
+  LinqWebhookEvent,
+} from "./webhook.js";
 
 type LinqMessageSendResponse = Awaited<ReturnType<LinqAPIV3["chats"]["messages"]["send"]>>;
 type LinqRetrievedMessage = LinqAPIV3.Message;
 export type LinqRawMessage =
-  | LinqAPIV3.MessageReceivedWebhookEvent["data"]
+  | LinqAPIV3.MessageEventV2
   | LinqMessageSendResponse
   | LinqRetrievedMessage;
 type LinqMessageEvent = LinqAPIV3.MessageEventV2;
@@ -72,16 +77,12 @@ export function parseLinqMessage(
 }
 
 export function isMessageReceivedWebhookEvent(
-  event: LinqAPIV3.UnwrapWebhookEvent,
-): event is LinqAPIV3.Webhooks.MessageReceivedWebhookEvent {
+  event: LinqWebhookEvent,
+): event is LinqMessageReceivedWebhookEvent {
   return event.event_type === "message.received";
 }
 
-export function isReactionWebhookEvent(
-  event: LinqAPIV3.UnwrapWebhookEvent,
-): event is
-  | LinqAPIV3.Webhooks.ReactionAddedWebhookEvent
-  | LinqAPIV3.Webhooks.ReactionRemovedWebhookEvent {
+export function isReactionWebhookEvent(event: LinqWebhookEvent): event is LinqReactionWebhookEvent {
   return event.event_type === "reaction.added" || event.event_type === "reaction.removed";
 }
 

@@ -1,9 +1,11 @@
-import type { LinqAPIV3 } from "@linqapp/sdk";
+import { Buffer } from "node:buffer";
+import { Webhook, WebhookVerificationError } from "standardwebhooks";
 
 import {
   failure,
   type LinqWebhookTransportObservation,
   type LinqWebhookVerificationFailure,
+  type LinqWebhookVerificationScheme,
 } from "./webhook.js";
 
 const STANDARD_ID_HEADER = "webhook-id";
@@ -19,14 +21,16 @@ export type LinqWebhookAuthenticationResult =
   | {
       readonly ok: true;
       readonly event: unknown;
+      readonly rawBody: string;
+      readonly rawBodyBase64: string;
       readonly transport: LinqWebhookTransportObservation;
     }
   | LinqWebhookVerificationFailure;
 
 export async function authenticateLinqWebhookRequest(
   request: Request,
-  webhooks: Pick<LinqAPIV3.Webhooks, "unwrap">,
   signingSecret: string,
+  scheme: LinqWebhookVerificationScheme,
 ): Promise<LinqWebhookAuthenticationResult> {
   const standardHeaders = [
     STANDARD_ID_HEADER,
@@ -35,51 +39,56 @@ export async function authenticateLinqWebhookRequest(
   ];
   const hasAnyStandardHeader = standardHeaders.some((header) => request.headers.has(header));
   const hasCompleteStandardHeaders = standardHeaders.every((header) => request.headers.has(header));
-  const hasCompleteLegacyHeaders = [LEGACY_SIGNATURE_HEADER, LEGACY_TIMESTAMP_HEADER].every(
-    (header) => request.headers.has(header),
-  );
-
-  // Linq sends both schemes on current deliveries and explicitly permits existing
-  // integrations to keep verifying the legacy headers. Prefer a complete legacy
-  // set only when the Standard set is also complete; this preserves compatibility
-  // with older subscription secrets without allowing partial Standard headers to
-  // downgrade an otherwise legacy request.
-  if (hasCompleteStandardHeaders && hasCompleteLegacyHeaders) {
-    return verifyLegacyWebhook(request, signingSecret);
+  if (hasAnyStandardHeader && !hasCompleteStandardHeaders) {
+    return failure("missing_signature_headers", 401, "Incomplete Standard Webhook headers");
   }
 
-  if (hasAnyStandardHeader) {
-    return verifyStandardWebhook(request, webhooks, signingSecret);
+  if (scheme === "standard" && !hasCompleteStandardHeaders) {
+    return failure("missing_signature_headers", 401, "Missing Standard Webhook headers");
   }
 
-  return verifyLegacyWebhook(request, signingSecret);
+  return scheme === "standard"
+    ? verifyStandardWebhook(request, signingSecret)
+    : verifyLegacyWebhook(request, signingSecret);
 }
 
 async function verifyStandardWebhook(
   request: Request,
-  webhooks: Pick<LinqAPIV3.Webhooks, "unwrap">,
   signingSecret: string,
 ): Promise<LinqWebhookAuthenticationResult> {
   if (!signingSecret) {
     return missingSigningSecret();
   }
 
-  const rawBody = await request.text();
+  const rawBytes = new Uint8Array(await request.arrayBuffer());
+  const rawBody = new TextDecoder().decode(rawBytes);
+  const timestamp = request.headers.get(STANDARD_TIMESTAMP_HEADER)?.trim() || "";
+
+  if (!isFreshTimestamp(timestamp)) {
+    return failure("stale_timestamp", 401, "Linq webhook timestamp is too old or invalid");
+  }
 
   try {
-    const event: unknown = webhooks.unwrap(rawBody, {
-      headers: Object.fromEntries(request.headers),
-      key: signingSecret,
-    });
+    const verifier = new Webhook(signingSecret);
+    const event: unknown = verifier.verify(
+      Buffer.from(rawBytes),
+      Object.fromEntries(request.headers),
+    );
 
     return {
       ok: true,
       event,
+      rawBody,
+      rawBodyBase64: Buffer.from(rawBytes).toString("base64"),
       transport: transportObservation(request.headers, "standard"),
     };
   } catch (error) {
     if (error instanceof SyntaxError) {
       return invalidJson();
+    }
+
+    if (!(error instanceof WebhookVerificationError)) {
+      return failure("invalid_signing_secret", 503, "Invalid Linq webhook signing secret");
     }
 
     return invalidSignature();
@@ -105,18 +114,21 @@ async function verifyLegacyWebhook(
     return missingSigningSecret();
   }
 
-  const rawBody = new Uint8Array(await request.arrayBuffer());
+  const rawBytes = new Uint8Array(await request.arrayBuffer());
+  const rawBody = new TextDecoder().decode(rawBytes);
 
-  if (!(await verifyLinqSignature(timestamp, signature, signingSecret, rawBody))) {
+  if (!(await verifyLinqSignature(timestamp, signature, signingSecret, rawBytes))) {
     return invalidSignature();
   }
 
   try {
-    const event: unknown = JSON.parse(new TextDecoder().decode(rawBody));
+    const event: unknown = JSON.parse(rawBody);
 
     return {
       ok: true,
       event,
+      rawBody,
+      rawBodyBase64: Buffer.from(rawBytes).toString("base64"),
       transport: transportObservation(request.headers, "legacy"),
     };
   } catch {
@@ -159,6 +171,9 @@ function invalidJson(): LinqWebhookVerificationFailure {
 }
 
 function isFreshTimestamp(timestamp: string): boolean {
+  if (!/^\d+$/.test(timestamp)) {
+    return false;
+  }
   const sentAt = Number(timestamp);
 
   if (!Number.isFinite(sentAt)) {

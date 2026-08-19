@@ -1,6 +1,6 @@
 # Linq webhook checklist
 
-Provider facts here were reverified on **2026-08-13**. Start with the current
+Provider facts here were reverified on **2026-08-19**. Start with the current
 [`docs.linqapp.com` index](https://docs.linqapp.com/llms.txt),
 [webhook guide](https://docs.linqapp.com/guides/webhooks/), and
 [canonical OpenAPI](https://cdn.linqapp.com/openapi/linq-api-v3.yaml). Then inspect the resolved
@@ -17,17 +17,19 @@ Always preserve the raw request body until authentication succeeds.
 - Verify `{webhook-id}.{webhook-timestamp}.{raw_body}` using the subscription secret.
 - Standard secrets use `whsec_` plus base64 key material; signatures contain `v1,{base64}` values.
 - Reject timestamps outside five minutes and compare signatures in constant time.
-- Prefer the official SDK's `webhooks.unwrap()` unless adapter compatibility requirements dictate
-  otherwise.
+- Use the direct `standardwebhooks` reference implementation. The current SDK's `Webhooks` class is
+  empty even though provider documentation still describes `webhooks.unwrap()`.
 
 ### Legacy compatibility
 
 - Linq still sends deprecated `X-Webhook-Event`, `X-Webhook-Subscription-ID`,
   `X-Webhook-Timestamp`, and `X-Webhook-Signature` headers.
 - The legacy signature is hex HMAC-SHA256 over `{timestamp}.{raw_body}`.
-- The adapter accepts legacy-only requests. When both complete header sets are present, it currently
-  verifies the legacy signature to preserve existing subscription-secret compatibility.
-- Any partial Standard header set takes the Standard path and must not downgrade to legacy.
+- Legacy requires explicit `webhookVerificationMode: "legacy"` for a known existing subscription.
+- Standard is the default; legacy-only requests fail in Standard mode.
+- Any partial Standard header set fails in both modes.
+- Complete dual headers use the configured authoritative mode. Never fall back after verification
+  fails under that mode.
 
 Both behaviors are contract-tested in `packages/adapter-linq/test/verified-webhook.test.ts` and
 `packages/adapter-linq/test/adapter.test.ts`. Do not infer a provider requirement from the adapter's
@@ -54,13 +56,16 @@ existing-chat sends, and two ingress forms:
   persist the authenticated observation before calling
   `adapter.dispatchVerifiedWebhook(webhook, options?)` for standard Chat SDK dispatch.
 
-The typed path targets `2026-02-03` and preserves an immutable snapshot of the complete verified raw
-envelope. The ordinary path retains compatibility dispatch for older signed payloads already
-accepted by the adapter. Consult `packages/adapter-linq/FEATURE_PARITY.md` before describing generic
+The typed path targets `2026-02-03` and preserves immutable parsed JSON, decoded request text, and
+exact authenticated bytes as base64. It returns lossless `unsupported_version` observations for older, future, and unknown
+non-empty versions. The ordinary path retains narrow compatibility dispatch for older signed
+payloads and acknowledges future/unknown versions without current-schema dispatch. Consult
+`packages/adapter-linq/FEATURE_PARITY.md` before describing generic
 event callbacks, deduplication, or other planned behavior as implemented.
 
-The installed `@linqapp/sdk@0.32.1` webhook union lags the current OpenAPI event enum. Do not use it
-as a closed-world event list; verified unknown/future events must remain lossless.
+The checked-in inventory records 68 callable operations, 56 webhook examples, and 45 event names.
+Run `pnpm openapi:check` to detect canonical schema drift. `@linqapp/sdk@0.41.1` has no unwrap union;
+do not use generated SDK webhook wrappers as a closed-world boundary.
 
 ## Repository setup and storage
 

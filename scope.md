@@ -129,14 +129,23 @@ The public extensions are deliberately cohesive:
 - Batch `005`: typed one/many/all `onLinqEvent()` registration with unsubscribe, lossless future
   events, verified-boundary provider/partner/event dedupe, standard message/reaction coexistence,
   fast acknowledgement, and `WebhookOptions.waitUntil`.
+- Batch `006`: lifecycle normalization immediately after `005`, split into `006A` for
+  sent/delivered/read/failed contracts and `006B` for edited/reconciled state and validation.
 - Batches `007`/`010`: one `LinqMessageOptions` model created by
-  `linqMessage(content, options)` for rich links, replies/part indexes, service, effects,
-  animations, and manual decorations. The ordinary `AdapterPostableMessage` transport must be
-  contract-tested before it is frozen.
+  `linqMessage(content, options)` for rich links, service, effects, animations, and manual
+  decorations. Ordinary replies already use Chat SDK `Thread.reply()`; only part-index targeting
+  remains a Linq-specific `007B` gap. The ordinary transport must be contract-tested before it is
+  frozen.
 - Batches `008`/`009`: `adapter.conversation(threadOrId)` with common operations directly on the
   facade, existing-group operations under `.group`, and location under `.location`.
 
-Explicitly deferred: Batch `011`, Batch `012`, and Batch `013`. Forward history remains partial if
+Batch `000` is complete: Chat SDK `4.38.1` standard reply/read contracts, Linq SDK `0.41.1`, direct
+Standard Webhooks verification, explicit deprecated legacy mode, OpenAPI drift checking, CI, and
+full test-fixture typechecking are reconciled. Mark-read is standard `Thread.markAsRead()` with
+Linq's chat-wide semantics; it is not a future conversation-facade method.
+
+Explicitly deferred: Batch `011`, Batch `012`, and Batch `013`, plus lazy credentials, trusted
+webhook forwarding, Changesets, and npm/OIDC publishing. Forward history remains partial if
 the provider cannot support or safely emulate it. Outbound sticker reactions wait for unambiguous
 official SDK input. Exact asynchronous group-update correlation must not be promised without a
 provider correlation key.

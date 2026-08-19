@@ -124,7 +124,7 @@ describe("renderLinqCardText", () => {
       ],
     });
 
-    expect(renderLinqCardText(card)).toBe("Inside a section\nhttps://example.com");
+    expect(renderLinqCardText(card as CardElement)).toBe("Inside a section\nhttps://example.com");
   });
 });
 

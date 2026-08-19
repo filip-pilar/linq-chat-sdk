@@ -14,26 +14,23 @@ describe("LinqAdapter verified webhook ingress", () => {
     const request = createStandardRequest(fixture);
     const text = vi.spyOn(request, "text");
     const arrayBuffer = vi.spyOn(request, "arrayBuffer");
-    const unwrap = vi.spyOn(adapter.client.webhooks, "unwrap");
 
     const result = await adapter.verifyWebhook(request);
 
     expect(result.ok).toBe(true);
-    expect(text).toHaveBeenCalledTimes(1);
-    expect(arrayBuffer).not.toHaveBeenCalled();
-    expect(unwrap).toHaveBeenCalledTimes(1);
+    expect(text).not.toHaveBeenCalled();
+    expect(arrayBuffer).toHaveBeenCalledTimes(1);
     expect(request.bodyUsed).toBe(true);
   });
 
   it("reads and verifies a legacy webhook exactly once", async () => {
-    const adapter = createTestAdapter();
+    const adapter = createLegacyTestAdapter();
     const request = createLegacyRequest(fixture, {
       "x-webhook-event": "message.received",
       "x-webhook-subscription-id": "subscription-123",
     });
     const text = vi.spyOn(request, "text");
     const arrayBuffer = vi.spyOn(request, "arrayBuffer");
-    const unwrap = vi.spyOn(adapter.client.webhooks, "unwrap");
     const sign = vi.spyOn(globalThis.crypto.subtle, "sign");
 
     const result = await adapter.verifyWebhook(request);
@@ -41,7 +38,6 @@ describe("LinqAdapter verified webhook ingress", () => {
     expect(result.ok).toBe(true);
     expect(text).not.toHaveBeenCalled();
     expect(arrayBuffer).toHaveBeenCalledTimes(1);
-    expect(unwrap).not.toHaveBeenCalled();
     expect(sign).toHaveBeenCalledTimes(1);
     if (result.ok) {
       expect(result.webhook.transport).toEqual({
@@ -55,7 +51,7 @@ describe("LinqAdapter verified webhook ingress", () => {
   });
 
   it("accepts complete dual headers through the valid legacy signature", async () => {
-    const adapter = createTestAdapter();
+    const adapter = createLegacyTestAdapter();
     const dual = createLegacyRequest(fixture, {
       "webhook-id": "dual-header-event",
       "webhook-signature": "v1,invalid-for-legacy-subscription-secret",
@@ -76,20 +72,93 @@ describe("LinqAdapter verified webhook ingress", () => {
     }
   });
 
-  it("resists downgrade from partial Standard headers to a valid legacy signature", async () => {
-    const adapter = createTestAdapter();
-    const legacy = createLegacyRequest(fixture, { "webhook-id": "partial-standard" });
-
-    const result = await adapter.verifyWebhook(legacy);
-
-    expect(result).toEqual({
-      ok: false,
-      error: {
-        code: "invalid_signature",
-        status: 401,
-        message: "Invalid Linq webhook signature",
-      },
+  it("uses Standard as the authoritative scheme for complete dual headers by default", async () => {
+    const body = JSON.stringify(fixture);
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const webhookId = "dual-standard-authority";
+    const standardSignature = `v1,${createHmac("sha256", SIGNING_KEY)
+      .update(`${webhookId}.${timestamp}.${body}`)
+      .digest("base64")}`;
+    const request = createLegacyRequest(fixture, {
+      "webhook-id": webhookId,
+      "webhook-signature": standardSignature,
+      "webhook-timestamp": timestamp,
+      "x-webhook-signature": "invalid-legacy-signature",
     });
+
+    const result = await createTestAdapter().verifyWebhook(request);
+
+    expect(result).toMatchObject({
+      ok: true,
+      webhook: { transport: { scheme: "standard", webhookId } },
+    });
+  });
+
+  it("does not use valid Standard headers when explicit legacy authority fails", async () => {
+    const body = JSON.stringify(fixture);
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const webhookId = "dual-legacy-no-fallback";
+    const standardSignature = `v1,${createHmac("sha256", SIGNING_KEY)
+      .update(`${webhookId}.${timestamp}.${body}`)
+      .digest("base64")}`;
+    const request = createLegacyRequest(fixture, {
+      "webhook-id": webhookId,
+      "webhook-signature": standardSignature,
+      "webhook-timestamp": timestamp,
+      "x-webhook-signature": "invalid-legacy-signature",
+    });
+
+    await expect(createLegacyTestAdapter().verifyWebhook(request)).resolves.toMatchObject({
+      ok: false,
+      error: { code: "invalid_signature", status: 401 },
+    });
+  });
+
+  it("never falls back to a valid legacy signature when authoritative Standard verification fails", async () => {
+    const request = createLegacyRequest(fixture, {
+      "webhook-id": "dual-no-fallback",
+      "webhook-signature": "v1,invalid",
+      "webhook-timestamp": Math.floor(Date.now() / 1000).toString(),
+    });
+
+    await expect(createTestAdapter().verifyWebhook(request)).resolves.toMatchObject({
+      ok: false,
+      error: { code: "invalid_signature", status: 401 },
+    });
+  });
+
+  it("rejects legacy-only deliveries unless legacy mode is explicit", async () => {
+    await expect(
+      createTestAdapter().verifyWebhook(createLegacyRequest(fixture)),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "missing_signature_headers", status: 401 },
+    });
+  });
+
+  it("rejects Standard-only deliveries in explicit legacy mode", async () => {
+    await expect(
+      createLegacyTestAdapter().verifyWebhook(createStandardRequest(fixture)),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "missing_signature_headers", status: 401 },
+    });
+  });
+
+  it("resists downgrade from partial Standard headers to a valid legacy signature", async () => {
+    for (const adapter of [createTestAdapter(), createLegacyTestAdapter()]) {
+      const legacy = createLegacyRequest(fixture, { "webhook-id": "partial-standard" });
+      const result = await adapter.verifyWebhook(legacy);
+
+      expect(result).toEqual({
+        ok: false,
+        error: {
+          code: "missing_signature_headers",
+          status: 401,
+          message: "Incomplete Standard Webhook headers",
+        },
+      });
+    }
   });
 
   it("returns typed failures for authentication, JSON, payload, and version errors", async () => {
@@ -100,7 +169,7 @@ describe("LinqAdapter verified webhook ingress", () => {
         "missing_signature_headers",
         401,
       ],
-      [createLegacyRequest(fixture, { "x-webhook-timestamp": "0" }), "stale_timestamp", 401],
+      [createStandardRequest(fixture, { "webhook-timestamp": "0" }), "stale_timestamp", 401],
       [createStandardRequest(fixture, { signature: "v1,invalid" }), "invalid_signature", 401],
       [createSignedBody("{"), "invalid_json", 400],
       [
@@ -109,11 +178,6 @@ describe("LinqAdapter verified webhook ingress", () => {
         400,
       ],
       [createStandardRequest({ ...fixture, api_version: "v2" }), "invalid_payload", 400],
-      [
-        createStandardRequest({ ...fixture, webhook_version: "2025-01-01" }),
-        "unsupported_version",
-        400,
-      ],
     ];
 
     for (const [request, code, status] of cases) {
@@ -131,6 +195,111 @@ describe("LinqAdapter verified webhook ingress", () => {
     ).resolves.toMatchObject({
       ok: false,
       error: { code: "missing_signing_secret", status: 503 },
+    });
+  });
+
+  it("enforces timestamp boundaries for Standard and explicit legacy verification", async () => {
+    const now = Math.floor(Date.now() / 1000);
+
+    await expect(
+      createTestAdapter().verifyWebhook(
+        createStandardRequest(fixture, { "webhook-timestamp": String(now - 300) }),
+      ),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(
+      createTestAdapter().verifyWebhook(
+        createStandardRequest(fixture, { "webhook-timestamp": String(now - 301) }),
+      ),
+    ).resolves.toMatchObject({ ok: false, error: { code: "stale_timestamp" } });
+    await expect(
+      createLegacyTestAdapter().verifyWebhook(
+        createLegacyRequest(fixture, { "x-webhook-timestamp": String(now + 300) }),
+      ),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(
+      createLegacyTestAdapter().verifyWebhook(
+        createLegacyRequest(fixture, { "x-webhook-timestamp": String(now + 301) }),
+      ),
+    ).resolves.toMatchObject({ ok: false, error: { code: "stale_timestamp" } });
+  });
+
+  it("rejects tampering, wrong secrets, and substituted Standard webhook IDs", async () => {
+    const signed = createStandardRequest(fixture);
+    const tampered = new Request(signed.url, {
+      method: "POST",
+      headers: signed.headers,
+      body: JSON.stringify({ ...fixture, event_id: "tampered" }),
+    });
+    const substitutedHeaders = new Headers(createStandardRequest(fixture).headers);
+    substitutedHeaders.set("webhook-id", "substituted-id");
+    const substituted = new Request("https://example.com/webhooks/linq", {
+      method: "POST",
+      headers: substitutedHeaders,
+      body: JSON.stringify(fixture),
+    });
+    const wrongSecret = createLinqAdapter({
+      apiKey: "test_linq_api_key",
+      signingSecret: `whsec_${Buffer.from("wrong-key").toString("base64")}`,
+    });
+
+    for (const [adapter, request] of [
+      [createTestAdapter(), tampered],
+      [createTestAdapter(), substituted],
+      [wrongSecret, createStandardRequest(fixture)],
+    ] as const) {
+      await expect(adapter.verifyWebhook(request)).resolves.toMatchObject({
+        ok: false,
+        error: { code: "invalid_signature", status: 401 },
+      });
+    }
+  });
+
+  it("rejects tampering and wrong secrets in explicit legacy mode", async () => {
+    const signed = createLegacyRequest(fixture);
+    const tampered = new Request(signed.url, {
+      method: "POST",
+      headers: signed.headers,
+      body: JSON.stringify({ ...fixture, event_id: "tampered-legacy" }),
+    });
+    const wrongSecret = createLinqAdapter({
+      apiKey: "test_linq_api_key",
+      signingSecret: "wrong-legacy-secret",
+      webhookVerificationMode: "legacy",
+    });
+
+    for (const [adapter, request] of [
+      [createLegacyTestAdapter(), tampered],
+      [wrongSecret, createLegacyRequest(fixture)],
+    ] as const) {
+      await expect(adapter.verifyWebhook(request)).resolves.toMatchObject({
+        ok: false,
+        error: { code: "invalid_signature", status: 401 },
+      });
+    }
+  });
+
+  it("accepts any valid v1 signature in a multiple-signature Standard header", async () => {
+    const valid = createStandardRequest(fixture);
+    const signature = valid.headers.get("webhook-signature");
+
+    await expect(
+      createTestAdapter().verifyWebhook(
+        createStandardRequest(fixture, { signature: `v1,invalid ${signature}` }),
+      ),
+    ).resolves.toMatchObject({ ok: true });
+  });
+
+  it("reports invalid Standard secrets as configuration failures", async () => {
+    const invalidSecret = createLinqAdapter({
+      apiKey: "test_linq_api_key",
+      signingSecret: "whsec_not-valid-base64!",
+    });
+
+    await expect(
+      invalidSecret.verifyWebhook(createStandardRequest(fixture)),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "invalid_signing_secret", status: 503 },
     });
   });
 
@@ -166,6 +335,7 @@ describe("LinqAdapter verified webhook ingress", () => {
       createdAt: fixture.created_at,
       traceId: fixture.trace_id,
       partnerId: fixture.partner_id,
+      versionStatus: "current",
     });
     expect(result.webhook.transport).toEqual({
       scheme: "standard",
@@ -289,12 +459,18 @@ describe("LinqAdapter verified webhook ingress", () => {
       expect(result.webhook.rawEvent).toEqual(fixture);
       expect(Object.isFrozen(result.webhook.rawEvent)).toBe(true);
       expect(Object.isFrozen(result.webhook.rawEvent.data)).toBe(true);
+      expect(result.webhook.rawBody).toBe(JSON.stringify(fixture));
+      expect(Buffer.from(result.webhook.rawBodyBase64, "base64").toString("utf8")).toBe(
+        JSON.stringify(fixture),
+      );
     }
   });
 
   it("keeps public raw mutations out of dispatch and forwards WebhookOptions", async () => {
     const adapter = createTestAdapter();
-    const processMessage = vi.fn((..._args: Parameters<ChatInstance["processMessage"]>) => {});
+    const processMessage = vi.fn(
+      async (..._args: Parameters<ChatInstance["processMessage"]>) => {},
+    );
     (adapter as unknown as { chat: Pick<ChatInstance, "processMessage"> }).chat = {
       processMessage,
     };
@@ -322,8 +498,9 @@ describe("LinqAdapter verified webhook ingress", () => {
       expect.any(Function),
       options,
     );
-    const messageFactory = processMessage.mock.calls[0]?.[2];
-    const message = await messageFactory?.();
+    const messageOrFactory = processMessage.mock.calls[0]?.[2];
+    const message =
+      typeof messageOrFactory === "function" ? await messageOrFactory() : messageOrFactory;
     expect(message?.raw).toEqual(fixture.data);
     expect(message?.raw).not.toBe(verification.webhook.rawEvent.data);
     expect(message?.id).toBe(fixture.data.id);
@@ -333,14 +510,17 @@ describe("LinqAdapter verified webhook ingress", () => {
 
   it("keeps normal-path Message.raw mutable and message-shaped", async () => {
     const adapter = createTestAdapter();
-    const processMessage = vi.fn((..._args: Parameters<ChatInstance["processMessage"]>) => {});
+    const processMessage = vi.fn(
+      async (..._args: Parameters<ChatInstance["processMessage"]>) => {},
+    );
     (adapter as unknown as { chat: Pick<ChatInstance, "processMessage"> }).chat = {
       processMessage,
     };
 
     const response = await adapter.handleWebhook(createStandardRequest(fixture));
-    const messageFactory = processMessage.mock.calls[0]?.[2];
-    const message = await messageFactory?.();
+    const messageOrFactory = processMessage.mock.calls[0]?.[2];
+    const message =
+      typeof messageOrFactory === "function" ? await messageOrFactory() : messageOrFactory;
     const raw = message?.raw as { id: string };
 
     expect(response.status).toBe(200);
@@ -365,10 +545,12 @@ describe("LinqAdapter verified webhook ingress", () => {
     }
   });
 
-  it("reports unsupported versions in the typed API while preserving handleWebhook compatibility", async () => {
+  it("preserves older versions in the typed API and compatibility dispatch", async () => {
     const payload = { ...fixture, webhook_version: "2025-01-01" };
     const adapter = createTestAdapter();
-    const processMessage = vi.fn((..._args: Parameters<ChatInstance["processMessage"]>) => {});
+    const processMessage = vi.fn(
+      async (..._args: Parameters<ChatInstance["processMessage"]>) => {},
+    );
     (adapter as unknown as { chat: Pick<ChatInstance, "processMessage"> }).chat = {
       processMessage,
     };
@@ -376,9 +558,63 @@ describe("LinqAdapter verified webhook ingress", () => {
     const verification = await adapter.verifyWebhook(createStandardRequest(payload));
     const response = await adapter.handleWebhook(createStandardRequest(payload));
 
-    expect(verification).toMatchObject({ ok: false, error: { code: "unsupported_version" } });
+    expect(verification).toMatchObject({
+      ok: true,
+      webhook: {
+        kind: "unsupported_version",
+        envelope: { webhookVersion: "2025-01-01", versionStatus: "older" },
+      },
+    });
     expect(response.status).toBe(200);
     expect(processMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["2027-01-01", "future"],
+    ["preview", "unknown"],
+  ] as const)(
+    "preserves and ignores %s webhook versions",
+    async (webhookVersion, versionStatus) => {
+      const payload = {
+        ...fixture,
+        webhook_version: webhookVersion,
+        data: versionStatus === "future" ? ["opaque", { future: true }] : fixture.data,
+      };
+      const adapter = createTestAdapter();
+      const processMessage = vi.fn(
+        async (..._args: Parameters<ChatInstance["processMessage"]>) => {},
+      );
+      (adapter as unknown as { chat: Pick<ChatInstance, "processMessage"> }).chat = {
+        processMessage,
+      };
+
+      const verification = await adapter.verifyWebhook(createStandardRequest(payload));
+      const response = await adapter.handleWebhook(createStandardRequest(payload));
+
+      expect(verification).toMatchObject({
+        ok: true,
+        webhook: {
+          kind: "unsupported_version",
+          envelope: { webhookVersion, versionStatus },
+          rawEvent: { webhook_version: webhookVersion },
+        },
+      });
+      expect(response.status).toBe(200);
+      expect(processMessage).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects malformed version envelopes without losing authenticated future versions", async () => {
+    for (const webhookVersion of [null, ""] as const) {
+      await expect(
+        createTestAdapter().verifyWebhook(
+          createStandardRequest({ ...fixture, webhook_version: webhookVersion }),
+        ),
+      ).resolves.toMatchObject({
+        ok: false,
+        error: { code: "invalid_payload", status: 400 },
+      });
+    }
   });
 
   it("verifies reactions and current unhandled events without forcing dispatch", async () => {
@@ -442,6 +678,14 @@ function createTestAdapter() {
   return createLinqAdapter({ apiKey: "test_linq_api_key", signingSecret: SIGNING_SECRET });
 }
 
+function createLegacyTestAdapter() {
+  return createLinqAdapter({
+    apiKey: "test_linq_api_key",
+    signingSecret: SIGNING_SECRET,
+    webhookVerificationMode: "legacy",
+  });
+}
+
 type MutableFixture = Record<string, unknown> & {
   event_type: string;
   webhook_version: string;
@@ -494,10 +738,10 @@ function createSignedBody(
 
 function createLegacyRequest(payload: unknown, extraHeaders: Record<string, string> = {}): Request {
   const body = JSON.stringify(payload);
-  const timestamp = Math.floor(Date.now() / 1000).toString();
-  const signature = createHmac("sha256", SIGNING_SECRET)
-    .update(`${timestamp}.${body}`)
-    .digest("hex");
+  const timestamp = extraHeaders["x-webhook-timestamp"] ?? Math.floor(Date.now() / 1000).toString();
+  const signature =
+    extraHeaders["x-webhook-signature"] ??
+    createHmac("sha256", SIGNING_SECRET).update(`${timestamp}.${body}`).digest("hex");
 
   return new Request("https://example.com/webhooks/linq", {
     method: "POST",

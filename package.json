@@ -5,11 +5,18 @@
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
-    "typecheck": "turbo typecheck"
+    "typecheck": "turbo typecheck",
+    "test": "turbo test",
+    "lint": "turbo lint",
+    "format": "turbo format",
+    "format:check": "turbo format:check",
+    "openapi:check": "pnpm --filter @forma/linq-chat-sdk-adapter openapi:check",
+    "check": "pnpm openapi:check && pnpm lint && pnpm format:check && pnpm test && pnpm typecheck && pnpm build"
   },
   "devDependencies": {
     "turbo": "^2.5.0",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "yaml": "^2.9.0"
   },
   "engines": {
     "node": ">=20"

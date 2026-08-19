@@ -23,6 +23,15 @@ also be recorded.
   read-only `adapter.client`.
 - Add a Linq-specific export only for a documented semantic gap. Record why the standard Chat SDK,
   shared-adapter, and native-client alternatives are insufficient.
+- Use Chat SDK `Thread.reply()` and `Thread.markAsRead()` for ordinary replies and read receipts.
+  Linq marks an entire chat read; document that coarser provider semantic. Reserve a Linq extension
+  only for part-index reply targeting or another fact the standard contract cannot carry.
+- Use `@linqapp/sdk` for outbound/native operations only. Inbound Standard verification uses the
+  direct `standardwebhooks` dependency and adapter-owned stable envelopes; never depend on the
+  generated SDK `Webhooks` resource being exhaustive or functional.
+- Standard verification is the default. Legacy verification is deprecated explicit migration
+  mode. Partial Standard headers always fail, dual headers use the configured authority, and a
+  failed authoritative scheme never falls back.
 - Prefer `ValidationError`, `AdapterRateLimitError`, `AuthenticationError`, `PermissionError`,
   `ResourceNotFoundError`, `NetworkError`, and `AdapterError` from `@chat-adapter/shared`. Add a
   Linq-specific error only when essential metadata cannot fit the standard contract, and document
@@ -49,5 +58,5 @@ also be recorded.
 - Preserve the settled Batch `004` boundary: no Linq `openDM()`, provisional IDs, aliases, identity
   migration, first-send persistence/locking, Chat SDK change, or proactive adapter wrapper. Use the
   documented native-client recipe and canonical returned `chat_id`.
-- Treat Batches `011` and `012` as deferred and Batch `013` as later inventory reconciliation unless
+- Treat Batches `011` and `012` as deferred and Batch `013` as later parity cleanup unless
   the user explicitly changes scope.

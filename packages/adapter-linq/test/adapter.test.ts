@@ -6,6 +6,11 @@ import { describe, expect, expectTypeOf, it, vi } from "vitest";
 
 import { createLinqAdapter } from "../src/adapter";
 import type { LinqRawMessage } from "../src/message-parser";
+import type {
+  LinqMessageReceivedWebhookEvent,
+  LinqReactionWebhookData,
+  LinqReactionWebhookEvent,
+} from "../src/webhook";
 
 const SIGNING_KEY = "test_linq_webhook_secret";
 const SIGNING_SECRET = `whsec_${Buffer.from(SIGNING_KEY).toString("base64")}`;
@@ -43,7 +48,7 @@ describe("LinqAdapter.handleWebhook", () => {
   });
 
   it("accepts a valid legacy X-Webhook signature", async () => {
-    const adapter = createTestAdapter();
+    const adapter = createLegacyTestAdapter();
     const request = createLegacySignedRequest(createMessageReceivedPayload());
 
     const response = await adapter.handleWebhook(request);
@@ -52,7 +57,7 @@ describe("LinqAdapter.handleWebhook", () => {
   });
 
   it("accepts a valid legacy signature when Linq sends both complete header sets", async () => {
-    const adapter = createTestAdapter();
+    const adapter = createLegacyTestAdapter();
     const legacyRequest = createLegacySignedRequest(createMessageReceivedPayload());
     const headers = new Headers(legacyRequest.headers);
     headers.set("webhook-id", "webhook-test-id");
@@ -70,7 +75,7 @@ describe("LinqAdapter.handleWebhook", () => {
   });
 
   it("does not downgrade partial Standard Webhooks headers to legacy verification", async () => {
-    const adapter = createTestAdapter();
+    const adapter = createLegacyTestAdapter();
     const legacyRequest = createLegacySignedRequest(createMessageReceivedPayload());
     const headers = new Headers(legacyRequest.headers);
     headers.set("webhook-id", "webhook-test-id");
@@ -97,15 +102,16 @@ describe("LinqAdapter.handleWebhook", () => {
 
   it("acknowledges unknown event types without dispatching them", async () => {
     const adapter = createTestAdapter();
-    const processMessage = vi.fn((..._args: Parameters<ChatInstance["processMessage"]>) => {});
+    const processMessage = vi.fn(
+      async (..._args: Parameters<ChatInstance["processMessage"]>) => {},
+    );
     const processReaction = vi.fn((..._args: Parameters<ChatInstance["processReaction"]>) => {});
     (
       adapter as unknown as {
         chat: Pick<ChatInstance, "processMessage" | "processReaction">;
       }
     ).chat = { processMessage, processReaction };
-    const payload = createMessageReceivedPayload();
-    payload.event_type = "message.sent";
+    const payload = { ...createMessageReceivedPayload(), event_type: "message.sent" };
 
     const response = await adapter.handleWebhook(createSignedRequest(payload));
 
@@ -116,7 +122,9 @@ describe("LinqAdapter.handleWebhook", () => {
 
   it("dispatches inbound message.received webhooks to Chat SDK", async () => {
     const adapter = createTestAdapter();
-    const processMessage = vi.fn((..._args: Parameters<ChatInstance["processMessage"]>) => {});
+    const processMessage = vi.fn(
+      async (..._args: Parameters<ChatInstance["processMessage"]>) => {},
+    );
     (adapter as unknown as { chat: Pick<ChatInstance, "processMessage"> }).chat = {
       processMessage,
     };
@@ -137,7 +145,9 @@ describe("LinqAdapter.handleWebhook", () => {
 
   it("dispatches a stable thread ID and learns DM identity from the webhook", async () => {
     const adapter = createTestAdapter();
-    const processMessage = vi.fn((..._args: Parameters<ChatInstance["processMessage"]>) => {});
+    const processMessage = vi.fn(
+      async (..._args: Parameters<ChatInstance["processMessage"]>) => {},
+    );
     (adapter as unknown as { chat: Pick<ChatInstance, "processMessage"> }).chat = {
       processMessage,
     };
@@ -158,7 +168,9 @@ describe("LinqAdapter.handleWebhook", () => {
 
   it("resolves chat identity from the API when the webhook omits is_group", async () => {
     const adapter = createTestAdapter();
-    const processMessage = vi.fn((..._args: Parameters<ChatInstance["processMessage"]>) => {});
+    const processMessage = vi.fn(
+      async (..._args: Parameters<ChatInstance["processMessage"]>) => {},
+    );
     (adapter as unknown as { chat: Pick<ChatInstance, "processMessage"> }).chat = {
       processMessage,
     };
@@ -266,8 +278,8 @@ describe("LinqAdapter.handleWebhook", () => {
 });
 
 describe("LinqAdapter.parseMessage", () => {
-  it("uses the current unwrap webhook data at the raw message boundary", () => {
-    const event = createMessageReceivedPayload() satisfies LinqAPIV3.UnwrapWebhookEvent;
+  it("uses the adapter-owned current webhook data at the raw message boundary", () => {
+    const event = createMessageReceivedPayload();
 
     expectTypeOf(event.data).toMatchTypeOf<LinqRawMessage>();
   });
@@ -443,6 +455,7 @@ describe("LinqAdapter.parseMessage", () => {
       created_at: "2026-05-08T16:21:12.499Z",
       updated_at: "2026-05-08T16:22:12.499Z",
       is_delivered: true,
+      delivery_status: "delivered",
       is_from_me: false,
       is_read: true,
       parts: [{ type: "text", value: "edited text", reactions: null }],
@@ -940,7 +953,15 @@ function createTestAdapter() {
   return createLinqAdapter({ apiKey: API_KEY, signingSecret: SIGNING_SECRET });
 }
 
-function createSendResponse() {
+function createLegacyTestAdapter() {
+  return createLinqAdapter({
+    apiKey: API_KEY,
+    signingSecret: SIGNING_SECRET,
+    webhookVerificationMode: "legacy",
+  });
+}
+
+function createSendResponse(): Awaited<ReturnType<LinqAPIV3["chats"]["messages"]["send"]>> {
   return {
     chat_id: "chat-123",
     message: {
@@ -948,7 +969,7 @@ function createSendResponse() {
       created_at: "2026-06-14T00:00:00.000Z",
       delivery_status: "queued",
       is_read: false,
-      parts: [{ type: "text", value: "ok" }],
+      parts: [{ type: "text", value: "ok", reactions: null }],
       sent_at: null,
     },
   };
@@ -1010,7 +1031,7 @@ function createLegacySignedRequest(payload: unknown): Request {
   });
 }
 
-function createMessageReceivedPayload(): LinqAPIV3.MessageReceivedWebhookEvent {
+function createMessageReceivedPayload(): LinqMessageReceivedWebhookEvent {
   return {
     api_version: "v3",
     webhook_version: "2026-02-03",
@@ -1070,8 +1091,8 @@ function createMessageReceivedPayload(): LinqAPIV3.MessageReceivedWebhookEvent {
 
 function createReactionPayload(
   eventType: "reaction.added" | "reaction.removed" = "reaction.added",
-  data: Partial<LinqAPIV3.Webhooks.ReactionEventBase> = {},
-): LinqAPIV3.ReactionAddedWebhookEvent | LinqAPIV3.ReactionRemovedWebhookEvent {
+  data: Partial<LinqReactionWebhookData> = {},
+): LinqReactionWebhookEvent {
   return {
     api_version: "v3",
     webhook_version: "2026-02-03",

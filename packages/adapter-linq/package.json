@@ -43,22 +43,24 @@
     "lint": "oxlint .",
     "lint:fix": "oxlint . --fix",
     "format": "oxfmt . --write",
-    "format:check": "oxfmt . --check"
+    "format:check": "oxfmt . --check",
+    "openapi:check": "node scripts/check-openapi-inventory.mjs"
   },
   "dependencies": {
-    "@chat-adapter/shared": "^4.37.0",
-    "@linqapp/sdk": "^0.32.1"
+    "@chat-adapter/shared": "^4.38.1",
+    "@linqapp/sdk": "^0.41.1",
+    "standardwebhooks": "^1.0.0"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
     "@vitest/coverage-v8": "^4.1.6",
-    "chat": "^4.37.0",
+    "chat": "^4.38.1",
     "oxfmt": "^0.50.0",
     "oxlint": "^1.65.0",
     "vitest": "^4.1.6"
   },
   "peerDependencies": {
-    "chat": "^4.28.1"
+    "chat": "^4.38.0"
   },
   "engines": {
     "node": ">=20"

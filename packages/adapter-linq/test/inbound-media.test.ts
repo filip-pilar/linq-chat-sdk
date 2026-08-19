@@ -41,7 +41,7 @@ function lookup(details = attachmentDetails()) {
 }
 
 function audioResponse(bytes: Uint8Array = new Uint8Array([1, 2, 3, 4]), init: ResponseInit = {}) {
-  return new Response(bytes, {
+  return new Response(Buffer.from(bytes), {
     status: 200,
     headers: {
       "content-length": String(bytes.byteLength),

@@ -11,12 +11,16 @@
 
 ```bash
 pnpm install
-pnpm -r test
-pnpm -r typecheck
+pnpm check
 ```
 
-The adapter package uses the official [`@linqapp/sdk`](https://www.npmjs.com/package/@linqapp/sdk)
-and Chat SDK's shared adapter utilities, with `chat` as a peer dependency.
+`pnpm check` checks the canonical Linq OpenAPI inventory, lint, formatting, tests, source/test
+TypeScript contracts, and the workspace build. CI runs the same command on Node.js 20 and 24.
+
+The adapter uses `@linqapp/sdk@0.41.1` for outbound/native API operations, Chat SDK `4.38.1`, and
+the Standard Webhooks reference implementation for inbound authentication. The adapter owns its
+stable webhook envelope and normalization boundary because the current Linq SDK no longer exports
+`webhooks.unwrap()` or exhaustive event-envelope types.
 
 ## Fork maintenance
 

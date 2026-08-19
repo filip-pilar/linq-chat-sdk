@@ -11,13 +11,13 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@chat-adapter/state-pg": "^4.37.0",
-    "@chat-adapter/telegram": "^4.37.0",
-    "@chat-adapter/whatsapp": "^4.37.0",
+    "@chat-adapter/state-pg": "^4.38.1",
+    "@chat-adapter/telegram": "^4.38.1",
+    "@chat-adapter/whatsapp": "^4.38.1",
     "@forma/linq-chat-sdk-adapter": "workspace:*",
-    "@linqapp/sdk": "^0.32.1",
+    "@linqapp/sdk": "^0.41.1",
     "ai": "^6.0.184",
-    "chat": "^4.37.0",
+    "chat": "^4.38.1",
     "pg": "^8.20.0",
     "zod": "^4.4.3"
   },

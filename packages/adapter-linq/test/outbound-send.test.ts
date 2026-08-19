@@ -7,6 +7,7 @@ import {
   ResourceNotFoundError,
   ValidationError,
 } from "@chat-adapter/shared";
+import type { LinqAPIV3 } from "@linqapp/sdk";
 import { Card, Chat, Image } from "chat";
 import type { AdapterPostableMessage, Attachment, StateAdapter } from "chat";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -21,6 +22,41 @@ afterEach(() => {
 });
 
 describe("reliable existing-chat send validation", () => {
+  it("reuses one explicit idempotency key across the SDK's default retries", async () => {
+    const requestBodies: unknown[] = [];
+    let attempt = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+      requestBodies.push(JSON.parse(String(init?.body)));
+      attempt += 1;
+
+      if (attempt < 3) {
+        return new Response(JSON.stringify({ error: { message: "retry" } }), {
+          status: 500,
+          headers: { "content-type": "application/json", "retry-after-ms": "0" },
+        });
+      }
+
+      return new Response(JSON.stringify(createSendResponse()), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const adapter = createLinqAdapter({
+      apiKey: "test-key",
+      baseURL: "https://linq-sdk-retry.example.test",
+      signingSecret: "test-secret",
+    });
+
+    await adapter.postMessage("linq:chat-123", "retry safely");
+
+    expect(requestBodies).toHaveLength(3);
+    const keys = requestBodies.map(
+      (body) => (body as { message: { idempotency_key: string } }).message.idempotency_key,
+    );
+    expect(new Set(keys).size).toBe(1);
+    expect(keys[0]).toMatch(UUID_PATTERN);
+  });
+
   it("accepts 10,000 text characters and rejects 10,001 before sending", async () => {
     const { adapter, send, create } = createOutboundTestAdapter();
 
@@ -348,12 +384,40 @@ describe("thread.post() contract", () => {
       },
     });
   });
+
+  it("uses the standard Thread.reply() contract with explicit idempotency", async () => {
+    const { adapter, send } = createOutboundTestAdapter();
+    const chat = createTestChat(adapter);
+    await chat.initialize();
+
+    const sent = await chat.thread("linq:chat-123").reply("message-parent", "reply text");
+
+    expect(sent.id).toBe("outbound-message-id");
+    expect(send).toHaveBeenCalledWith("chat-123", {
+      message: {
+        idempotency_key: expect.stringMatching(UUID_PATTERN),
+        parts: [{ type: "text", value: "reply text" }],
+        reply_to: { message_id: "message-parent" },
+      },
+    });
+  });
+
+  it("uses the standard Thread.markAsRead() contract with Linq's chat-wide semantics", async () => {
+    const { adapter, markAsRead } = createOutboundTestAdapter();
+    const chat = createTestChat(adapter);
+    await chat.initialize();
+
+    await chat.thread("linq:chat-123").markAsRead("message-inbound");
+
+    expect(markAsRead).toHaveBeenCalledWith("chat-123");
+  });
 });
 
 function createOutboundTestAdapter(): {
   adapter: LinqAdapter;
   create: ReturnType<typeof vi.fn>;
   deleteAttachment: ReturnType<typeof vi.fn>;
+  markAsRead: ReturnType<typeof vi.fn>;
   send: ReturnType<typeof vi.fn>;
 } {
   const adapter = createLinqAdapter({ apiKey: "test-key", signingSecret: "test-secret" });
@@ -371,23 +435,39 @@ function createOutboundTestAdapter(): {
     };
   });
   const deleteAttachment = vi.fn().mockResolvedValue(undefined);
+  const markAsRead = vi.fn().mockResolvedValue(undefined);
 
   (
     adapter as unknown as {
       apiClient: {
         attachments: { create: typeof create; delete: typeof deleteAttachment };
-        chats: { messages: { send: typeof send } };
+        chats: { markAsRead: typeof markAsRead; messages: { send: typeof send } };
       };
     }
   ).apiClient = {
     attachments: { create, delete: deleteAttachment },
-    chats: { messages: { send } },
+    chats: { markAsRead, messages: { send } },
   };
 
-  return { adapter, create, deleteAttachment, send };
+  return { adapter, create, deleteAttachment, markAsRead, send };
 }
 
-function createSendResponse() {
+function createTestChat(adapter: LinqAdapter): Chat<{ linq: LinqAdapter }> {
+  const state = {
+    appendToList: vi.fn().mockResolvedValue(undefined),
+    connect: vi.fn().mockResolvedValue(undefined),
+    disconnect: vi.fn().mockResolvedValue(undefined),
+  } as unknown as StateAdapter;
+
+  return new Chat({
+    adapters: { linq: adapter },
+    logger: "silent",
+    state,
+    userName: "linq-test",
+  });
+}
+
+function createSendResponse(): Awaited<ReturnType<LinqAPIV3["chats"]["messages"]["send"]>> {
   return {
     chat_id: "chat-123",
     message: {

@@ -18,6 +18,40 @@ export interface LinqWebhookRawEvent {
   readonly [key: string]: LinqWebhookRawValue;
 }
 
+/** Stable provider envelope owned by the adapter, independent of generated SDK wrappers. */
+export interface LinqWebhookEvent<TData = unknown> {
+  readonly api_version: "v3";
+  readonly webhook_version: string;
+  readonly event_type: string;
+  readonly event_id: string;
+  readonly created_at: string;
+  readonly trace_id: string;
+  readonly partner_id: string;
+  readonly data: TData;
+}
+
+export type LinqMessageReceivedWebhookEvent = LinqWebhookEvent<LinqAPIV3.MessageEventV2> & {
+  readonly event_type: "message.received";
+};
+
+export interface LinqReactionWebhookData {
+  readonly is_from_me: boolean;
+  readonly reaction_type: LinqAPIV3.ReactionType;
+  readonly chat_id?: string;
+  readonly message_id?: string;
+  readonly part_index?: number;
+  readonly custom_emoji?: string | null;
+  readonly reacted_at?: string | null;
+  readonly service?: LinqAPIV3.ServiceType | null;
+  readonly from_handle?: LinqAPIV3.ChatHandle | null;
+  /** Deprecated legacy sender handle retained for old webhook versions. */
+  readonly from?: string;
+}
+
+export type LinqReactionWebhookEvent = LinqWebhookEvent<LinqReactionWebhookData> & {
+  readonly event_type: "reaction.added" | "reaction.removed";
+};
+
 export type LinqWebhookVerificationScheme = "standard" | "legacy";
 
 export interface LinqWebhookTransportObservation {
@@ -31,7 +65,8 @@ export interface LinqWebhookTransportObservation {
 export interface LinqWebhookEnvelopeObservation {
   readonly provider: "linq";
   readonly apiVersion: "v3";
-  readonly webhookVersion: typeof LINQ_WEBHOOK_VERSION;
+  readonly webhookVersion: string;
+  readonly versionStatus: "current" | "older" | "future" | "unknown";
   readonly eventType: string;
   readonly eventId: string;
   readonly createdAt: string;
@@ -114,6 +149,10 @@ interface LinqVerifiedWebhookBase {
   readonly envelope: LinqWebhookEnvelopeObservation;
   readonly transport: LinqWebhookTransportObservation;
   readonly rawEvent: LinqWebhookRawEvent;
+  /** Exact authenticated request text. Persist this before dispatch for durable ingress. */
+  readonly rawBody: string;
+  /** Exact authenticated request bytes, encoded for immutable/persistence-safe transport. */
+  readonly rawBodyBase64: string;
   readonly [VERIFIED_WEBHOOK]: LinqVerifiedWebhookInternal;
 }
 
@@ -131,19 +170,24 @@ export interface LinqVerifiedUnhandledWebhook extends LinqVerifiedWebhookBase {
   readonly kind: "unhandled";
 }
 
+export interface LinqVerifiedUnsupportedVersionWebhook extends LinqVerifiedWebhookBase {
+  readonly kind: "unsupported_version";
+}
+
 export type LinqVerifiedWebhook =
   | LinqVerifiedMessageWebhook
   | LinqVerifiedReactionWebhook
-  | LinqVerifiedUnhandledWebhook;
+  | LinqVerifiedUnhandledWebhook
+  | LinqVerifiedUnsupportedVersionWebhook;
 
 export type LinqWebhookVerificationErrorCode =
   | "missing_signature_headers"
   | "invalid_signature"
   | "stale_timestamp"
   | "missing_signing_secret"
+  | "invalid_signing_secret"
   | "invalid_json"
-  | "invalid_payload"
-  | "unsupported_version";
+  | "invalid_payload";
 
 export interface LinqWebhookVerificationError {
   readonly code: LinqWebhookVerificationErrorCode;
@@ -166,24 +210,18 @@ export interface LinqVerifiedWebhookDispatchResult {
 
 interface LinqVerifiedWebhookInternal {
   readonly authority: object;
-  readonly event: LinqAPIV3.UnwrapWebhookEvent;
+  readonly event: LinqWebhookEvent;
 }
 
 export function normalizeAuthenticatedLinqWebhook(
   event: unknown,
   transport: LinqWebhookTransportObservation,
+  rawBody: string,
+  rawBodyBase64: string,
   authority: object,
 ): LinqWebhookVerificationResult {
   if (!isRecord(event)) {
     return invalidPayload();
-  }
-
-  if (event.webhook_version !== LINQ_WEBHOOK_VERSION) {
-    return failure(
-      "unsupported_version",
-      400,
-      `Unsupported Linq webhook version: ${stringObservation(event.webhook_version)}`,
-    );
   }
 
   const envelope = parseEnvelope(event);
@@ -197,11 +235,20 @@ export function normalizeAuthenticatedLinqWebhook(
     envelope,
     transport: Object.freeze(transport),
     rawEvent,
+    rawBody,
+    rawBodyBase64,
     [VERIFIED_WEBHOOK]: Object.freeze({
       authority,
-      event: event as unknown as LinqAPIV3.UnwrapWebhookEvent,
+      event: event as unknown as LinqWebhookEvent,
     }),
   };
+
+  if (envelope.versionStatus !== "current") {
+    return {
+      ok: true,
+      webhook: Object.freeze({ ...base, kind: "unsupported_version" }),
+    };
+  }
 
   if (envelope.eventType === "message.received") {
     const message = parseMessageObservation(rawEvent.data);
@@ -238,14 +285,14 @@ export function normalizeAuthenticatedLinqWebhook(
 export function getVerifiedLinqWebhookEvent(
   webhook: LinqVerifiedWebhook,
   authority: object,
-): LinqAPIV3.UnwrapWebhookEvent {
+): LinqWebhookEvent {
   const internal = isRecord(webhook) ? webhook[VERIFIED_WEBHOOK] : undefined;
 
   if (!isRecord(internal) || internal.authority !== authority || !("event" in internal)) {
     throw new TypeError("Expected a verified Linq webhook produced by this adapter");
   }
 
-  return internal.event as LinqAPIV3.UnwrapWebhookEvent;
+  return internal.event as LinqWebhookEvent;
 }
 
 export function failure(
@@ -269,12 +316,13 @@ function invalidPayload(): LinqWebhookVerificationFailure {
 function parseEnvelope(event: Record<string, unknown>): LinqWebhookEnvelopeObservation | null {
   if (
     event.api_version !== "v3" ||
+    !isNonEmptyString(event.webhook_version) ||
     !isNonEmptyString(event.event_type) ||
     !isNonEmptyString(event.event_id) ||
     !isNonEmptyString(event.created_at) ||
     !isNonEmptyString(event.trace_id) ||
     !isNonEmptyString(event.partner_id) ||
-    !isRecord(event.data)
+    !("data" in event)
   ) {
     return null;
   }
@@ -282,7 +330,8 @@ function parseEnvelope(event: Record<string, unknown>): LinqWebhookEnvelopeObser
   return Object.freeze({
     provider: "linq",
     apiVersion: "v3",
-    webhookVersion: LINQ_WEBHOOK_VERSION,
+    webhookVersion: event.webhook_version,
+    versionStatus: classifyWebhookVersion(event.webhook_version),
     eventType: event.event_type,
     eventId: event.event_id,
     createdAt: event.created_at,
@@ -545,8 +594,16 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
-function stringObservation(value: unknown): string {
-  return typeof value === "string" && value ? value : "missing";
+function classifyWebhookVersion(version: string): LinqWebhookEnvelopeObservation["versionStatus"] {
+  if (version === LINQ_WEBHOOK_VERSION) {
+    return "current";
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(version)) {
+    return version < LINQ_WEBHOOK_VERSION ? "older" : "future";
+  }
+
+  return "unknown";
 }
 
 function immutableJsonSnapshot(event: Record<string, unknown>): LinqWebhookRawEvent {

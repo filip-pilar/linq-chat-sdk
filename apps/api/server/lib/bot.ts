@@ -220,14 +220,8 @@ function sleep(ms: number) {
 }
 
 async function markMessageReadIfSupported(thread: Thread, message: Message) {
-  const markAsRead = (thread.adapter as { markAsRead?: unknown }).markAsRead;
-
-  if (typeof markAsRead !== "function") {
-    return;
-  }
-
   try {
-    await markAsRead.call(thread.adapter, message.id);
+    await thread.markAsRead(message);
   } catch (error) {
     console.warn("Failed to mark chat message as read", error);
   }
