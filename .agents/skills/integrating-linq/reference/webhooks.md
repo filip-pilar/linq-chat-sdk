@@ -64,7 +64,7 @@ payloads and acknowledges future/unknown versions without current-schema dispatc
 event callbacks, deduplication, or other planned behavior as implemented.
 
 The checked-in inventory records 68 callable operations, 56 webhook examples, and 45 event names.
-Run `pnpm openapi:check` to detect canonical schema drift. `@linqapp/sdk@0.41.1` has no unwrap union;
+Run `pnpm openapi:check` to detect canonical schema drift. `@linqapp/sdk@0.42.0` has no unwrap union;
 do not use generated SDK webhook wrappers as a closed-world boundary.
 
 ## Repository setup and storage

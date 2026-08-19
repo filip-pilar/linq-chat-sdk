@@ -177,7 +177,7 @@ Experience discovery remains only in the native-client boundary audit.
 
 The canonical OpenAPI evidence reverified on 2026-08-19 contains 68 callable operations, 56 webhook
 example operation IDs, and 45 event names (124 operation IDs total). The checked-in inventory and
-`pnpm openapi:check` detect drift. The installed `@linqapp/sdk@0.41.1` covers native operations but
+`pnpm openapi:check` detect drift. The installed `@linqapp/sdk@0.42.0` covers native operations but
 its empty generated `Webhooks` resource contradicts documentation that still describes
 `webhooks.unwrap()`; inbound authentication and envelopes therefore remain adapter-owned.
 
@@ -400,6 +400,12 @@ A full example app (Nitro server wiring Linq, Telegram, and WhatsApp adapters in
 `pnpm build` first because it imports `./dist`. Every command is plan-only until `--apply` is
 supplied; plans and results fingerprint all provider identifiers and handles.
 
+`send` and `live` are fixed-line operations. Their provider requests are constructed in
+TypeScript-checked source and use `chats.create({ from, ... })`, which creates or reuses the chat
+keyed to the exact selected line and recipient. The apply result verifies the returned owner line
+before an operator should reply. They never use auto-line `messages.create()`; that operation may
+reuse a more recently active chat on another healthy account line.
+
 Get a sandbox number with the [Linq CLI](https://www.npmjs.com/package/@linqapp/cli): `linq signup --phone <your cell>`, then grab the token from `~/.linq/config.json`.
 
 ```bash
@@ -434,7 +440,7 @@ LINQ_LIVE_STATE_FILE=<ignored mode-0600 env file> \
 | `LINQ_BASE_URL` / `LINQ_API_BASE_URL`                 | all       | Current SDK base URL override                                        |
 | `LINQ_LIVE_CONFIRM`                                   | apply     | Exact confirmation printed by the reviewed plan                      |
 
-`send --apply` performs exactly one text send. `serve --apply` never echoes. `live --apply` starts
+`send --apply` performs exactly one fixed-line text send. `serve --apply` never echoes. `live --apply` starts
 the local receiver first, creates an exact-line-filtered subscription for only `message.received`
 and `message.sent`, persists the one-time secret immediately, sends one text, verifies a
 provider-produced delivery, and deletes the subscription in `finally`. If deletion fails, the

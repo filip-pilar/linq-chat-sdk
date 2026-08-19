@@ -39,6 +39,9 @@ also be recorded.
 - Do not duplicate official-client retries. Classify every side effect before retrying; retry only
   safe or verified-idempotent operations, reuse one idempotency value per logical operation, and
   never infer safety across endpoints.
+- Keep every live/smoke provider request in TypeScript-checked source. Fixed-line operations must
+  use an SDK contract that accepts `from`, verify the returned owner line, and fail closed instead
+  of calling the auto-line `messages.create()` operation.
 - Cleanup only resources definitely created and orphaned by the adapter. Keep cleanup best-effort
   and preserve the primary error.
 - Use current official docs and installed SDK behavior/types as primary evidence. Record conflicts;

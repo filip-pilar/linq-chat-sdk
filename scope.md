@@ -117,6 +117,9 @@ thread with ``chat.thread(`linq:${result.chat_id}`)``. Subscriptions, history, t
 edits, and subsequent posts then use normal Chat SDK behavior. Explicit fixed-line creation remains
 on `adapter.client.chats.create()`.
 
+Guarded fixed-line smoke operations also use `chats.create({ from, ... })`; they must not substitute
+the auto-line operation because Linq may reuse a more recently active chat on another healthy line.
+
 Reduced Batch `004` contains only recipe documentation, compile-time contracts, and sandbox
 validation for creation, active-chat reuse, same-key idempotent retry, failover, and concurrent
 distinct intentional sends. A first-class proactive adapter extension is deferred until real usage
@@ -139,7 +142,7 @@ The public extensions are deliberately cohesive:
 - Batches `008`/`009`: `adapter.conversation(threadOrId)` with common operations directly on the
   facade, existing-group operations under `.group`, and location under `.location`.
 
-Batch `000` is complete: Chat SDK `4.38.1` standard reply/read contracts, Linq SDK `0.41.1`, direct
+Batch `000` is complete: Chat SDK `4.38.1` standard reply/read contracts, Linq SDK `0.42.0`, direct
 Standard Webhooks verification, explicit deprecated legacy mode, OpenAPI drift checking, CI, and
 full test-fixture typechecking are reconciled. Mark-read is standard `Thread.markAsRead()` with
 Linq's chat-wide semantics; it is not a future conversation-facade method.

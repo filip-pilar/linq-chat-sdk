@@ -79,7 +79,7 @@ The signed content is:
 
 The current adapter verifies this scheme directly with `standardwebhooks@1.0.0`. Standard secrets
 use the `whsec_` format, and signatures use `v1,{base64}` values. The current Linq documentation
-still describes SDK `webhooks.unwrap()`, but `@linqapp/sdk@0.41.1` removes that method and its wrapper
+still describes SDK `webhooks.unwrap()`, but `@linqapp/sdk@0.42.0` removes that method and its wrapper
 event types at runtime and in declarations. Treat that as a provider documentation/SDK discrepancy.
 
 ### Legacy compatibility
@@ -119,9 +119,14 @@ identifies the sender, `chat` contains canonical chat facts including `id`, `is_
 live directly on `data`.
 
 The canonical OpenAPI currently has 68 callable operations, 56 webhook example operation IDs, and
-45 event names. `@linqapp/sdk@0.41.1` exposes the 45-name subscription enum and useful lower-level
+45 event names. `@linqapp/sdk@0.42.0` exposes the 45-name subscription enum and useful lower-level
 resource types, but no exhaustive webhook envelope union or unwrap runtime. The adapter therefore
 owns a stable envelope, a checked-in OpenAPI-derived event-name inventory, curated normalized
 message/reaction observations, and a lossless raw form for unknown/future events.
+
+SDK `0.42.0` also adds the `app_clip` message part for a standalone Linq checkout URL. It is
+iMessage-only and does not downgrade to SMS or RCS. Keep outbound use on the typed native client;
+the adapter normalizes an inbound App Clip URL as ordinary text/link while retaining the full raw
+part for title, description, and image metadata.
 
 Read `reference/webhooks.md` for the repository-specific ingress and setup checklist.

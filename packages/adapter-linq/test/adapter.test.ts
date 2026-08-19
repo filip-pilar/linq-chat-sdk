@@ -344,6 +344,27 @@ describe("LinqAdapter.parseMessage", () => {
     expect(message.links).toEqual([{ url: "https://example.com" }]);
   });
 
+  it("preserves App Clip checkout URLs as text and links", () => {
+    const adapter = createTestAdapter();
+    vi.spyOn(adapter, "encodeThreadId").mockReturnValue("linq:chat-123");
+    const payload = createMessageReceivedPayload();
+    payload.data.parts = [
+      {
+        type: "app_clip",
+        value: "https://checkout.linqapp.com/session/test",
+        title: "Example merchant",
+        description: "AED 10.00",
+        image_url: "https://cdn.linqapp.com/app-clips/test.png",
+      },
+    ];
+
+    const message = adapter.parseMessage(payload.data);
+
+    expect(message.text).toBe("https://checkout.linqapp.com/session/test");
+    expect(message.links).toEqual([{ url: "https://checkout.linqapp.com/session/test" }]);
+    expect(message.raw).toBe(payload.data);
+  });
+
   it("normalizes media parts as attachments", () => {
     const adapter = createTestAdapter();
     vi.spyOn(adapter, "encodeThreadId").mockReturnValue("linq:chat-123");

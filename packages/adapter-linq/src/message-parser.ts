@@ -168,7 +168,10 @@ function dateFrom(value: string | null | undefined): Date {
 
 function messageText(parts: LinqMessagePart[], attachments: Attachment[]): string {
   const textParts = parts.flatMap((part) => {
-    if ((part.type === "text" || part.type === "link") && typeof part.value === "string") {
+    if (
+      (part.type === "text" || part.type === "link" || part.type === "app_clip") &&
+      typeof part.value === "string"
+    ) {
       return [part.value];
     }
 
@@ -187,7 +190,7 @@ function messageLinks(parts: LinqMessagePart[]): LinkPreview[] {
   const urls = new Set<string>();
 
   for (const part of parts) {
-    if (part.type === "link") {
+    if (part.type === "link" || part.type === "app_clip") {
       urls.add(part.value);
       continue;
     }

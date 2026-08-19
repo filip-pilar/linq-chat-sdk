@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
@@ -21,12 +22,20 @@ function run(mode: string, env: Record<string, string> = {}, apply = false) {
 }
 
 describe("guarded live smoke CLI", () => {
+  it("keeps provider request construction in TypeScript-checked source", () => {
+    const source = readFileSync(SCRIPT, "utf8");
+
+    expect(source).not.toContain("@linqapp/sdk");
+    expect(source).not.toMatch(/\bsdk\.[A-Za-z]/);
+  });
+
   it("prints a redacted one-text send plan without touching the provider", () => {
     const result = run("send");
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('"message_count": 1');
     expect(result.stdout).toContain('"provider_mutation": "one outbound text"');
+    expect(result.stdout).toContain('"line_selection": "fixed"');
     expect(result.stdout).toContain("No provider operation was performed");
     expect(result.stdout).not.toContain(FROM);
     expect(result.stdout).not.toContain(TO);
@@ -59,6 +68,7 @@ describe("guarded live smoke CLI", () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('"exact_phone_filter": true');
+    expect(result.stdout).toContain('"line_selection": "fixed"');
     expect(result.stdout).toContain('"cleanup": "delete subscription in finally"');
     expect(result.stdout).toContain('"echo": false');
     expect(result.stdout).toContain('"message.received"');

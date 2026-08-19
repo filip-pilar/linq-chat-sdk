@@ -6,16 +6,9 @@ const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner"
 export const LINQ_API_TOKEN_ENV_NAME = "LINQ_API_TOKEN"
 export const LINQ_WEBHOOK_VERSION = "2026-02-03"
 
-export interface LinqWebhookSubscription {
-  created_at: string
-  id: string
-  is_active: boolean
-  phone_numbers?: string[] | null
-  signing_secret: string
-  subscribed_events: string[]
-  target_url: string
-  updated_at: string
-}
+export type LinqWebhookSubscription = Awaited<
+  ReturnType<LinqAPIV3["webhookSubscriptions"]["create"]>
+>
 
 export function getLinqApiBaseUrl(): string {
   return process.env.LINQ_API_BASE_URL?.trim() || DEFAULT_LINQ_API_BASE_URL
@@ -93,7 +86,7 @@ export async function createLinqWebhookSubscription(targetUrl: string): Promise<
       subscribed_events: ["message.received"],
     })
 
-    return subscription as unknown as LinqWebhookSubscription
+    return subscription
   } catch (error) {
     if (error instanceof HTTPError) {
       throw error

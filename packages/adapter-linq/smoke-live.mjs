@@ -19,8 +19,6 @@ import { createServer } from "node:http";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 
-import { LinqAPIV3 } from "@linqapp/sdk";
-
 const CURRENT_WEBHOOK_VERSION = "2026-02-03";
 const SEND_CONFIRMATION = "SEND_ONE_REAL_TEXT";
 const RECEIVE_CONFIRMATION = "ACCEPT_REAL_WEBHOOKS";
@@ -76,6 +74,10 @@ async function createAdapter(config) {
   return createLinqAdapter(config);
 }
 
+async function smokeOperations() {
+  return import("./dist/smoke-operations.js");
+}
+
 function lineAndRecipient() {
   return {
     from: exactPhone("LINQ_FROM", need("LINQ_FROM", "LINQ_DEVELOPMENT_LINE")),
@@ -128,6 +130,7 @@ async function send() {
     mode: "send",
     provider_mutation: "one outbound text",
     message_count: 1,
+    line_selection: "fixed",
     line_fp: fingerprint(from),
     recipient_fp: fingerprint(to),
     text_fp: fingerprint(text),
@@ -136,19 +139,18 @@ async function send() {
   if (!apply) return printPlan(plan);
 
   requireConfirmation(SEND_CONFIRMATION);
-  const sdk = new LinqAPIV3(apiConfig());
-  const result = await sdk.messages.create({
-    from,
-    to: [to],
-    message: { parts: [{ type: "text", value: text }] },
-  });
+  const { createLinqSmokeClient, sendExactLineText } = await smokeOperations();
+  const sdk = createLinqSmokeClient(apiConfig());
+  const result = await sendExactLineText(sdk, { from, to, text });
   console.log(
     JSON.stringify({
       ok: true,
       mode: "send",
       message_count: 1,
-      message_fp: fingerprint(result.message.id),
-      chat_fp: fingerprint(result.chat_id),
+      exact_line_verified: true,
+      line_fp: fingerprint(result.from),
+      message_fp: fingerprint(result.messageId),
+      chat_fp: fingerprint(result.chatId),
     }),
   );
 }
@@ -324,6 +326,7 @@ async function live() {
     recipient_fp: fingerprint(to),
     target_fp: fingerprint(target.toString()),
     exact_phone_filter: true,
+    line_selection: "fixed",
     events: LIVE_EVENTS,
     webhook_version: CURRENT_WEBHOOK_VERSION,
     echo: false,
@@ -334,7 +337,13 @@ async function live() {
 
   requireConfirmation(SEND_CONFIRMATION);
   await requirePrivateIgnoredStateFile(stateFile);
-  const sdk = new LinqAPIV3(apiConfig());
+  const {
+    createExactLineSmokeSubscription,
+    createLinqSmokeClient,
+    deleteSmokeSubscription,
+    sendExactLineText,
+  } = await smokeOperations();
+  const sdk = createLinqSmokeClient(apiConfig());
   let adapter;
   let subscription;
   let subscriptionDeleted = false;
@@ -355,11 +364,7 @@ async function live() {
 
   try {
     await listen(server, receiverPort);
-    subscription = await sdk.webhookSubscriptions.create({
-      target_url: target.toString(),
-      subscribed_events: LIVE_EVENTS,
-      phone_numbers: [from],
-    });
+    subscription = await createExactLineSmokeSubscription(sdk, target.toString(), from);
     await updateLiveState(stateFile, {
       LINQ_WEBHOOK_SUBSCRIPTION_ID: subscription.id,
       LINQ_WEBHOOK_SIGNING_SECRET: subscription.signing_secret,
@@ -368,12 +373,18 @@ async function live() {
     adapter = await createAdapter({ ...apiConfig(), signingSecret: subscription.signing_secret });
     attachChat(adapter);
 
-    await sdk.messages.create({
-      from,
-      to: [to],
-      message: { parts: [{ type: "text", value: text }] },
-    });
-    console.log(JSON.stringify({ sent: true, message_count: 1, waiting_for: "message.sent" }));
+    const sent = await sendExactLineText(sdk, { from, to, text });
+    console.log(
+      JSON.stringify({
+        sent: true,
+        message_count: 1,
+        exact_line_verified: true,
+        line_fp: fingerprint(sent.from),
+        chat_fp: fingerprint(sent.chatId),
+        message_fp: fingerprint(sent.messageId),
+        waiting_for: "message.sent",
+      }),
+    );
 
     const outcome = await Promise.race([
       deliveryPromise,
@@ -387,7 +398,7 @@ async function live() {
   } finally {
     if (subscription) {
       try {
-        await sdk.webhookSubscriptions.delete(subscription.id);
+        await deleteSmokeSubscription(sdk, subscription.id);
         subscriptionDeleted = true;
         await updateLiveState(stateFile, {
           LINQ_WEBHOOK_SUBSCRIPTION_ID: "",
