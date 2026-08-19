@@ -62,9 +62,11 @@ non-empty versions. The ordinary path retains narrow compatibility dispatch for 
 payloads and acknowledges future/unknown versions without current-schema dispatch. Verified
 generic callbacks and atomic provider/partner/event deduplication are implemented through
 `adapter.onLinqEvent(...)`. They are at-most-once attempted after claim; callback failures are
-isolated and logged. One-step generic callbacks still block acknowledgement until Batch `005C`
-adds `WebhookOptions.waitUntil` scheduling. Consult `packages/adapter-linq/FEATURE_PARITY.md` before
-describing scheduling or other planned behavior as implemented.
+isolated and logged. Generic callbacks do not block acknowledgement. Pass the host's
+`WebhookOptions.waitUntil` implementation so their completion survives the response; without it,
+serverless completion is not guaranteed. Durable consumers must commit or enqueue the verified
+observation before dispatch. Consult `packages/adapter-linq/FEATURE_PARITY.md` for the remaining
+live-evidence gap.
 
 The checked-in inventory records 68 callable operations, 56 webhook examples, and 45 event names.
 Run `pnpm openapi:check` to detect canonical schema drift. `@linqapp/sdk@0.42.0` has no unwrap union;

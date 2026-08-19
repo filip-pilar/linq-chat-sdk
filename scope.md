@@ -129,10 +129,11 @@ justifies it.
 
 The public extensions are deliberately cohesive:
 
-- Batch `005`: `005A`/`005B` typed one/many/all `onLinqEvent()` registration, lossless verified
-  fan-out, atomic provider/partner/event dedupe, standard message/reaction coexistence, and callback
-  failure isolation are complete. `005C` adds fast acknowledgement, `WebhookOptions.waitUntil`,
-  representative fixtures, durable-ingress guidance, and live replay/timing evidence.
+- Batch `005`: `005A`–`005C` typed one/many/all `onLinqEvent()` registration, lossless verified
+  fan-out, atomic provider/partner/event dedupe, standard message/reaction coexistence, callback
+  failure isolation, fast acknowledgement, `WebhookOptions.waitUntil`, representative fixtures,
+  and durable-ingress guidance are implemented. Real signed-webhook replay/timing evidence remains
+  an external validation gate before Batch `006`.
 - Batch `006`: lifecycle normalization immediately after `005`, split into `006A` for
   sent/delivered/read/failed contracts and `006B` for edited/reconciled state and validation.
 - Batches `007`/`010`: one `LinqMessageOptions` model created by

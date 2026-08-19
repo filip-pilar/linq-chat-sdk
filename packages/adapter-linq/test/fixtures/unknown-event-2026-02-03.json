@@ -1,0 +1,10 @@
+{
+  "api_version": "v3",
+  "webhook_version": "2026-02-03",
+  "event_type": "future.provider_event",
+  "event_id": "10d156df-cb7f-4a86-b134-c90a83cbe280",
+  "created_at": "2026-05-08T16:21:12.793119775Z",
+  "trace_id": "44ad357b88d04ac5a83b93d9f7794820",
+  "partner_id": "d4eaec41-a266-4b25-8fe1-9a61724e30e5",
+  "data": ["opaque", { "nested": true }]
+}

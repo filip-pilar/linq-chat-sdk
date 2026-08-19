@@ -64,7 +64,7 @@ export function createLinqEvent(webhook: LinqVerifiedWebhook): LinqAnyEvent {
   }) as LinqAnyEvent;
 }
 
-/** Instance-local callback registry. Batch 005B owns verified dispatch into it. */
+/** Instance-local callback registry for verified Linq event dispatch. */
 export class LinqEventRegistry {
   private readonly all = new Set<LinqEventRegistration>();
   private readonly byType = new Map<LinqKnownEventType, Set<LinqEventRegistration>>();

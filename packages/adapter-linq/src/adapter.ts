@@ -467,23 +467,20 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     }
 
     const genericDispatch = this.dispatchGenericLinqEvent(webhook, genericHandlers);
-    let standardDispatch: Promise<LinqVerifiedWebhookDispatchResult>;
+
+    if (genericHandlers.length > 0 && options?.waitUntil) {
+      options.waitUntil(genericDispatch);
+    }
 
     if (webhook.envelope.versionStatus === "older") {
-      standardDispatch = this.dispatchCompatibilityWebhook(event, options);
-    } else if (webhook.envelope.versionStatus === "current") {
-      standardDispatch = this.dispatchWebhookEvent(event, options);
-    } else {
-      standardDispatch = Promise.resolve({ handled: "ignored" });
+      return this.dispatchCompatibilityWebhook(event, options);
     }
 
-    const [standardResult] = await Promise.allSettled([standardDispatch, genericDispatch]);
-
-    if (standardResult.status === "rejected") {
-      throw standardResult.reason;
+    if (webhook.envelope.versionStatus === "current") {
+      return this.dispatchWebhookEvent(event, options);
     }
 
-    return standardResult.value;
+    return { handled: "ignored" };
   }
 
   private async dispatchGenericLinqEvent(

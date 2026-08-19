@@ -47,3 +47,8 @@ the standard Chat SDK `thread.markAsRead(message)` API; Linq implements this as 
 acknowledgement. Legacy Linq subscriptions require explicit adapter
 `webhookVerificationMode: "legacy"` while they are migrated to a Standard `whsec_` subscription
 secret. The application never falls back from failed Standard verification to legacy verification.
+
+The example route's post-dispatch database write is an observability aid, not the adapter's durable
+ingress pattern. Production workflows that require replayable side effects should verify, commit or
+enqueue the authenticated observation, and only then call `dispatchVerifiedWebhook()` as documented
+in the adapter README.

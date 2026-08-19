@@ -65,10 +65,10 @@ const unsubscribe = adapter.onLinqEvent(["message.delivered", "message.failed"],
 unsubscribe();
 ```
 
-Generic callbacks are currently awaited by the one-step webhook response. A claimed callback is
-at-most-once attempted: failure is logged and isolated, and a duplicate delivery will not invoke it
-again. Persist the result of `verifyWebhook()` before `dispatchVerifiedWebhook()` when application
-work needs its own durable retry policy. Batch `005C` adds non-blocking `waitUntil` scheduling.
+Generic callbacks do not delay the one-step webhook response. Pass the host's `waitUntil` through
+the webhook options so their completion remains alive after acknowledgement. Without it, a
+serverless host may terminate before callbacks finish. A claimed callback is at-most-once
+attempted: failure is logged and isolated, and a duplicate delivery will not invoke it again.
 
 ## Verified ingress
 
@@ -93,10 +93,13 @@ const webhookOptions = {
 };
 
 // Persist or correlate provider observations in the application's own model.
-await eventStore.record({
+await eventStore.recordIfAbsent({
   provider: webhook.envelope.provider,
+  partnerId: webhook.envelope.partnerId,
   eventId: webhook.envelope.eventId,
   raw: webhook.rawEvent,
+  rawBodyBase64: webhook.rawBodyBase64,
+  transport: webhook.transport,
 });
 
 if (shouldRunChatHandlers(webhook)) {
@@ -112,12 +115,18 @@ adapter instance that verified it; `dispatchVerifiedWebhook()` rejects forged
 results and results from another adapter. Do not call the one-step handler with
 the same consumed `Request` afterward.
 
-`dispatchVerifiedWebhook()` enters the existing Chat SDK dispatch path and
-forwards `WebhookOptions`. Awaiting it does not guarantee that every Chat SDK
-handler has completed. When `waitUntil` is supplied, Chat SDK registers the
-downstream task with it; task lifetime and completion then follow the host's
-`waitUntil` behavior. Without `waitUntil`, handler execution still follows the
-ordinary `Chat.processMessage()` lifecycle and error handling.
+`dispatchVerifiedWebhook()` enters the existing Chat SDK dispatch path and forwards
+`WebhookOptions`. Awaiting it does not mean Chat SDK or generic event handlers have completed. When
+`waitUntil` is supplied, both paths register their downstream tasks with it; task lifetime and
+completion then follow the host's `waitUntil` behavior. Without `waitUntil`, callback completion is
+not guaranteed on serverless hosts.
+
+Commit the authenticated observation before dispatch and return a non-success response if that
+commit fails, so a provider retry can try persistence again before the adapter claims the event.
+Use a uniqueness key containing provider, authenticated partner ID, and provider event ID. If
+downstream side effects require retries beyond one callback attempt, transactionally enqueue them
+with the observation and run them from an application-owned worker; `waitUntil` extends request
+lifetime but is not a durable queue.
 
 The normalized contract targets Linq webhook version `2026-02-03`. Authenticated older, future, and
 unknown non-empty versions are preserved losslessly as `kind: "unsupported_version"` with a
@@ -230,7 +239,7 @@ administrative behavior remains on `adapter.client`.
 | Typing indicators                                  | ✅ DMs only (Linq rejects typing in groups)                                                                                |
 | Webhook signature verification + replay protection | ✅                                                                                                                         |
 | Two-phase verified webhook ingress                 | ✅ `2026-02-03` typed facts + optional Chat SDK dispatch                                                                   |
-| Generic Linq event registration                    | ⚠️ verified one/many/all delivery + atomic dedupe; non-blocking `waitUntil` scheduling remains `005C`                      |
+| Generic Linq event registration                    | ✅ verified one/many/all delivery, atomic dedupe, callback isolation, and non-blocking `waitUntil` scheduling              |
 | Streaming                                          | ⚠️ buffered — recipients see one final message                                                                             |
 | Sticker reactions                                  | ❌ skipped (no Chat SDK equivalent)                                                                                        |
 | Delete message                                     | ❌ Linq cannot unsend on the recipient's device                                                                            |

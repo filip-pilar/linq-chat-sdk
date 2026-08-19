@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createLinqAdapter, type LinqAdapter } from "../src/index.js";
 import fixture from "./fixtures/message-received-2026-02-03.json";
+import unknownFixture from "./fixtures/unknown-event-2026-02-03.json";
 
 const SIGNING_KEY = "test_linq_webhook_secret";
 const SIGNING_SECRET = `whsec_${Buffer.from(SIGNING_KEY).toString("base64")}`;
@@ -60,10 +61,14 @@ describe("verified generic Linq event dispatch", () => {
       throw failure;
     });
     const sibling = vi.fn();
+    const tasks: Promise<unknown>[] = [];
     context.adapter.onLinqEvent("message.received", failed);
     context.adapter.onLinqEvent("message.received", sibling);
 
-    const response = await context.adapter.handleWebhook(createStandardRequest(fixture));
+    const response = await context.adapter.handleWebhook(createStandardRequest(fixture), {
+      waitUntil: (task) => tasks.push(task),
+    });
+    await tasks[0];
 
     expect(response.status).toBe(200);
     expect(context.processMessage).toHaveBeenCalledTimes(1);
@@ -117,17 +122,97 @@ describe("verified generic Linq event dispatch", () => {
     );
   });
 
+  it("acknowledges without waiting for a slow generic callback", async () => {
+    const context = await createContext();
+    const deferred = createDeferred();
+    const handler = vi.fn(() => deferred.promise);
+    context.adapter.onLinqEvent(handler);
+
+    const response = await context.adapter.handleWebhook(createStandardRequest(unknownFixture));
+
+    expect(response.status).toBe(200);
+    expect(handler).toHaveBeenCalledTimes(1);
+    deferred.resolve();
+    await deferred.promise;
+  });
+
+  it("registers generic callback completion with waitUntil", async () => {
+    const context = await createContext();
+    const deferred = createDeferred();
+    const handler = vi.fn(() => deferred.promise);
+    const tasks: Promise<unknown>[] = [];
+    context.adapter.onLinqEvent(handler);
+
+    const response = await context.adapter.handleWebhook(createStandardRequest(unknownFixture), {
+      waitUntil: (task) => tasks.push(task),
+    });
+
+    expect(response.status).toBe(200);
+    expect(tasks).toHaveLength(1);
+    expect(handler).toHaveBeenCalledTimes(1);
+
+    let completed = false;
+    void tasks[0]?.then(() => {
+      completed = true;
+    });
+    await Promise.resolve();
+    expect(completed).toBe(false);
+
+    deferred.resolve();
+    await tasks[0];
+    expect(completed).toBe(true);
+  });
+
+  it("acknowledges a duplicate while the claimed callback is still running", async () => {
+    const context = await createContext();
+    const deferred = createDeferred();
+    const handler = vi.fn(() => deferred.promise);
+    const tasks: Promise<unknown>[] = [];
+    context.adapter.onLinqEvent(handler);
+
+    const first = await context.adapter.handleWebhook(createStandardRequest(unknownFixture), {
+      waitUntil: (task) => tasks.push(task),
+    });
+    const duplicate = await context.adapter.handleWebhook(
+      createStandardRequest(unknownFixture, { "webhook-id": "pending-callback-replay" }),
+      { waitUntil: (task) => tasks.push(task) },
+    );
+
+    expect(first.status).toBe(200);
+    expect(duplicate.status).toBe(200);
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(tasks).toHaveLength(1);
+    deferred.resolve();
+    await tasks[0];
+  });
+
+  it("uses the same waitUntil scheduling in two-phase dispatch", async () => {
+    const context = await createContext();
+    const deferred = createDeferred();
+    const tasks: Promise<unknown>[] = [];
+    context.adapter.onLinqEvent(() => deferred.promise);
+    const verification = await context.adapter.verifyWebhook(createStandardRequest(unknownFixture));
+
+    if (!verification.ok) {
+      throw new Error("Expected verification success");
+    }
+
+    const result = await context.adapter.dispatchVerifiedWebhook(verification.webhook, {
+      waitUntil: (task) => tasks.push(task),
+    });
+
+    expect(result).toEqual({ handled: "ignored" });
+    expect(tasks).toHaveLength(1);
+    deferred.resolve();
+    await tasks[0];
+  });
+
   it("delivers current unknown names losslessly only to all-event handlers", async () => {
     const context = await createContext();
     const all = vi.fn();
     context.adapter.onLinqEvent(all);
-    const payload = {
-      ...fixture,
-      event_type: "future.provider_event",
-      data: ["opaque", { nested: true }],
-    };
 
-    const response = await context.adapter.handleWebhook(createStandardRequest(payload));
+    const response = await context.adapter.handleWebhook(createStandardRequest(unknownFixture));
 
     expect(response.status).toBe(200);
     expect(all).toHaveBeenCalledTimes(1);
@@ -135,7 +220,7 @@ describe("verified generic Linq event dispatch", () => {
     expect(event).toMatchObject({
       type: "future.provider_event",
       data: ["opaque", { nested: true }],
-      rawEvent: payload,
+      rawEvent: unknownFixture,
     });
     expect(Object.isFrozen(event)).toBe(true);
     expect(Object.isFrozen(event.rawEvent)).toBe(true);
@@ -264,4 +349,13 @@ function createStandardRequest(payload: unknown, overrides: Record<string, strin
     },
     body,
   });
+}
+
+function createDeferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((complete) => {
+    resolve = complete;
+  });
+
+  return { promise, resolve };
 }
