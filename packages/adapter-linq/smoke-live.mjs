@@ -1,267 +1,426 @@
-// Live smoke test against the REAL Linq API, through the real adapter.
-// Whatever lands on your phone is exactly what ships.
+// Guarded live smoke tooling for the real Linq API.
 //
-//   send  — bootstrap a chat (or reuse one) and send text + two images
-//   cards — send Chat SDK cards (incl. the image+buttons card that used to vanish)
-//   serve — receive real webhooks (text/reactions) and optionally echo-reply
+// Every mode is plan-only unless --apply is present. Mutating modes also require
+// an exact confirmation phrase. Output contains fingerprints, never raw handles,
+// credentials, provider IDs, message content, or target URLs.
 //
-// Run from packages/adapter-linq so deps + ./dist resolve.
-//
-//   pnpm build   # make sure dist is current
-//
-//   LINQ_API_KEY=...  LINQ_FROM=+1...  LINQ_TEST_TO=+1<your phone> \
-//   [LINQ_BASE_URL=https://sandbox...] node smoke-live.mjs send
-//
-//   LINQ_API_KEY=...  LINQ_SIGNING_SECRET=...  LINQ_ECHO=1 \
-//   [PORT=8787] node smoke-live.mjs serve     # then tunnel + register webhook
+// Run from packages/adapter-linq after `pnpm build`:
+//   node smoke-live.mjs send
+//   node smoke-live.mjs send --apply
+//   node smoke-live.mjs serve
+//   node smoke-live.mjs serve --apply
+//   node smoke-live.mjs live
+//   node smoke-live.mjs live --apply
 
+import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
+import { chmod, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import { Buffer } from "node:buffer";
+import { resolve } from "node:path";
+import { promisify } from "node:util";
 
 import { LinqAPIV3 } from "@linqapp/sdk";
-import {
-  Actions,
-  Button,
-  Card,
-  CardLink,
-  CardText,
-  Divider,
-  Field,
-  Fields,
-  Image,
-  LinkButton,
-} from "chat";
 import { createLinqAdapter } from "./dist/index.js";
 
-const API_KEY = need("LINQ_API_KEY");
-const BASE_URL = process.env.LINQ_BASE_URL || undefined;
-// Real 1x1 PNG so Linq's content validation passes on the pre-upload path.
-const PNG_1x1 = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
-  "base64",
-);
-const IMAGE_URL =
-  process.env.LINQ_TEST_IMAGE_URL ||
-  "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Cat03.jpg/120px-Cat03.jpg";
+const CURRENT_WEBHOOK_VERSION = "2026-02-03";
+const SEND_CONFIRMATION = "SEND_ONE_REAL_TEXT";
+const RECEIVE_CONFIRMATION = "ACCEPT_REAL_WEBHOOKS";
+const LIVE_EVENTS = ["message.received", "message.sent"];
+const DEFAULT_TEXT = "Linq adapter live smoke test.";
+const DEFAULT_PORT = 8787;
+const LIVE_TIMEOUT_MS = 60_000;
+const execFileAsync = promisify(execFile);
 
-function need(name) {
-  const v = process.env[name];
-  if (!v) {
-    console.error(`missing env: ${name}`);
-    process.exit(2);
+const mode = process.argv[2];
+const apply = process.argv.slice(3).includes("--apply");
+
+function optional(...names) {
+  for (const name of names) {
+    const value = process.env[name]?.trim();
+    if (value) return value;
   }
-  return v;
+  return undefined;
 }
 
-function adapter(signingSecret = "unused-for-outbound") {
-  return createLinqAdapter({ apiKey: API_KEY, baseURL: BASE_URL, signingSecret });
+function need(...names) {
+  const value = optional(...names);
+  if (!value) throw new Error(`missing required environment setting: ${names.join(" or ")}`);
+  return value;
 }
 
-async function step(label, fn) {
-  process.stdout.write(`  … ${label}`);
-  try {
-    const out = await fn();
-    console.log(`\r  ✓ ${label}${out ? ` — ${out}` : ""}`);
-    return true;
-  } catch (err) {
-    const status = err?.status ? ` [${err.status}]` : "";
-    const body = err?.error ? ` ${JSON.stringify(err.error)}` : ` ${err?.message ?? err}`;
-    console.log(`\r  ✗ ${label}${status}${body}`);
-    return false;
+function exactPhone(name, value) {
+  if (!/^\+[1-9]\d{7,14}$/.test(value)) {
+    throw new Error(`${name} must be one exact E.164 handle`);
+  }
+  return value;
+}
+
+function fingerprint(value) {
+  return createHash("sha256").update(value).digest("hex").slice(0, 12);
+}
+
+function requireConfirmation(expected) {
+  if (process.env.LINQ_LIVE_CONFIRM !== expected) {
+    throw new Error(`--apply requires LINQ_LIVE_CONFIRM=${expected}`);
   }
 }
 
-async function bootstrapChat(firstMessage) {
-  let chatId = process.env.LINQ_TEST_CHAT_ID;
+function apiConfig() {
+  return {
+    apiKey: need("LINQ_API_KEY", "LINQ_API_TOKEN"),
+    baseURL: optional("LINQ_BASE_URL", "LINQ_API_BASE_URL"),
+  };
+}
 
-  if (!chatId) {
-    const from = need("LINQ_FROM");
-    const to = need("LINQ_TEST_TO");
-    const sdk = new LinqAPIV3({ apiKey: API_KEY, baseURL: BASE_URL });
-    console.log(`bootstrapping a chat ${from} → ${to} …`);
-    const created = await sdk.chats.create({
-      from,
-      to: [to],
-      message: { parts: [{ type: "text", value: firstMessage }] },
-    });
-    chatId = created.chat.id;
-    console.log(`chat id: ${chatId}\n`);
-  } else {
-    console.log(`reusing chat ${chatId}\n`);
+function lineAndRecipient() {
+  return {
+    from: exactPhone("LINQ_FROM", need("LINQ_FROM", "LINQ_DEVELOPMENT_LINE")),
+    to: exactPhone("LINQ_TEST_TO", need("LINQ_TEST_TO")),
+  };
+}
+
+function webhookTarget() {
+  const target = new URL(need("LINQ_WEBHOOK_TARGET_URL"));
+  const runID = need("LINQ_LIVE_RUN_ID");
+  if (target.protocol !== "https:") {
+    throw new Error("LINQ_WEBHOOK_TARGET_URL must use HTTPS");
   }
+  if (!/^[A-Za-z0-9_-]{8,64}$/.test(runID)) {
+    throw new Error("LINQ_LIVE_RUN_ID must contain 8-64 safe identifier characters");
+  }
+  target.searchParams.set("version", CURRENT_WEBHOOK_VERSION);
+  target.searchParams.set("smoke_run", runID);
+  return target;
+}
 
-  return chatId;
+function port() {
+  const value = Number(optional("PORT") ?? DEFAULT_PORT);
+  if (!Number.isInteger(value) || value < 1 || value > 65_535) {
+    throw new Error("PORT must be an integer from 1 through 65535");
+  }
+  return value;
+}
+
+function printPlan(plan) {
+  console.log(JSON.stringify({ apply: false, ...plan }, null, 2));
+  console.log(
+    "No provider operation was performed. Re-run with --apply and the displayed confirmation.",
+  );
+}
+
+function safeFailure(error) {
+  return {
+    name: error instanceof Error ? error.name : "UnknownError",
+    status: typeof error?.status === "number" ? error.status : undefined,
+    code:
+      typeof error?.code === "number" || typeof error?.code === "string" ? error.code : undefined,
+  };
 }
 
 async function send() {
-  const a = adapter();
-  const chatId = await bootstrapChat("linq adapter smoke test 👋 (1/4)");
-  const threadId = `linq:${chatId}`;
-  console.log("sending through the adapter — watch your phone:");
+  const { from, to } = lineAndRecipient();
+  const text = optional("LINQ_TEST_TEXT") ?? DEFAULT_TEXT;
+  const plan = {
+    mode: "send",
+    provider_mutation: "one outbound text",
+    message_count: 1,
+    line_fp: fingerprint(from),
+    recipient_fp: fingerprint(to),
+    text_fp: fingerprint(text),
+    confirmation: SEND_CONFIRMATION,
+  };
+  if (!apply) return printPlan(plan);
 
-  let ok = true;
-  ok &= await step("2/4 outbound text", async () => {
-    const r = await a.postMessage(threadId, "outbound text via the adapter ✅ (2/4)");
-    return `msg ${r.id}`;
+  requireConfirmation(SEND_CONFIRMATION);
+  const sdk = new LinqAPIV3(apiConfig());
+  const result = await sdk.messages.create({
+    from,
+    to: [to],
+    message: { parts: [{ type: "text", value: text }] },
   });
-  ok &= await step("3/4 image by public URL", async () => {
-    const r = await a.postMessage(threadId, {
-      markdown: "image by url (3/4)",
-      attachments: [{ type: "image", url: IMAGE_URL, mimeType: "image/jpeg" }],
-    });
-    return `msg ${r.id}`;
-  });
-  ok &= await step("4/4 image by bytes (real /attachments pre-upload + PUT)", async () => {
-    const r = await a.postMessage(threadId, {
-      markdown: "image by bytes (4/4)",
-      files: [{ filename: "smoke.png", mimeType: "image/png", data: PNG_1x1 }],
-    });
-    return `msg ${r.id}`;
-  });
-
   console.log(
-    ok
-      ? "\nall sends accepted by Linq. confirm all 4 messages + both images arrived on the device."
-      : "\nsomething was rejected — the error above is the real Linq response. that's the bug to fix before Wed.",
+    JSON.stringify({
+      ok: true,
+      mode: "send",
+      message_count: 1,
+      message_fp: fingerprint(result.message.id),
+      chat_fp: fingerprint(result.chat_id),
+    }),
   );
-  process.exit(ok ? 0 : 1);
 }
 
-// The card payloads below are exactly what chat-core hands the adapter after
-// thread.post(<Card …/>) — JSX is flattened to these CardElement objects by
-// toCardElement() before postMessage() runs.
-async function cards() {
-  const a = adapter();
-  const chatId = await bootstrapChat("linq adapter card smoke test 🃏 (1/4)");
-  const threadId = `linq:${chatId}`;
-  console.log("sending cards through the adapter — watch your phone:");
-
-  let ok = true;
-  ok &= await step("2/4 full text card (title/fields/link/divider/buttons)", async () => {
-    const r = await a.postMessage(
-      threadId,
-      Card({
-        title: "Order #1234 (2/4)",
-        subtitle: "Placed today",
-        children: [
-          CardText("Your order has been **received**! _No literal asterisks should show._"),
-          Fields([Field({ label: "Name", value: "Eve" }), Field({ label: "Total", value: "$42" })]),
-          CardLink({ url: "https://chat-sdk.dev/docs/cards", label: "View order" }),
-          Divider(),
-          Actions([
-            Button({ id: "approve", label: "Approve", style: "primary" }),
-            Button({ id: "reject", label: "Reject", style: "danger" }),
-            LinkButton({ url: "https://linqapp.com", label: "Get help" }),
-          ]),
-        ],
-      }),
-    );
-    return `msg ${r.id}`;
-  });
-  ok &= await step("3/4 card with an image element", async () => {
-    const r = await a.postMessage(
-      threadId,
-      Card({
-        title: "Card with image (3/4)",
-        children: [
-          CardText("This card should arrive as text + a real image attachment."),
-          Image({ url: IMAGE_URL, alt: "cat" }),
-        ],
-      }),
-    );
-    return `msg ${r.id}`;
-  });
-  ok &= await step("4/4 regression: image + buttons only (used to vanish)", async () => {
-    const r = await a.postMessage(
-      threadId,
-      Card({
-        children: [
-          Image({ url: IMAGE_URL, alt: "cat" }),
-          Actions([Button({ id: "yes", label: "Yes" }), Button({ id: "no", label: "No" })]),
-        ],
-      }),
-    );
-    return `msg ${r.id}`;
-  });
-
-  console.log(
-    ok
-      ? "\nall card sends accepted by Linq. on the device, check: (2/4) one clean text bubble with no ** or dropped links, (3/4) text + image, (4/4) 'Options: Yes, No' + image."
-      : "\na card send was rejected — the error above is the real Linq response.",
-  );
-  process.exit(ok ? 0 : 1);
-}
-
-async function serve() {
-  const signingSecret = need("LINQ_SIGNING_SECRET");
-  const a = adapter(signingSecret);
-  const echo = process.env.LINQ_ECHO === "1";
-  const port = Number(process.env.PORT || 8787);
-
-  // Minimal stand-in for ChatInstance: log what the adapter dispatches, and
-  // (optionally) reply so you get a real round-trip on the device.
-  a.chat = {
+function attachChat(adapter) {
+  adapter.chat = {
     processMessage: async (_adapter, threadId, factory) => {
-      const msg = await factory();
+      const message = await factory();
       console.log(
-        `\n📩 inbound message  thread=${threadId}  from=${msg.author?.userName}  text=${JSON.stringify(msg.text)}  attachments=${msg.attachments?.length ?? 0}`,
+        JSON.stringify({
+          delivery: "message",
+          thread_fp: fingerprint(threadId),
+          message_fp: fingerprint(message.id),
+          attachments: message.attachments?.length ?? 0,
+        }),
       );
-      if (echo && msg.text) {
-        await a
-          .postMessage(threadId, `echo: ${msg.text}`)
-          .then((r) => console.log(`   ↪︎ replied msg ${r.id}`))
-          .catch((e) => console.log(`   ↪︎ reply failed: ${e?.message ?? e}`));
-      }
     },
-    processReaction: (payload) => {
+    processReaction: (reaction) => {
       console.log(
-        `\n👍 inbound reaction  ${payload.added ? "added" : "removed"}  ${payload.emoji?.name}  on msg=${payload.messageId}`,
+        JSON.stringify({
+          delivery: "reaction",
+          message_fp: fingerprint(reaction.messageId),
+          added: reaction.added,
+        }),
       );
     },
   };
+}
 
-  createServer(async (req, res) => {
-    if (req.method !== "POST") {
-      res.writeHead(200);
-      res.end("ok");
+function requestHandler(getAdapter, receiverPort, delivery) {
+  return async (request, response) => {
+    if (request.method !== "POST") {
+      response.writeHead(200);
+      response.end("ok");
       return;
     }
+
+    const adapter = getAdapter();
+    if (!adapter) {
+      response.writeHead(503);
+      response.end("receiver not ready");
+      return;
+    }
+
     const chunks = [];
-    for await (const c of req) chunks.push(c);
+    for await (const chunk of request) chunks.push(chunk);
     const raw = Buffer.concat(chunks);
     const headers = new Headers();
-    for (const [k, v] of Object.entries(req.headers)) {
-      if (typeof v === "string") headers.set(k, v);
+    for (const [name, value] of Object.entries(request.headers)) {
+      if (typeof value === "string") headers.set(name, value);
     }
-    const request = new Request(`http://localhost:${port}${req.url}`, {
-      method: "POST",
-      headers,
-      body: raw,
-    });
-    const response = await a.handleWebhook(request);
-    if (response.status !== 200) {
-      console.log(`⚠️  webhook rejected: ${response.status} ${await response.text()}`);
+
+    let eventType = "unknown";
+    try {
+      const parsed = JSON.parse(raw.toString("utf8"));
+      if (typeof parsed?.event_type === "string") eventType = parsed.event_type;
+    } catch {
+      // The adapter owns the typed malformed-body response.
     }
-    res.writeHead(response.status);
-    res.end(await response.text().catch(() => ""));
-  }).listen(port, () => {
-    console.log(`webhook receiver on http://localhost:${port}`);
-    console.log("now expose it and register the webhook:");
-    console.log(`  1. tunnel:   cloudflared tunnel --url http://localhost:${port}`);
-    console.log("                (or: ngrok http " + port + ")");
-    console.log("  2. register the https tunnel URL as a Linq webhook subscription");
-    console.log("     events: message.received, reaction.added, reaction.removed");
-    console.log(
-      "  3. text the sandbox number from your phone — watch this log" + (echo ? " (echo on)" : ""),
+
+    const result = await adapter.handleWebhook(
+      new Request(`http://127.0.0.1:${receiverPort}${request.url}`, {
+        method: "POST",
+        headers,
+        body: raw,
+      }),
     );
+    const responseText = await result.text();
+    console.log(JSON.stringify({ delivery: eventType, status: result.status }));
+    if (result.status === 200) delivery?.(eventType);
+    response.writeHead(result.status, { "content-type": "text/plain" });
+    response.end(responseText);
+  };
+}
+
+function waitForSignal() {
+  return new Promise((resolveSignal) => {
+    const stop = (signal) => resolveSignal(signal);
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
   });
 }
 
-const mode = process.argv[2];
-if (mode === "send") await send();
-else if (mode === "cards") await cards();
-else if (mode === "serve") await serve();
-else {
-  console.error("usage: node smoke-live.mjs <send|cards|serve>");
-  process.exit(2);
+async function listen(server, receiverPort) {
+  await new Promise((resolveListen, reject) => {
+    server.once("error", reject);
+    server.listen(receiverPort, "127.0.0.1", resolveListen);
+  });
+}
+
+async function close(server) {
+  if (!server.listening) return;
+  await new Promise((resolveClose, reject) => {
+    server.close((error) => (error ? reject(error) : resolveClose()));
+  });
+}
+
+async function serve() {
+  const receiverPort = port();
+  const plan = {
+    mode: "serve",
+    provider_mutation: "none",
+    receiver_port: receiverPort,
+    echo: false,
+    confirmation: RECEIVE_CONFIRMATION,
+  };
+  if (!apply) return printPlan(plan);
+
+  requireConfirmation(RECEIVE_CONFIRMATION);
+  const signingSecret = need("LINQ_SIGNING_SECRET", "LINQ_WEBHOOK_SIGNING_SECRET");
+  const adapter = createLinqAdapter({ ...apiConfig(), signingSecret });
+  attachChat(adapter);
+  const server = createServer(requestHandler(() => adapter, receiverPort));
+
+  try {
+    await listen(server, receiverPort);
+    console.log(
+      JSON.stringify({ ready: true, mode: "serve", receiver_port: receiverPort, echo: false }),
+    );
+    await waitForSignal();
+  } finally {
+    await close(server);
+    console.log(JSON.stringify({ cleaned_up: true, resource: "local receiver" }));
+  }
+}
+
+async function updateLiveState(path, values) {
+  const absolutePath = resolve(path);
+  const existing = await readFile(absolutePath, "utf8");
+  const replacements = new Map(Object.entries(values));
+  const found = new Set();
+  const lines = existing.split(/\r?\n/).map((line) => {
+    const match = line.match(/^([A-Za-z_][A-Za-z0-9_]*)=/);
+    if (!match || !replacements.has(match[1])) return line;
+    found.add(match[1]);
+    return `${match[1]}=${replacements.get(match[1])}`;
+  });
+  for (const [name, value] of replacements) {
+    if (!found.has(name)) lines.push(`${name}=${value}`);
+  }
+
+  const temporary = `${absolutePath}.${process.pid}.tmp`;
+  await writeFile(temporary, lines.join("\n"), { mode: 0o600 });
+  await chmod(temporary, 0o600);
+  await rename(temporary, absolutePath);
+  await chmod(absolutePath, 0o600);
+}
+
+async function requirePrivateIgnoredStateFile(path) {
+  const absolutePath = resolve(path);
+  const metadata = await stat(absolutePath);
+  if (!metadata.isFile() || (metadata.mode & 0o077) !== 0) {
+    throw new Error("LINQ_LIVE_STATE_FILE must be a regular mode-0600 private file");
+  }
+  try {
+    await execFileAsync("git", ["check-ignore", "-q", "--", absolutePath]);
+  } catch {
+    throw new Error("LINQ_LIVE_STATE_FILE must be ignored by this Git repository");
+  }
+}
+
+async function live() {
+  const { from, to } = lineAndRecipient();
+  const receiverPort = port();
+  const target = webhookTarget();
+  const text = optional("LINQ_TEST_TEXT") ?? DEFAULT_TEXT;
+  const stateFile = need("LINQ_LIVE_STATE_FILE");
+  const plan = {
+    mode: "live",
+    provider_mutation: "ephemeral filtered subscription plus one outbound text",
+    message_count: 1,
+    line_fp: fingerprint(from),
+    recipient_fp: fingerprint(to),
+    target_fp: fingerprint(target.toString()),
+    exact_phone_filter: true,
+    events: LIVE_EVENTS,
+    webhook_version: CURRENT_WEBHOOK_VERSION,
+    echo: false,
+    cleanup: "delete subscription in finally",
+    confirmation: SEND_CONFIRMATION,
+  };
+  if (!apply) return printPlan(plan);
+
+  requireConfirmation(SEND_CONFIRMATION);
+  await requirePrivateIgnoredStateFile(stateFile);
+  const sdk = new LinqAPIV3(apiConfig());
+  let adapter;
+  let subscription;
+  let subscriptionDeleted = false;
+  let stateCleared = false;
+  let resolveDelivery;
+  const deliveryPromise = new Promise((resolveSeen) => {
+    resolveDelivery = resolveSeen;
+  });
+  const server = createServer(
+    requestHandler(
+      () => adapter,
+      receiverPort,
+      (eventType) => {
+        if (eventType === "message.sent") resolveDelivery(eventType);
+      },
+    ),
+  );
+
+  try {
+    await listen(server, receiverPort);
+    subscription = await sdk.webhookSubscriptions.create({
+      target_url: target.toString(),
+      subscribed_events: LIVE_EVENTS,
+      phone_numbers: [from],
+    });
+    await updateLiveState(stateFile, {
+      LINQ_WEBHOOK_SUBSCRIPTION_ID: subscription.id,
+      LINQ_WEBHOOK_SIGNING_SECRET: subscription.signing_secret,
+      LINQ_WEBHOOK_TARGET_URL: target.toString(),
+    });
+    adapter = createLinqAdapter({ ...apiConfig(), signingSecret: subscription.signing_secret });
+    attachChat(adapter);
+
+    await sdk.messages.create({
+      from,
+      to: [to],
+      message: { parts: [{ type: "text", value: text }] },
+    });
+    console.log(JSON.stringify({ sent: true, message_count: 1, waiting_for: "message.sent" }));
+
+    const outcome = await Promise.race([
+      deliveryPromise,
+      new Promise((resolveTimeout) => setTimeout(() => resolveTimeout("timeout"), LIVE_TIMEOUT_MS)),
+      waitForSignal(),
+    ]);
+    if (outcome !== "message.sent") {
+      throw new Error("no verified message.sent delivery arrived before stop/timeout");
+    }
+    console.log(JSON.stringify({ verified_provider_delivery: true, event: outcome }));
+  } finally {
+    if (subscription) {
+      try {
+        await sdk.webhookSubscriptions.delete(subscription.id);
+        subscriptionDeleted = true;
+        await updateLiveState(stateFile, {
+          LINQ_WEBHOOK_SUBSCRIPTION_ID: "",
+          LINQ_WEBHOOK_SIGNING_SECRET: "",
+          LINQ_WEBHOOK_TARGET_URL: "",
+        });
+        stateCleared = true;
+      } catch (error) {
+        console.error(JSON.stringify({ cleanup_failed: true, ...safeFailure(error) }));
+      }
+    }
+    await close(server);
+    console.log(
+      JSON.stringify({
+        subscription_deleted: subscriptionDeleted,
+        private_state_cleared: stateCleared,
+        subscription_created: Boolean(subscription),
+        local_receiver_closed: true,
+      }),
+    );
+  }
+
+  if (subscription && !subscriptionDeleted) {
+    throw new Error("subscription cleanup failed; private state file retains recovery identifiers");
+  }
+  if (subscription && !stateCleared) {
+    throw new Error("subscription was deleted but the private state file could not be cleared");
+  }
+}
+
+try {
+  if (mode === "send") await send();
+  else if (mode === "serve") await serve();
+  else if (mode === "live") await live();
+  else throw new Error("usage: node smoke-live.mjs <send|serve|live> [--apply]");
+} catch (error) {
+  console.error(JSON.stringify({ ok: false, ...safeFailure(error) }));
+  if (error instanceof Error && error.message.startsWith("usage:")) console.error(error.message);
+  process.exitCode = 2;
 }

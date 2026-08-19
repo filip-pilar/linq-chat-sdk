@@ -396,33 +396,49 @@ A full example app (Nitro server wiring Linq, Telegram, and WhatsApp adapters in
 
 ## Live smoke test
 
-`smoke-live.mjs` drives this adapter against the **real Linq API** so you can validate a sandbox in one command. Run `pnpm build` first (it imports `./dist`).
+`smoke-live.mjs` provides a guarded plan/apply workflow against the **real Linq API**. Run
+`pnpm build` first because it imports `./dist`. Every command is plan-only until `--apply` is
+supplied; plans and results fingerprint all provider identifiers and handles.
 
 Get a sandbox number with the [Linq CLI](https://www.npmjs.com/package/@linqapp/cli): `linq signup --phone <your cell>`, then grab the token from `~/.linq/config.json`.
 
 ```bash
-# outbound: bootstrap a chat and send text + two images (one by URL, one pre-uploaded)
-LINQ_API_KEY=<token> LINQ_FROM=<sandbox number> LINQ_TEST_TO=<your cell> \
+# Plan one outbound text. This performs no provider operation.
+LINQ_API_KEY=<token> LINQ_FROM=<exact development line> LINQ_TEST_TO=<exact recipient> \
   node smoke-live.mjs send
 
-# cards: send Chat SDK cards end-to-end — a full text card, a card with an image,
-# and the image+buttons-only card that used to silently vanish
-LINQ_API_KEY=<token> LINQ_FROM=<sandbox number> LINQ_TEST_TO=<your cell> \
-  node smoke-live.mjs cards
+# Apply only after reviewing the redacted plan.
+LINQ_LIVE_CONFIRM=SEND_ONE_REAL_TEXT \
+  node smoke-live.mjs send --apply
 
-# inbound: receive real webhooks (text + reactions), optionally echo-reply
-LINQ_API_KEY=<token> LINQ_SIGNING_SECRET=<webhook secret> LINQ_ECHO=1 \
+# Plan an echo-free local receiver using an existing Standard Webhooks secret.
+LINQ_API_KEY=<token> LINQ_SIGNING_SECRET=<webhook secret> \
   node smoke-live.mjs serve
-# then tunnel it (cloudflared/ngrok) and register the URL as a Linq webhook subscription
+
+# Plan one ephemeral end-to-end delivery. The receiver starts before the subscription,
+# the subscription is filtered to LINQ_FROM, and deletion runs in finally.
+LINQ_WEBHOOK_TARGET_URL=<unique HTTPS tunnel route> \
+LINQ_LIVE_RUN_ID=<stable unique run ID> \
+LINQ_LIVE_STATE_FILE=<ignored mode-0600 env file> \
+  node smoke-live.mjs live
 ```
 
-| Env                          | Mode  | Purpose                                                                           |
-| ---------------------------- | ----- | --------------------------------------------------------------------------------- |
-| `LINQ_API_KEY`               | both  | Linq API token                                                                    |
-| `LINQ_FROM` / `LINQ_TEST_TO` | send  | sender (sandbox) number / your phone — or set `LINQ_TEST_CHAT_ID` to reuse a chat |
-| `LINQ_SIGNING_SECRET`        | serve | webhook signing secret (from the subscription)                                    |
-| `LINQ_BASE_URL`              | both  | override API base URL (optional)                                                  |
-| `LINQ_ECHO=1`                | serve | reply to inbound messages so you get a round-trip on the device                   |
+| Env                                                   | Mode      | Purpose                                                              |
+| ----------------------------------------------------- | --------- | -------------------------------------------------------------------- |
+| `LINQ_API_KEY` / `LINQ_API_TOKEN`                     | all       | Linq API token; never printed                                        |
+| `LINQ_FROM` / `LINQ_TEST_TO`                          | send/live | Exact E.164 development line and recipient; output is fingerprinted  |
+| `LINQ_SIGNING_SECRET` / `LINQ_WEBHOOK_SIGNING_SECRET` | serve     | Existing Standard Webhooks signing secret                            |
+| `LINQ_WEBHOOK_TARGET_URL`                             | live      | Unique HTTPS route; version and unique run ID are added              |
+| `LINQ_LIVE_RUN_ID`                                    | live      | Stable unique run identifier used by both plan and apply             |
+| `LINQ_LIVE_STATE_FILE`                                | live      | Ignored mode-0600 env file for immediate one-time-secret persistence |
+| `LINQ_BASE_URL` / `LINQ_API_BASE_URL`                 | all       | Current SDK base URL override                                        |
+| `LINQ_LIVE_CONFIRM`                                   | apply     | Exact confirmation printed by the reviewed plan                      |
+
+`send --apply` performs exactly one text send. `serve --apply` never echoes. `live --apply` starts
+the local receiver first, creates an exact-line-filtered subscription for only `message.received`
+and `message.sent`, persists the one-time secret immediately, sends one text, verifies a
+provider-produced delivery, and deletes the subscription in `finally`. If deletion fails, the
+private state file retains the recovery identifiers for deterministic manual cleanup.
 
 ## License
 
