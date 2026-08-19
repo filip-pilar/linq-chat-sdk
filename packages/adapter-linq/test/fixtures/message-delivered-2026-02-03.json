@@ -1,0 +1,47 @@
+{
+  "api_version": "v3",
+  "webhook_version": "2026-02-03",
+  "event_type": "message.delivered",
+  "event_id": "10000000-0000-4000-8000-000000000002",
+  "created_at": "2026-05-08T16:21:14.000Z",
+  "trace_id": "trace-message-delivered",
+  "partner_id": "20000000-0000-4000-8000-000000000001",
+  "data": {
+    "id": "30000000-0000-4000-8000-000000000001",
+    "chat": {
+      "id": "40000000-0000-4000-8000-000000000001",
+      "is_group": false,
+      "owner_handle": {
+        "id": "50000000-0000-4000-8000-000000000001",
+        "is_me": true,
+        "handle": "+15550001000",
+        "status": "active",
+        "left_at": null,
+        "service": "iMessage",
+        "joined_at": "2026-05-01T12:00:00.000Z"
+      },
+      "health_status": {
+        "status": "HEALTHY",
+        "doc_url": "https://docs.linqapp.com/guides/chats/chat-health#healthy",
+        "updated_at": "2026-05-08T16:00:00.000Z"
+      }
+    },
+    "direction": "outbound",
+    "sender_handle": {
+      "id": "50000000-0000-4000-8000-000000000001",
+      "is_me": true,
+      "handle": "+15550001000",
+      "status": "active",
+      "left_at": null,
+      "service": "iMessage",
+      "joined_at": "2026-05-01T12:00:00.000Z"
+    },
+    "parts": [{ "type": "text", "value": "Lifecycle fixture" }],
+    "sent_at": "2026-05-08T16:21:12.499Z",
+    "delivered_at": "2026-05-08T16:21:13.750Z",
+    "read_at": null,
+    "service": "iMessage",
+    "preferred_service": "auto",
+    "idempotency_key": "lifecycle-logical-send-1"
+  }
+}

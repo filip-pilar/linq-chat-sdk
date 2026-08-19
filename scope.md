@@ -135,8 +135,10 @@ The public extensions are deliberately cohesive:
   failure isolation, fast acknowledgement, `WebhookOptions.waitUntil`, representative fixtures,
   and durable-ingress guidance are complete. Batch `006` is no longer blocked by external webhook
   evidence.
-- Batch `006`: lifecycle normalization immediately after `005`, split into `006A` for
-  sent/delivered/read/failed contracts and `006B` for edited/reconciled state and validation.
+- Batch `006`: `006A` is complete with curated, contract-verified sent/delivered/read/failed data,
+  immutable raw access, malformed/unknown handling, and existing dedupe/Chat webhook coexistence.
+  `006B` remains for edited/reconciled state and validation; no ordering, retry, terminal-state, or
+  application workflow guarantee is implied.
 - Batches `007`/`010`: one `LinqMessageOptions` model created by
   `linqMessage(content, options)` for rich links, service, effects, animations, and manual
   decorations. Ordinary replies already use Chat SDK `Thread.reply()`; only part-index targeting

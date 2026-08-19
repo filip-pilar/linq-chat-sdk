@@ -59,7 +59,11 @@ atomically deduplicates both paths by partner and provider event ID before callb
 
 ```ts
 const unsubscribe = adapter.onLinqEvent(["message.delivered", "message.failed"], async (event) => {
-  // Narrowed to these names; data stays lossless until Batch 006 curates lifecycle types.
+  if (event.type === "message.delivered") {
+    console.log(event.data.providerMessageId, event.data.deliveredAt);
+  } else {
+    console.log(event.data.code, event.data.reason, event.envelope.traceId);
+  }
 });
 
 unsubscribe();
@@ -143,6 +147,17 @@ observation cannot alter later dispatch. `rawBody` preserves the decoded authent
 `rawBodyBase64` preserves the exact authenticated bytes for durable ingress. Existing Chat SDK `Message.raw`
 remains the mutable Linq message data object, preserving current consumer
 behavior.
+
+Current `message.sent`, `message.delivered`, and `message.read` callbacks expose curated message/chat
+correlation, actual and preferred service, idempotency key, and sent/delivered/read timestamps.
+`message.failed` exposes nullable message/chat correlation, numeric provider code, opaque detail
+code, reason, actual/preferred service, and failure timestamp. The authenticated trace remains on
+`event.envelope.traceId`; every callback retains the complete immutable `rawEvent`.
+
+The adapter does not derive retry safety, ordering, or a terminal delivery state from these events.
+Linq documents code-specific recovery guidance, and a `message.delivered` event can rarely follow
+`message.failed` for the same message. SMS/MMS also do not produce delivered/read receipts. Treat
+callbacks as authenticated observations and keep application workflow policy outside the adapter.
 
 These values are authenticated provider observations, not durable application
 identity. Applications remain responsible for identity resolution,

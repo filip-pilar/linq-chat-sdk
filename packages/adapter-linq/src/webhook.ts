@@ -94,6 +94,36 @@ export interface LinqChatHandleObservation {
 
 export type LinqConversationKind = "direct" | "group" | "unknown";
 
+export type LinqMessageLifecycleEventType = "message.sent" | "message.delivered" | "message.read";
+
+type LinqServicePreference = LinqAPIV3.ServiceType | "auto";
+
+/** Curated current-version correlation facts for message lifecycle events. */
+export interface LinqMessageLifecycleEventData {
+  readonly providerMessageId: string;
+  readonly chatId: string;
+  readonly direction: "inbound" | "outbound";
+  readonly service: LinqAPIV3.ServiceType;
+  readonly preferredService: LinqServicePreference | null;
+  readonly idempotencyKey: string | null;
+  readonly sentAt: string;
+  readonly deliveredAt: string | null;
+  readonly readAt: string | null;
+}
+
+/** Provider failure facts; consumers must interpret retry safety from current Linq guidance. */
+export interface LinqMessageFailedEventData {
+  readonly providerMessageId: string | null;
+  readonly chatId: string | null;
+  readonly code: number;
+  /** Opaque provider diagnostic. Preserve for support; do not branch on it. */
+  readonly detailCode: number | null;
+  readonly reason: string | null;
+  readonly service: LinqAPIV3.ServiceType | null;
+  readonly preferredService: LinqServicePreference | null;
+  readonly failedAt: string;
+}
+
 export interface LinqMessageLifecycleObservation {
   readonly sentAt: string | null;
   readonly deliveredAt: string | null;
@@ -161,6 +191,16 @@ export interface LinqVerifiedMessageWebhook extends LinqVerifiedWebhookBase {
   readonly message: LinqMessageObservation;
 }
 
+export interface LinqVerifiedMessageLifecycleWebhook extends LinqVerifiedWebhookBase {
+  readonly kind: LinqMessageLifecycleEventType;
+  readonly lifecycle: LinqMessageLifecycleEventData;
+}
+
+export interface LinqVerifiedMessageFailedWebhook extends LinqVerifiedWebhookBase {
+  readonly kind: "message.failed";
+  readonly failure: LinqMessageFailedEventData;
+}
+
 export interface LinqVerifiedReactionWebhook extends LinqVerifiedWebhookBase {
   readonly kind: "reaction.added" | "reaction.removed";
   readonly reaction: LinqReactionObservation;
@@ -176,6 +216,8 @@ export interface LinqVerifiedUnsupportedVersionWebhook extends LinqVerifiedWebho
 
 export type LinqVerifiedWebhook =
   | LinqVerifiedMessageWebhook
+  | LinqVerifiedMessageLifecycleWebhook
+  | LinqVerifiedMessageFailedWebhook
   | LinqVerifiedReactionWebhook
   | LinqVerifiedUnhandledWebhook
   | LinqVerifiedUnsupportedVersionWebhook;
@@ -260,6 +302,32 @@ export function normalizeAuthenticatedLinqWebhook(
     return {
       ok: true,
       webhook: Object.freeze({ ...base, kind: "message.received", message }),
+    };
+  }
+
+  if (isMessageLifecycleEventType(envelope.eventType)) {
+    const lifecycle = parseMessageLifecycleEventData(envelope.eventType, rawEvent.data);
+
+    if (!lifecycle) {
+      return invalidPayload();
+    }
+
+    return {
+      ok: true,
+      webhook: Object.freeze({ ...base, kind: envelope.eventType, lifecycle }),
+    };
+  }
+
+  if (envelope.eventType === "message.failed") {
+    const failureObservation = parseMessageFailedEventData(rawEvent.data);
+
+    if (!failureObservation) {
+      return invalidPayload();
+    }
+
+    return {
+      ok: true,
+      webhook: Object.freeze({ ...base, kind: "message.failed", failure: failureObservation }),
     };
   }
 
@@ -416,6 +484,73 @@ function parseMessageObservation(value: unknown): LinqMessageObservation | null 
   });
 }
 
+function isMessageLifecycleEventType(value: string): value is LinqMessageLifecycleEventType {
+  return value === "message.sent" || value === "message.delivered" || value === "message.read";
+}
+
+function parseMessageLifecycleEventData(
+  eventType: LinqMessageLifecycleEventType,
+  value: unknown,
+): LinqMessageLifecycleEventData | null {
+  const message = parseMessageObservation(value);
+
+  if (!message || !isRecord(value) || message.timestamps.sentAt === null) {
+    return null;
+  }
+
+  if (
+    (eventType === "message.sent" &&
+      (message.timestamps.deliveredAt !== null || message.timestamps.readAt !== null)) ||
+    (eventType === "message.delivered" &&
+      (message.timestamps.deliveredAt === null || message.timestamps.readAt !== null)) ||
+    (eventType === "message.read" &&
+      (message.timestamps.deliveredAt === null || message.timestamps.readAt === null)) ||
+    !isNullableString(value.idempotency_key) ||
+    !isNullableServicePreference(value.preferred_service)
+  ) {
+    return null;
+  }
+
+  return Object.freeze({
+    providerMessageId: message.providerMessageId,
+    chatId: message.chatId,
+    direction: message.direction,
+    service: message.service,
+    preferredService: isServicePreference(value.preferred_service) ? value.preferred_service : null,
+    idempotencyKey: typeof value.idempotency_key === "string" ? value.idempotency_key : null,
+    sentAt: message.timestamps.sentAt,
+    deliveredAt: message.timestamps.deliveredAt,
+    readAt: message.timestamps.readAt,
+  });
+}
+
+function parseMessageFailedEventData(value: unknown): LinqMessageFailedEventData | null {
+  if (
+    !isRecord(value) ||
+    !Number.isInteger(value.code) ||
+    !isNonEmptyString(value.failed_at) ||
+    !isOptionalNonEmptyString(value.chat_id) ||
+    !isOptionalNonEmptyString(value.message_id) ||
+    !isOptionalString(value.reason) ||
+    !isNullableInteger(value.detail_code) ||
+    !isNullableService(value.service) ||
+    !isNullableServicePreference(value.preferred_service)
+  ) {
+    return null;
+  }
+
+  return Object.freeze({
+    providerMessageId: isNonEmptyString(value.message_id) ? value.message_id : null,
+    chatId: isNonEmptyString(value.chat_id) ? value.chat_id : null,
+    code: value.code as number,
+    detailCode: Number.isInteger(value.detail_code) ? (value.detail_code as number) : null,
+    reason: typeof value.reason === "string" ? value.reason : null,
+    service: isService(value.service) ? value.service : null,
+    preferredService: isServicePreference(value.preferred_service) ? value.preferred_service : null,
+    failedAt: value.failed_at,
+  });
+}
+
 function isMessageParts(value: unknown): value is Record<string, unknown>[] {
   if (!Array.isArray(value)) {
     return false;
@@ -568,6 +703,34 @@ function parseReactionObservation(value: unknown): LinqReactionObservation | nul
 
 function isService(value: unknown): value is LinqAPIV3.ServiceType {
   return value === "iMessage" || value === "SMS" || value === "RCS";
+}
+
+function isNullableService(value: unknown): boolean {
+  return value === undefined || value === null || isService(value);
+}
+
+function isNullableServicePreference(value: unknown): boolean {
+  return value === undefined || value === null || isServicePreference(value);
+}
+
+function isServicePreference(value: unknown): value is LinqServicePreference {
+  return value === "auto" || isService(value);
+}
+
+function isNullableString(value: unknown): boolean {
+  return value === undefined || value === null || typeof value === "string";
+}
+
+function isOptionalString(value: unknown): boolean {
+  return value === undefined || typeof value === "string";
+}
+
+function isOptionalNonEmptyString(value: unknown): boolean {
+  return value === undefined || isNonEmptyString(value);
+}
+
+function isNullableInteger(value: unknown): boolean {
+  return value === undefined || value === null || Number.isInteger(value);
 }
 
 function isNullableBoolean(value: unknown): boolean {

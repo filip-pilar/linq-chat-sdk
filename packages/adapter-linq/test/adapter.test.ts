@@ -111,7 +111,7 @@ describe("LinqAdapter.handleWebhook", () => {
         chat: Pick<ChatInstance, "processMessage" | "processReaction">;
       }
     ).chat = { processMessage, processReaction };
-    const payload = { ...createMessageReceivedPayload(), event_type: "message.sent" };
+    const payload = { ...createMessageReceivedPayload(), event_type: "future.provider_event" };
 
     const response = await adapter.handleWebhook(createSignedRequest(payload));
 

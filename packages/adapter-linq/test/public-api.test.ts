@@ -8,6 +8,8 @@ import type {
   LinqEventMap,
   LinqFutureEvent,
   LinqKnownEventType,
+  LinqMessageFailedEventData,
+  LinqMessageLifecycleEventData,
   LinqVerifiedUnhandledWebhook,
   LinqVerifiedWebhook,
   LinqWebhookVerificationResult,
@@ -86,9 +88,21 @@ function assertTypedEventRegistration(adapter: LinqAdapter): void {
       expectTypeOf(event).toEqualTypeOf<
         LinqEventMap["message.delivered"] | LinqEventMap["message.failed"]
       >();
-      expectTypeOf(event.data).toEqualTypeOf<import("../src/index.js").LinqWebhookRawValue>();
+      expectTypeOf(event.data).toEqualTypeOf<
+        LinqMessageLifecycleEventData | LinqMessageFailedEventData
+      >();
     },
   );
+  adapter.onLinqEvent("message.sent", (event) => {
+    expectTypeOf(event.data).toEqualTypeOf<LinqMessageLifecycleEventData>();
+    expectTypeOf(event.data.providerMessageId).toBeString();
+    expectTypeOf(event.envelope.traceId).toBeString();
+  });
+  adapter.onLinqEvent("message.failed", (event) => {
+    expectTypeOf(event.data).toEqualTypeOf<LinqMessageFailedEventData>();
+    expectTypeOf(event.data.code).toBeNumber();
+    expectTypeOf(event.data.detailCode).toEqualTypeOf<number | null>();
+  });
   const unsubscribeAll = adapter.onLinqEvent((event) => {
     expectTypeOf(event).toEqualTypeOf<LinqAnyEvent>();
   });

@@ -2,6 +2,8 @@ import type { LinqAPIV3 } from "@linqapp/sdk";
 
 import { LINQ_KNOWN_EVENT_TYPES, type LinqKnownEventType } from "./linq-event-types.generated.js";
 import type {
+  LinqMessageFailedEventData,
+  LinqMessageLifecycleEventData,
   LinqReactionWebhookData,
   LinqWebhookEnvelopeObservation,
   LinqWebhookRawEvent,
@@ -20,11 +22,17 @@ export interface LinqEventBase<TType extends string, TData> {
 
 type LinqReactionEventType = "reaction.added" | "reaction.removed";
 
+type LinqMessageLifecycleEventType = "message.sent" | "message.delivered" | "message.read";
+
 type LinqEventData<TType extends LinqKnownEventType> = TType extends "message.received"
   ? LinqAPIV3.MessageEventV2
-  : TType extends LinqReactionEventType
-    ? LinqReactionWebhookData
-    : LinqWebhookRawValue;
+  : TType extends LinqMessageLifecycleEventType
+    ? LinqMessageLifecycleEventData
+    : TType extends "message.failed"
+      ? LinqMessageFailedEventData
+      : TType extends LinqReactionEventType
+        ? LinqReactionWebhookData
+        : LinqWebhookRawValue;
 
 export type LinqEventMap = {
   readonly [TType in LinqKnownEventType]: LinqEventBase<TType, LinqEventData<TType>>;
@@ -55,9 +63,18 @@ export function isLinqKnownEventType(value: string): value is LinqKnownEventType
 }
 
 export function createLinqEvent(webhook: LinqVerifiedWebhook): LinqAnyEvent {
+  const data =
+    webhook.kind === "message.sent" ||
+    webhook.kind === "message.delivered" ||
+    webhook.kind === "message.read"
+      ? webhook.lifecycle
+      : webhook.kind === "message.failed"
+        ? webhook.failure
+        : (webhook.rawEvent.data ?? null);
+
   return Object.freeze({
     type: webhook.envelope.eventType,
-    data: webhook.rawEvent.data ?? null,
+    data,
     envelope: webhook.envelope,
     transport: webhook.transport,
     rawEvent: webhook.rawEvent,

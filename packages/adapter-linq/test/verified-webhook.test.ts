@@ -617,7 +617,7 @@ describe("LinqAdapter verified webhook ingress", () => {
     }
   });
 
-  it("verifies reactions and current unhandled events without forcing dispatch", async () => {
+  it("verifies reactions and typed lifecycle events without forcing standard dispatch", async () => {
     const reaction = cloneFixture() as Record<string, unknown>;
     reaction.event_type = "reaction.added";
     reaction.data = {
@@ -631,7 +631,7 @@ describe("LinqAdapter verified webhook ingress", () => {
       service: "iMessage",
       from_handle: fixture.data.sender_handle,
     };
-    const unhandled = { ...fixture, event_type: "message.delivered" };
+    const lifecycle = { ...fixture, event_type: "message.delivered" };
     const adapter = createTestAdapter();
     const processReaction = vi.fn((..._args: Parameters<ChatInstance["processReaction"]>) => {});
     (adapter as unknown as { chat: Pick<ChatInstance, "processReaction"> }).chat = {
@@ -639,7 +639,7 @@ describe("LinqAdapter verified webhook ingress", () => {
     };
 
     const reactionResult = await adapter.verifyWebhook(createStandardRequest(reaction));
-    const unhandledResult = await adapter.verifyWebhook(createStandardRequest(unhandled));
+    const lifecycleResult = await adapter.verifyWebhook(createStandardRequest(lifecycle));
 
     expect(reactionResult).toMatchObject({
       ok: true,
@@ -659,15 +659,25 @@ describe("LinqAdapter verified webhook ingress", () => {
         },
       },
     });
-    expect(unhandledResult).toMatchObject({ ok: true, webhook: { kind: "unhandled" } });
+    expect(lifecycleResult).toMatchObject({
+      ok: true,
+      webhook: {
+        kind: "message.delivered",
+        lifecycle: {
+          providerMessageId: fixture.data.id,
+          deliveredAt: fixture.data.delivered_at,
+          readAt: null,
+        },
+      },
+    });
     if (reactionResult.ok) {
       await expect(adapter.dispatchVerifiedWebhook(reactionResult.webhook)).resolves.toEqual({
         handled: "reaction",
       });
       expect(processReaction).toHaveBeenCalledTimes(1);
     }
-    if (unhandledResult.ok) {
-      await expect(adapter.dispatchVerifiedWebhook(unhandledResult.webhook)).resolves.toEqual({
+    if (lifecycleResult.ok) {
+      await expect(adapter.dispatchVerifiedWebhook(lifecycleResult.webhook)).resolves.toEqual({
         handled: "ignored",
       });
     }
