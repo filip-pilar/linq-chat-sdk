@@ -65,8 +65,16 @@ generic callbacks and atomic provider/partner/event deduplication are implemente
 isolated and logged. Generic callbacks do not block acknowledgement. Pass the host's
 `WebhookOptions.waitUntil` implementation so their completion survives the response; without it,
 serverless completion is not guaranteed. Durable consumers must commit or enqueue the verified
-observation before dispatch. Consult `packages/adapter-linq/FEATURE_PARITY.md` for the remaining
-live-evidence gap.
+observation before dispatch. Batch `005` is complete on this contract-verified boundary.
+
+Provider-produced compatibility evidence is event-triggered rather than a routine gate. Revisit it
+when the signing verifier, `standardwebhooks` dependency, supported webhook version, Linq signing
+contract, or a host's raw-body handling materially changes. Limit the assertion to real Standard
+headers, the server-generated signature over the untouched body, the versioned envelope, and the
+adapter's `2xx` response. It does not prove deduplication, callback timing, `waitUntil`, database
+behavior, or provider delivery reliability. Historical real-delivery observations remain
+`Provider-observed`; legacy stays locally contract-tested unless a real legacy subscription is
+being migrated.
 
 The checked-in inventory records 68 callable operations, 56 webhook examples, and 45 event names.
 Run `pnpm openapi:check` to detect canonical schema drift. `@linqapp/sdk@0.42.0` has no unwrap union;

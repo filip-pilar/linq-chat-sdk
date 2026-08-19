@@ -12,9 +12,10 @@ Before changing behavior, read:
   `@chat-adapter/shared` types; and
 - the repository `chat-sdk` and `integrating-linq` skills.
 
-Update every affected parity row in the same change as behavior. Design approval or code-complete
-status alone does not make a capability parity-`Complete`; required sandbox/device evidence must
-also be recorded.
+Update every affected parity row in the same change as behavior. A capability is `Complete` when
+its adapter-owned implementation, contracts, tests, and documentation are complete. Record
+external evidence separately as `Documented`, `Contract-verified`, `Provider-observed`,
+`Device-observed`, or `Host-staged`; sandbox, device, and host evidence are not universal gates.
 
 ## Required boundaries
 

@@ -213,8 +213,9 @@ See [`FEATURE_PARITY.md`](./FEATURE_PARITY.md) for the authoritative capability 
 of every Linq endpoint, message feature, and webhook, including its architectural
 disposition, limitations, priority, definition of done, test coverage, recipes,
 and independently reviewable batch. Batches `011` and `012` are deferred; Batch `013` is later
-inventory reconciliation and cleanup. A change can be code-complete while capability status remains
-`Partial` until its required Linq sandbox and physical-device checks are recorded.
+inventory reconciliation and cleanup. `Complete` means the adapter-owned implementation,
+contracts, tests, and documentation are complete. Provider, device, and host observations use the
+separate evidence labels defined in the parity matrix and are not universal completion gates.
 
 The extension surface is intentionally small: `onLinqEvent()` registration for verified generic
 events, planned `linqMessage(content, options)` for provider-only rich message options, and
@@ -281,9 +282,10 @@ calls retain the official client's native request, response, validation, error, 
 they do not create a Chat SDK thread automatically; construct one only from the returned canonical
 `chat_id`.
 
-Reduced Batch `004` adds recipe/compile-time contracts and sandbox validation for new creation,
-active-chat reuse, same-key retry, failover, and concurrent distinct intentional sends. It adds no
-runtime adapter behavior, first-send lock, identity migration, or Chat SDK change. See
+Reduced Batch `004` adds recipe/compile-time contracts. Selective sandbox observations of new
+creation, active-chat reuse, same-key retry, failover, or concurrent distinct intentional sends are
+optional provider evidence. It adds no runtime adapter behavior, first-send lock, identity
+migration, or Chat SDK change. See
 [Batch `004` proactive native-client recipe](./FEATURE_PARITY.md#batch-004-proactive-native-client-recipe).
 
 ## Recipes
@@ -418,11 +420,19 @@ pnpm build
 
 A full example app (Nitro server wiring Linq, Telegram, and WhatsApp adapters into one bot) lives in [`apps/api`](../../apps/api) in this repo.
 
-## Live smoke test
+## Optional live smoke evidence
 
 `smoke-live.mjs` provides a guarded plan/apply workflow against the **real Linq API**. Run
 `pnpm build` first because it imports `./dist`. Every command is plan-only until `--apply` is
 supplied; plans and results fingerprint all provider identifiers and handles.
+
+This smoke is optional compatibility evidence, not an ordinary development or release gate. Revisit
+provider-produced webhook compatibility when the signing verifier, `standardwebhooks` dependency,
+supported webhook version, Linq signing contract, or a host's raw-body handling materially changes.
+Its narrow purpose is to confirm the real Standard Webhooks headers, server-generated signature,
+untouched body, versioned envelope, and adapter `2xx` response. It does not prove deduplication,
+callback timing, `waitUntil`, database behavior, or Linq delivery reliability. Legacy remains
+locally contract-tested unless an actual legacy subscription is being migrated.
 
 `send` and `live` are fixed-line operations. Their provider requests are constructed in
 TypeScript-checked source and use `chats.create({ from, ... })`, which creates or reuses the chat
@@ -468,7 +478,9 @@ LINQ_LIVE_STATE_FILE=<ignored mode-0600 env file> \
 the local receiver first, creates an exact-line-filtered subscription for only `message.received`
 and `message.sent`, persists the one-time secret immediately, sends one text, verifies a
 provider-produced delivery, and deletes the subscription in `finally`. If deletion fails, the
-private state file retains the recovery identifiers for deterministic manual cleanup.
+private state file retains the recovery identifiers for deterministic manual cleanup. The live
+mode does not initialize a production state backend, register generic callbacks, pass `waitUntil`,
+or replay a delivery, so do not cite it as evidence for those behaviors.
 
 ## License
 

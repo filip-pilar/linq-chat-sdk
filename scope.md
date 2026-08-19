@@ -4,8 +4,9 @@ This file tracks what is still left in the Linq Chat SDK adapter.
 
 [`packages/adapter-linq/FEATURE_PARITY.md`](./packages/adapter-linq/FEATURE_PARITY.md) is authoritative
 for capability status. Design approval is not implementation: applicable parity rows remain
-`Partial` or `Missing` until code, contracts, documentation, and required Linq sandbox/device
-validation are complete.
+`Partial` or `Missing` until their adapter-owned code, contracts, tests, and documentation are
+complete. Provider, device, and host observations are recorded separately and are not universal
+completion gates.
 
 Keep this readable and practical: each item should say what is missing, why it matters, and any Linq-specific caveats.
 
@@ -120,10 +121,10 @@ on `adapter.client.chats.create()`.
 Guarded fixed-line smoke operations also use `chats.create({ from, ... })`; they must not substitute
 the auto-line operation because Linq may reuse a more recently active chat on another healthy line.
 
-Reduced Batch `004` contains only recipe documentation, compile-time contracts, and sandbox
-validation for creation, active-chat reuse, same-key idempotent retry, failover, and concurrent
-distinct intentional sends. A first-class proactive adapter extension is deferred until real usage
-justifies it.
+Reduced Batch `004` contains only recipe documentation and compile-time contracts. Selective
+sandbox observations of creation, active-chat reuse, same-key idempotent retry, failover, or
+concurrent distinct intentional sends are optional `Provider-observed` evidence. A first-class
+proactive adapter extension is deferred until real usage justifies it.
 
 ## Approved remaining implementation
 
@@ -132,8 +133,8 @@ The public extensions are deliberately cohesive:
 - Batch `005`: `005A`–`005C` typed one/many/all `onLinqEvent()` registration, lossless verified
   fan-out, atomic provider/partner/event dedupe, standard message/reaction coexistence, callback
   failure isolation, fast acknowledgement, `WebhookOptions.waitUntil`, representative fixtures,
-  and durable-ingress guidance are implemented. Real signed-webhook replay/timing evidence remains
-  an external validation gate before Batch `006`.
+  and durable-ingress guidance are complete. Batch `006` is no longer blocked by external webhook
+  evidence.
 - Batch `006`: lifecycle normalization immediately after `005`, split into `006A` for
   sent/delivered/read/failed contracts and `006B` for edited/reconciled state and validation.
 - Batches `007`/`010`: one `LinqMessageOptions` model created by
@@ -155,11 +156,10 @@ the provider cannot support or safely emulate it. Outbound sticker reactions wai
 official SDK input. Exact asynchronous group-update correlation must not be promised without a
 provider correlation key.
 
-Physical-device validation is required for iMessage formatting/effects, typing, contact sharing,
-voice memos, groups, and location consent. RCS/SMS routes are required for relevant fallbacks. Linq
-sandbox validation is required for webhook delivery/dedupe and proactive creation/reuse/retry/
-failover/concurrency. Code-complete work remains parity-`Partial` until applicable live evidence is
-recorded.
+Physical-device observations remain valuable for iMessage formatting/effects, typing, contact
+sharing, voice memos, groups, location consent, and relevant RCS/SMS fallbacks. Selective Linq
+sandbox observations remain useful for contradictory or high-risk provider assumptions. Record
+those facts with evidence labels without making them blanket adapter completion gates.
 
 ## Intentional adapter boundaries
 
