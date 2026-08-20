@@ -37,6 +37,9 @@ The adapter can already handle the core receive/reply path:
   exact official-client calls, repeated acknowledgement semantics, and shared error translation.
 - Send native voice memos through that facade from exactly one public HTTPS URL or existing Linq
   attachment UUID, returning only the provider-established message, thread, and attachment IDs.
+- Expose inbound user voice memos through the standard media path as audio attachments with stable
+  attachment identity and fresh `fetchData()` downloads. The canonical schema does not distinguish
+  native Messages voice memos from ordinary audio attachments; transcription is application-owned.
 - Update existing group metadata, add/remove one canonical participant handle, and leave through
   the nested `.group` facade as acknowledgement-only operations. Request and retrieve location
   through `.location` with acknowledgement-only consent prompting and defensive immutable
@@ -92,7 +95,8 @@ Still missing:
 
 ### 2. Outbound attachments and media
 
-Status: **existing-chat send path implemented; full media lifecycle remains partial**
+Status: **existing-chat send and inbound download paths implemented; optional voice-memo upload
+convenience deferred**
 
 `postMessage()` maps Chat SDK `attachments` and `files` to Linq media parts:
 
@@ -105,17 +109,32 @@ Status: **existing-chat send path implemented; full media lifecycle remains part
 - Linq failures map to standard `@chat-adapter/shared` errors while retaining the original Linq error, provider code, trace ID, and applicable retry-after data.
 
 Inbound attachments survive queue serialization via `rehydrateAttachment` and a stable Linq attachment ID.
+Persistent and ephemeral attachments share that stable identity; each download resolves current
+metadata and a fresh URL. Retention and deletion policy remain application-owned through
+`adapter.client`, and the adapter performs no automatic retention deletion.
 
 Native voice-memo requests (`POST /v3/chats/{chatId}/voicememo`) are implemented for public HTTPS
 URLs and existing Linq attachment IDs. The adapter validates the source shape locally and leaves
 remote size, media format, reachability, and attachment ownership to Linq. The immediate result is
 acceptance identity only; delivery and presentation remain lifecycle/provider/device observations.
 
-Still missing:
+Inbound user voice memos arrive as ordinary audio media parts and are already exposed as downloadable
+Chat SDK audio attachments with stable identity and `fetchData()`. Linq's current canonical inbound
+schema provides no reliable native-voice-memo discriminator, so the adapter must not add
+`isVoiceMemo` or URL/filename heuristics. Transcription and other audio processing belong to the
+consumer.
 
-- Batch `012` media lifecycle: streaming uploads, readiness, upload retries, complete format
-  handling, retention, and all send-time cleanup. Existing inbound download security/bounding is
-  implemented and covered by focused tests.
+Optional future work is deliberately narrow:
+
+- Batch `012A` may accept a raw Chat SDK `FileUpload` as a third `sendVoiceMemo()` source for
+  generated or TTS audio that has no public URL. It is not required for the completed inbound media
+  or existing two-source outbound contracts.
+- Large-file streaming waits for a demonstrated memory or scale need. Automatic upload retries,
+  uncertain-send recovery, persistence-backed orphan cleanup, retention, and deletion policy remain
+  deferred or application-owned. The current preparation-only cleanup boundary remains unchanged.
+
+Attachment `status` is deprecated by Linq and documented as no longer a useful signal. Readiness
+polling or readiness completion is therefore not adapter roadmap work.
 
 ### 3. Inbound reaction webhooks
 
@@ -206,9 +225,12 @@ Standard Webhooks verification, explicit deprecated legacy mode, OpenAPI drift c
 full test-fixture typechecking are reconciled. Mark-read is standard `Thread.markAsRead()` with
 Linq's chat-wide semantics; it is not a future conversation-facade method.
 
-Explicitly deferred: Batch `011`, Batch `012`, and broader Batch `013` work beyond completed
-`013A`–`013B`, plus lazy credentials, trusted webhook forwarding, Changesets, and npm/OIDC
-publishing. Forward history remains partial if the provider cannot support or safely emulate it.
+Explicitly deferred: Batch `011`, optional Batch `012A`, and Batch `013C` curated group/presence
+events beyond completed `013A`–`013B`, plus lazy credentials and trusted webhook forwarding.
+`013C` has no current consumer need. Changesets, npm/OIDC publishing, package-artifact validation,
+and package-consumer validation belong to Linq's upstream review and release process rather than
+this local roadmap. Forward history remains partial if the provider cannot support or safely
+emulate it.
 Outbound sticker reactions wait for unambiguous official SDK input. Exact asynchronous group-update
 correlation must not be promised without a provider correlation key.
 

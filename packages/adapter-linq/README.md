@@ -153,7 +153,8 @@ Voice-memo URL, source-exclusivity, and UUID validation run before provider I/O.
 format, reachability, attachment ownership, and content remain provider validations. Acceptance is
 not delivery, playback, retention, or recipient-presentation proof. Existing typed message
 lifecycle events can observe later provider outcomes without adapter polling or correlation
-workflows. Raw bytes, `FileUpload`, upload readiness, retries, and cleanup remain outside this API.
+workflows. A raw Chat SDK `FileUpload` source is an optional future convenience; automatic upload
+retries, uncertain-send recovery, orphan workflows, and retention policy remain outside this API.
 
 Group updates accept only `displayName` and a public HTTPS `iconUrl`; empty updates reject locally.
 Participant handles must be an E.164 phone number or email address. Linq currently supports
@@ -400,7 +401,7 @@ feature or batch—composed from `adapter.client.paymentRequests`, general rich-
 delivery, and generic typed `onLinqEvent` passthrough. Agentcard is out of scope.
 Experience discovery remains only in the native-client boundary audit.
 
-The canonical OpenAPI evidence reverified on 2026-08-19 contains 68 callable operations, 56 webhook
+The canonical OpenAPI evidence reverified on 2026-08-21 contains 68 callable operations, 56 webhook
 example operation IDs, and 45 event names (124 operation IDs total). The checked-in inventory and
 `pnpm openapi:check` detect drift. The installed `@linqapp/sdk@0.42.0` covers native operations but
 its empty generated `Webhooks` resource contradicts documentation that still describes
@@ -414,8 +415,8 @@ adapter wrapper.
 See [`FEATURE_PARITY.md`](./FEATURE_PARITY.md) for the authoritative capability status
 of every Linq endpoint, message feature, and webhook, including its architectural
 disposition, limitations, priority, definition of done, test coverage, recipes,
-and independently reviewable batch. Batches `011` and `012` remain deferred; Batch `013A`–`013B`
-complete the currently approved deterministic compatibility cleanup. `Complete` means the
+and independently reviewable batch. Batch `011`, optional `012A`, and `013C` remain deferred;
+Batch `013A`–`013B` complete the currently approved deterministic compatibility cleanup. `Complete` means the
 adapter-owned implementation, contracts, tests, and documentation are complete. Provider, device,
 and host observations use the separate evidence labels defined in the parity matrix and are not
 universal completion gates.
@@ -433,7 +434,7 @@ Endpoint-shaped account and administrative behavior remains on `adapter.client`.
 | Inbound text messages                              | ✅                                                                                                            |
 | Outbound text messages                             | ✅ to existing chats                                                                                          |
 | Group chats                                        | ✅ reply to existing groups received via webhook                                                              |
-| Inbound media (images, audio, files)               | ✅ parsed as attachments with downloadable data                                                               |
+| Inbound media (images, audio, files)               | ✅ stable attachments with fresh downloadable data; voice memos are ordinary audio media                      |
 | Outbound media / file sending                      | ✅ to existing chats; `attachments` and `files` become media parts                                            |
 | Inbound reactions (tapbacks + custom emoji)        | ✅ dispatch to `onReaction()`                                                                                 |
 | Outbound reactions (add/remove)                    | ✅                                                                                                            |
@@ -612,10 +613,21 @@ sent as a downloadable attachment. For Linq's dedicated voice-memo request,
 use `adapter.conversation(threadOrId).sendVoiceMemo()` with a public HTTPS URL
 or an existing Linq attachment ID as documented above.
 
-Batch `012` retains streaming upload work, readiness, upload retries, complete
-format handling, retention, and all send-time cleanup. Existing inbound
-download security/bounding and the by-reference public-HTTPS behavior above
-remain implemented; Batch `012` must not regress them.
+Inbound user voice memos use this same completed standard media path: Linq's canonical message
+schema exposes them as audio media, and the adapter returns a Chat SDK audio attachment with stable
+identity and `fetchData()`. The schema does not distinguish a native Messages voice memo from an
+ordinary audio attachment, so the adapter does not expose an `isVoiceMemo` discriminator or infer
+one from a URL or filename. Transcription and other audio processing belong to the consuming bot.
+
+The [canonical OpenAPI](https://cdn.linqapp.com/openapi/linq-api-v3.yaml) deprecates attachment
+`status` because it is no longer a useful readiness signal, so the adapter does not poll it or treat
+readiness as incomplete work. Optional Batch `012A` is limited to accepting a raw Chat SDK
+`FileUpload` as a future `sendVoiceMemo()` source for generated or TTS audio. Large-file streaming
+remains deferred until a demonstrated memory or scale need. Automatic upload retries,
+uncertain-send recovery, persistence-backed orphan cleanup, retention, and deletion policy remain
+application concerns; callers can administer attachments through `adapter.client`. The adapter
+keeps its conservative boundary: it deletes only an attachment it created when preparation fails
+before sending begins and never performs automatic retention deletion.
 
 ## Cards
 
