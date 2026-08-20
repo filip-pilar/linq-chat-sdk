@@ -1,5 +1,22 @@
 # @linqapp/chat-sdk-adapter
 
+## 0.4.0
+
+### Minor Changes
+
+- f98ee5b: Report delivery status for outbound messages. `adapter.onDeliveryStatus()`
+  surfaces `message.sent`, `message.delivered`, `message.read`, and
+  `message.failed`, so a caller can tell a delivered message from one the carrier
+  rejected instead of treating every send as a success. Chat SDK has no
+  delivery-status dispatch, so this lives on the adapter — reach it with
+  `chat.getAdapter("linq")`.
+
+### Patch Changes
+
+- a746e67: Record a disposition for every Linq webhook event type, so an
+  `@linqapp/sdk` upgrade that adds events fails typecheck instead of passing
+  unnoticed.
+
 ## 0.3.0
 
 ### Minor Changes

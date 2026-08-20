@@ -1,6 +1,6 @@
 {
   "name": "@linqapp/chat-sdk-adapter",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Linq adapter for Chat SDK — build chatbots that talk over iMessage and SMS",
   "keywords": [
     "adapter",
