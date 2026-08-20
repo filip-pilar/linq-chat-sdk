@@ -110,6 +110,8 @@ const conversation = adapter.conversation(thread);
 await conversation.replyToPart(messageId, 1, "Reply to the second part");
 await conversation.addReaction(messageId, "heart", { partIndex: 0 });
 await conversation.removeReaction(messageId, "heart", { partIndex: 0 });
+await conversation.stopTyping();
+await conversation.shareContactCard();
 ```
 
 The facade accepts a Thread owned by this adapter instance or a canonical existing-chat ID in the
@@ -120,12 +122,22 @@ database mutation, or delivery/presentation guarantee is added.
 
 The same frozen facade now declares the complete cohesive Linq conversation surface. Common
 operations are `stopTyping()`, `shareContactCard()`, and `sendVoiceMemo()`; existing-group
-operations are under `.group`; location request/retrieval is under `.location`. These newly frozen
-methods are contract-only and currently reject with `NotImplementedError` before provider I/O.
+operations are under `.group`; location request/retrieval is under `.location`. `stopTyping()` and
+`shareContactCard()` are implemented through the official client with shared adapter errors.
+Voice, group, and location methods remain contract-only and reject with `NotImplementedError`
+before provider I/O.
+
+Stopping typing works for direct and group chats and acknowledges only that Linq accepted the
+request. Contact-card sharing takes no body, requires a configured active card and prior outbound
+activity, and is useful only for iMessage; the adapter does not add capability probes, cadence
+scheduling, or a recipient-save guarantee. Repeated calls remain repeated provider requests—Linq
+documents that calls within 24 hours do not present the option more than once.
+
 Voice sources are exactly one public URL or existing attachment ID, with a future normalized result
 limited to `messageId`, canonical `threadId`, and `attachmentId`. Location retrieval is typed as a
 canonical thread plus immutable participant locations with longitude-first coordinates, optional
 altitude, address, locality, and provider timestamp.
+
 Mark-read remains `Thread.markAsRead()`, and account or administrative operations remain on
 `adapter.client`.
 
@@ -378,7 +390,7 @@ Endpoint-shaped account and administrative behavior remains on `adapter.client`.
 | Rich link previews                                 | ✅ standalone `linqMessage("", { richLink })`; request contract only                                          |
 | Standard replies                                   | ✅ `thread.reply(messageOrId, content)`                                                                       |
 | Part-specific replies/reactions                    | ✅ `adapter.conversation(threadOrId)` with explicit zero-based indexes                                        |
-| Common/group/location facade                       | ⚠️ contract frozen; newly declared operations remain unimplemented                                            |
+| Common/group/location facade                       | ⚠️ stop typing/contact sharing implemented; voice/group/location remain planned                               |
 | Mark as read                                       | ✅ `thread.markAsRead(messageOrId)`; Linq marks the whole chat                                                |
 | Edit message                                       | ✅ text, first part only                                                                                      |
 | Fetch message / history / thread                   | ⚠️ defensive backward cursor history; forward/`allMessages` is explicitly unsupported                         |

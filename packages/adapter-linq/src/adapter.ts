@@ -193,6 +193,7 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   conversation(threadOrId: Thread | string): LinqConversation {
     const thread = this.resolveConversationThread(threadOrId);
     const threadId = thread.id;
+    const { chatId } = this.decodeThreadId(threadId);
     const group: LinqGroupConversation = Object.freeze({
       update: async (_options: LinqGroupUpdateOptions): Promise<void> => {
         throw new NotImplementedError("Linq group updates are not implemented");
@@ -246,10 +247,26 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
         await this.reactToMessagePart(threadId, messageId, reaction, "remove", options);
       },
       stopTyping: async (): Promise<void> => {
-        throw new NotImplementedError("Stopping Linq typing is not implemented");
+        try {
+          await this.apiClient.chats.typing.stop(chatId);
+        } catch (error) {
+          throw translateLinqError(error, {
+            action: "stop chat typing",
+            resourceId: chatId,
+            resourceType: "chat",
+          });
+        }
       },
       shareContactCard: async (): Promise<void> => {
-        throw new NotImplementedError("Sharing Linq contact cards is not implemented");
+        try {
+          await this.apiClient.chats.shareContactCard(chatId);
+        } catch (error) {
+          throw translateLinqError(error, {
+            action: "share chat contact card",
+            resourceId: chatId,
+            resourceType: "chat",
+          });
+        }
       },
       sendVoiceMemo: async (_source: LinqVoiceMemoSource): Promise<LinqVoiceMemoResult> => {
         throw new NotImplementedError("Sending Linq voice memos is not implemented");

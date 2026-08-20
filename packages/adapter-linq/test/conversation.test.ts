@@ -1,4 +1,11 @@
-import { ResourceNotFoundError, ValidationError } from "@chat-adapter/shared";
+import {
+  AdapterError,
+  AuthenticationError,
+  NetworkError,
+  PermissionError,
+  ResourceNotFoundError,
+  ValidationError,
+} from "@chat-adapter/shared";
 import { Actions, Button, Card, Chat, NotImplementedError } from "chat";
 import type { StateAdapter } from "chat";
 import { describe, expect, it, vi } from "vitest";
@@ -6,6 +13,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createLinqAdapter, type LinqAdapter } from "../src/index.js";
 
 const CHAT_ID = "11111111-1111-1111-1111-111111111111";
+const GROUP_CHAT_ID = "55555555-5555-5555-5555-555555555555";
 const THREAD_ID = `linq:${CHAT_ID}`;
 const MESSAGE_ID = "22222222-2222-2222-2222-222222222222";
 const PARENT_ID = "33333333-3333-3333-3333-333333333333";
@@ -88,6 +96,49 @@ describe("Linq conversation facade", () => {
     ]);
   });
 
+  it("stops typing and shares the configured contact card with exact acknowledgements", async () => {
+    const { adapter, chat, shareContactCard, stopTyping } = await createHarness();
+    const byThread = adapter.conversation(chat.thread(THREAD_ID));
+    const byId = adapter.conversation(THREAD_ID);
+
+    await byThread.stopTyping();
+    await byThread.stopTyping();
+    await byId.shareContactCard();
+    await byId.shareContactCard();
+
+    expect(stopTyping.mock.calls).toEqual([[CHAT_ID], [CHAT_ID]]);
+    expect(shareContactCard.mock.calls).toEqual([[CHAT_ID], [CHAT_ID]]);
+  });
+
+  it("supports stop acknowledgements for known group chats", async () => {
+    const { adapter, stopTyping } = await createHarness();
+    const groupThreadId = adapter.encodeThreadId({ chatId: GROUP_CHAT_ID, isGroup: true });
+
+    await adapter.conversation(groupThreadId).stopTyping();
+
+    expect(stopTyping).toHaveBeenCalledWith(GROUP_CHAT_ID);
+  });
+
+  it("coexists with standard start-typing, mark-read, and whole-message reactions", async () => {
+    const { adapter, addReaction, chat, markAsRead, startTyping, stopTyping } =
+      await createHarness();
+    const thread = chat.thread(THREAD_ID);
+
+    await thread.startTyping();
+    await thread.markAsRead(MESSAGE_ID);
+    await adapter.conversation(thread).stopTyping();
+    const sent = await thread.post("standard reaction target");
+    await sent.addReaction("heart");
+
+    expect(startTyping).toHaveBeenCalledWith(CHAT_ID);
+    expect(markAsRead).toHaveBeenCalledWith(CHAT_ID);
+    expect(stopTyping).toHaveBeenCalledWith(CHAT_ID);
+    expect(addReaction).toHaveBeenCalledWith(MESSAGE_ID, {
+      operation: "add",
+      type: "love",
+    });
+  });
+
   it.each([
     ["reply message ID", "not-a-uuid", 0],
     ["negative reply index", PARENT_ID, -1],
@@ -142,11 +193,10 @@ describe("Linq conversation facade", () => {
     `other:${CHAT_ID}`,
     `linq:recipient:${CHAT_ID}`,
   ])("rejects noncanonical conversation identity %s", async (threadId) => {
-    const { adapter, addReaction, send } = await createHarness();
+    const { adapter, providerIO } = await createHarness();
 
     expect(() => adapter.conversation(threadId)).toThrow(ValidationError);
-    expect(addReaction).not.toHaveBeenCalled();
-    expect(send).not.toHaveBeenCalled();
+    for (const providerCall of providerIO) expect(providerCall).not.toHaveBeenCalled();
   });
 
   it("rejects a Thread owned by another adapter instance", async () => {
@@ -156,6 +206,7 @@ describe("Linq conversation facade", () => {
     expect(() => first.adapter.conversation(second.chat.thread(THREAD_ID))).toThrow(
       ValidationError,
     );
+    for (const providerCall of first.providerIO) expect(providerCall).not.toHaveBeenCalled();
   });
 
   it("requires Chat initialization when resolving a conversation by ID", () => {
@@ -193,8 +244,6 @@ describe("Linq conversation facade", () => {
     expect(Object.isFrozen(conversation.location)).toBe(true);
 
     const operations = [
-      conversation.stopTyping(),
-      conversation.shareContactCard(),
       conversation.sendVoiceMemo({ url: "https://example.com/memo.m4a" }),
       conversation.group.update({ displayName: "Example" }),
       conversation.group.addParticipant("+15550000001"),
@@ -218,6 +267,35 @@ describe("Linq conversation facade", () => {
       adapter.conversation(THREAD_ID).addReaction(MESSAGE_ID, "heart", { partIndex: 0 }),
     ).rejects.toBeInstanceOf(ResourceNotFoundError);
   });
+
+  it.each([
+    ["stopTyping", 400, ValidationError],
+    ["stopTyping", 401, AuthenticationError],
+    ["stopTyping", 403, PermissionError],
+    ["stopTyping", 404, ResourceNotFoundError],
+    ["stopTyping", 500, AdapterError],
+    ["stopTyping", undefined, NetworkError],
+    ["shareContactCard", 401, AuthenticationError],
+    ["shareContactCard", 403, PermissionError],
+    ["shareContactCard", 404, ResourceNotFoundError],
+    ["shareContactCard", 500, AdapterError],
+    ["shareContactCard", undefined, NetworkError],
+  ] as const)(
+    "translates %s provider failures with status %s",
+    async (operation, status, ErrorType) => {
+      const harness = await createHarness();
+      const providerCall = harness[operation];
+      const error = Object.assign(
+        new Error("provider failure"),
+        status === undefined ? {} : { status },
+      );
+      providerCall.mockRejectedValueOnce(error);
+
+      await expect(harness.adapter.conversation(THREAD_ID)[operation]()).rejects.toBeInstanceOf(
+        ErrorType,
+      );
+    },
+  );
 });
 
 async function createHarness(): Promise<{
@@ -227,6 +305,10 @@ async function createHarness(): Promise<{
   send: ReturnType<typeof vi.fn>;
   update: ReturnType<typeof vi.fn>;
   providerIO: ReturnType<typeof vi.fn>[];
+  markAsRead: ReturnType<typeof vi.fn>;
+  shareContactCard: ReturnType<typeof vi.fn>;
+  startTyping: ReturnType<typeof vi.fn>;
+  stopTyping: ReturnType<typeof vi.fn>;
 }> {
   const adapter = createLinqAdapter({ apiKey: "test-key", signingSecret: "test-secret" });
   const send = vi.fn().mockResolvedValue({
@@ -272,8 +354,18 @@ async function createHarness(): Promise<{
     ],
     next_cursor: null,
   });
-  const providerIO = Array.from({ length: 9 }, () => vi.fn());
-  const [
+  const stopTyping = vi.fn();
+  const shareContactCard = vi.fn();
+  const sendVoicememo = vi.fn();
+  const updateChat = vi.fn();
+  const addParticipant = vi.fn();
+  const removeParticipant = vi.fn();
+  const leaveChat = vi.fn();
+  const requestLocation = vi.fn();
+  const retrieveLocation = vi.fn();
+  const startTyping = vi.fn();
+  const markAsRead = vi.fn();
+  const providerIO = [
     stopTyping,
     shareContactCard,
     sendVoicememo,
@@ -283,7 +375,9 @@ async function createHarness(): Promise<{
     leaveChat,
     requestLocation,
     retrieveLocation,
-  ] = providerIO;
+    startTyping,
+    markAsRead,
+  ];
 
   Object.assign(adapter.client, {
     chats: {
@@ -293,8 +387,9 @@ async function createHarness(): Promise<{
       participants: { add: addParticipant, remove: removeParticipant },
       sendVoicememo,
       shareContactCard,
-      typing: { stop: stopTyping },
+      typing: { start: startTyping, stop: stopTyping },
       update: updateChat,
+      markAsRead,
     },
     messages: { addReaction, update },
   });
@@ -313,5 +408,16 @@ async function createHarness(): Promise<{
   });
   await chat.initialize();
 
-  return { adapter, addReaction, chat, providerIO, send, update };
+  return {
+    adapter,
+    addReaction,
+    chat,
+    markAsRead,
+    providerIO,
+    send,
+    shareContactCard,
+    startTyping,
+    stopTyping,
+    update,
+  };
 }
