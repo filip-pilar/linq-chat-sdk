@@ -63,6 +63,7 @@ export interface CompiledLinqMessageText {
 export interface CompiledLinqSendOptions {
   effect?: LinqMessageEffect;
   preferredService?: LinqPreferredService;
+  richLink?: string;
 }
 
 type TextFragment = CompiledLinqMessageText;
@@ -88,6 +89,7 @@ export function compileLinqSendOptions(message: AdapterPostableMessage): Compile
 
   const preferredService = validatePreferredService(message.linq.preferredService);
   const effect = validateEffect(message.linq.effect);
+  const richLink = validateRichLink(message.linq.richLink);
   const manualDecorations = message.linq.decorations;
 
   if (manualDecorations !== undefined && !Array.isArray(manualDecorations)) {
@@ -106,6 +108,7 @@ export function compileLinqSendOptions(message: AdapterPostableMessage): Compile
   return {
     ...(effect === undefined ? {} : { effect }),
     ...(preferredService === undefined ? {} : { preferredService }),
+    ...(richLink === undefined ? {} : { richLink }),
   };
 }
 
@@ -296,6 +299,30 @@ function validateEffect(value: unknown): LinqMessageEffect | undefined {
   }
 
   throw validationError("Linq message effect type and name must be a supported matching pair.");
+}
+
+function validateRichLink(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.trim() !== value ||
+    Array.from(value).length > 2_048
+  ) {
+    throw validationError("Linq rich links must contain 1-2048 characters.");
+  }
+
+  try {
+    const url = new URL(value);
+
+    if (url.protocol === "https:" && url.hostname) {
+      return value;
+    }
+  } catch {
+    // Fall through to the stable validation error.
+  }
+
+  throw validationError("Linq rich links must be valid HTTPS URLs.");
 }
 
 function extractManualDecorations(

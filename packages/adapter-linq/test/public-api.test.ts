@@ -6,6 +6,7 @@ import { createLinqAdapter, linqMessage, LINQ_WEBHOOK_VERSION, LinqAdapter } fro
 import type {
   LinqAnyEvent,
   LinqAdapterConfig,
+  LinqConversation,
   LinqEventMap,
   LinqFutureEvent,
   LinqKnownEventType,
@@ -175,6 +176,11 @@ function assertLinqMessageErgonomics(
     preferredService: "RCS",
     effect: { type: "bubble", name: "invisible" },
   });
+  linqMessage("", { richLink: new URL("https://example.com/preview") });
+  linqMessage("", {
+    // @ts-expect-error -- rich links accept only strings or URL objects.
+    richLink: 42,
+  });
   linqMessage("hello", {
     // @ts-expect-error -- preferred service values are closed and case-sensitive.
     preferredService: "sms",
@@ -190,6 +196,40 @@ function assertLinqMessageErgonomics(
 }
 
 void assertLinqMessageErgonomics;
+
+function assertConversationErgonomics(
+  adapter: LinqAdapter,
+  thread: Thread,
+  content: AdapterPostableMessage,
+): void {
+  const byId = adapter.conversation("linq:11111111-1111-1111-1111-111111111111");
+  const byThread = adapter.conversation(thread);
+
+  expectTypeOf(byId).toEqualTypeOf<LinqConversation>();
+  expectTypeOf(byThread.threadId).toBeString();
+  expectTypeOf(
+    byId.replyToPart("22222222-2222-2222-2222-222222222222", 0, content),
+  ).resolves.toMatchTypeOf<SentMessage>();
+  expectTypeOf(
+    byId.addReaction("22222222-2222-2222-2222-222222222222", "heart", { partIndex: 0 }),
+  ).resolves.toBeVoid();
+  expectTypeOf(
+    byId.removeReaction("22222222-2222-2222-2222-222222222222", "heart"),
+  ).resolves.toBeVoid();
+
+  // @ts-expect-error -- endpoint-shaped aliases are intentionally excluded.
+  adapter.postReply("linq:11111111-1111-1111-1111-111111111111", content);
+  byId.addReaction("22222222-2222-2222-2222-222222222222", "heart", {
+    // @ts-expect-error -- the public option uses application-facing camelCase.
+    part_index: 0,
+  });
+  linqMessage("hello", {
+    // @ts-expect-error -- reply targeting belongs only on the conversation facade.
+    replyTo: { messageId: "22222222-2222-2222-2222-222222222222", partIndex: 0 },
+  });
+}
+
+void assertConversationErgonomics;
 
 type Assert<T extends true> = T;
 type Equal<Left, Right> =

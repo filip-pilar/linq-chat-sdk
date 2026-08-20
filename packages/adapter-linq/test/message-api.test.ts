@@ -118,7 +118,11 @@ describe("linqMessage Chat SDK transport", () => {
           markdown: "**ordinary** send",
           attachments: [{ type: "image", url: "https://example.com/image.png" }],
         },
-        OPTIONS,
+        {
+          preferredService: OPTIONS.preferredService,
+          effect: OPTIONS.effect,
+          decorations: OPTIONS.decorations,
+        },
       ),
     );
 

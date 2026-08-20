@@ -42,8 +42,9 @@ chat.onReaction(["thumbs_up"], async (event) => {
 
 `linqMessage(content, options)` attaches immutable Linq-specific send metadata to an ordinary Chat
 SDK postable. Strings become `{ raw }` messages; Markdown/AST, cards, files, and attachments keep
-their standard shapes. The result works with `thread.post()`, `thread.reply()`, and
-`SentMessage.edit()` and keeps their normal returned identity, history, and serialization behavior.
+their standard shapes. The result works with `thread.post()` and `thread.reply()` and keeps their
+normal returned identity, history, and serialization behavior. Text options also travel through
+`SentMessage.edit()`; standalone rich links cannot because Linq's current edit API is text-only.
 
 ```ts
 import { linqMessage } from "@forma/linq-chat-sdk-adapter";
@@ -84,8 +85,38 @@ before media preparation, logging, or a provider call; standard derived formatti
 and may degrade to plain text on a protocol that does not render decorations. These are request
 contracts, not recipient-presentation or delivery claims.
 
-Provider translation for rich links remains planned for `007B`. Standard cards, files,
-attachments, returned identity, history, and serialization behavior remain unchanged.
+`richLink` sends one canonical native `link` part. Pass empty ordinary content because the link
+must stand alone:
+
+```ts
+await thread.post(linqMessage("", { richLink: "https://example.com/preview" }));
+```
+
+The adapter requires a valid HTTPS URL of at most 2,048 characters and rejects coexistence with
+text, cards, files, or attachments before UUID generation, logging, media preparation, or provider
+I/O. Omitted service preserves Linq's iMessage → RCS → SMS selection; explicit service follows the
+same `preferredService` contract above. Linq documents rich previews on iMessage and RCS and a bare
+URL fallback on SMS. Those are provider request/fallback contracts, not a device-presentation claim.
+Standard cards, files, attachments, returned identity, history, and serialization remain unchanged.
+
+### Part-specific replies and reactions
+
+Ordinary replies and reactions stay on Chat SDK's `Thread` and `SentMessage` APIs. Use the narrow
+conversation facade only when Linq's zero-based message-part index matters:
+
+```ts
+const conversation = adapter.conversation(thread);
+
+await conversation.replyToPart(messageId, 1, "Reply to the second part");
+await conversation.addReaction(messageId, "heart", { partIndex: 0 });
+await conversation.removeReaction(messageId, "heart", { partIndex: 0 });
+```
+
+The facade accepts a Thread owned by this adapter instance or a canonical existing-chat ID in the
+form `linq:{chat UUID}`. Message IDs must be UUIDs, and indexes must be non-negative integers.
+Reaction options preserve omission separately from explicit `0`. `replyToPart()` still travels
+through Chat SDK reply processing and returns a canonical `SentMessage`; no provisional identity,
+database mutation, or delivery/presentation guarantee is added.
 
 Then route Linq webhooks to the adapter from any framework with fetch-style handlers:
 
@@ -295,8 +326,9 @@ contracts, tests, and documentation are complete. Provider, device, and host obs
 separate evidence labels defined in the parity matrix and are not universal completion gates.
 
 The extension surface is intentionally small: `onLinqEvent()` registration for verified generic
-events, the implemented `linqMessage(content, options)` send-time transport and decorations, and
-planned `adapter.conversation(threadOrId)` native conversation behavior.
+events, the implemented `linqMessage(content, options)` send-time transport, and the
+`adapter.conversation(threadOrId)` facade for part-specific reply/reaction semantics that Chat SDK
+cannot express. Other native conversation behavior remains planned.
 Endpoint-shaped account and administrative behavior remains on `adapter.client`.
 
 ## Supported features
@@ -310,7 +342,9 @@ Endpoint-shaped account and administrative behavior remains on `adapter.client`.
 | Outbound media / file sending                      | ✅ to existing chats; `attachments` and `files` become media parts                                                         |
 | Inbound reactions (tapbacks + custom emoji)        | ✅ dispatch to `onReaction()`                                                                                              |
 | Outbound reactions (add/remove)                    | ✅                                                                                                                         |
-| Standard replies                                   | ✅ `thread.reply(messageOrId, content)`; Linq part-index targeting remains planned                                         |
+| Rich link previews                                 | ✅ standalone `linqMessage("", { richLink })`; request contract only                                                       |
+| Standard replies                                   | ✅ `thread.reply(messageOrId, content)`                                                                                    |
+| Part-specific replies/reactions                    | ✅ `adapter.conversation(threadOrId)` with explicit zero-based indexes                                                     |
 | Mark as read                                       | ✅ `thread.markAsRead(messageOrId)`; Linq marks the whole chat                                                             |
 | Edit message                                       | ✅ text, first part only                                                                                                   |
 | Fetch message / history / thread                   | ⚠️ basic cursor history works; forward direction and rich normalization remain partial                                     |
@@ -370,15 +404,15 @@ migration, or Chat SDK change. See
 Recipes compose the native client with adapter-provided chat primitives; they do
 not add workflow-specific adapter methods or appear in implementation batches.
 
-### Accept payments over chat (planned)
+### Accept payments over chat (recipe primitives available)
 
 Create and manage a Payment Request with
 `adapter.client.paymentRequests`, send its `checkout_url` through the general
 rich-link message capability, and observe `payment.succeeded`,
 `payment.canceled`, or `payment.expired` through generic typed
 `adapter.onLinqEvent(...)`. Application code owns reconciliation and payment
-state. The native client is available now; rich-link delivery and generic event
-passthrough remain planned, so the complete recipe is not supported yet.
+state. The native client, general rich-link delivery, and generic event passthrough primitives are
+available; no payment-specific adapter API, reconciliation, or workflow guarantee is implied.
 
 Agentcard is not a recipe and remains explicitly out of scope.
 

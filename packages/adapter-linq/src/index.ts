@@ -1,5 +1,5 @@
 export { createLinqAdapter, LinqAdapter } from "./adapter.js";
-export type { LinqAdapterConfig } from "./adapter.js";
+export type { LinqAdapterConfig, LinqConversation } from "./adapter.js";
 export { linqMessage } from "./message.js";
 export type {
   LinqBubbleEffectName,

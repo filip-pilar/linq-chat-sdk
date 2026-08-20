@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { ValidationError } from "@chat-adapter/shared";
 import { LinqAPIV3 } from "@linqapp/sdk";
 import { ConsoleLogger, Message, NotImplementedError, stringifyMarkdown } from "chat";
 import type {
@@ -14,6 +15,8 @@ import type {
   RawMessage,
   StateAdapter,
   StreamChunk,
+  SentMessage,
+  Thread,
   ThreadInfo,
   WebhookOptions,
 } from "chat";
@@ -39,6 +42,7 @@ import {
 } from "./message-parser.js";
 import { planLinqOutboundMessage, prepareLinqOutboundParts } from "./outbound-media.js";
 import { compileLinqMessageText, compileLinqSendOptions } from "./message-compiler.js";
+import { getLinqReplyPartIndex, withLinqReplyPartIndex } from "./message.js";
 import { fromLinqReaction, toLinqReaction } from "./reactions.js";
 import { authenticateLinqWebhookRequest } from "./verification.js";
 import {
@@ -69,6 +73,33 @@ export interface LinqAdapterConfig {
   webhookVerificationMode?: LinqWebhookVerificationScheme;
 }
 
+type LinqPartReactionOptions = {
+  readonly partIndex?: number;
+};
+
+export interface LinqConversation {
+  readonly threadId: string;
+  replyToPart(
+    messageId: string,
+    partIndex: number,
+    content: AdapterPostableMessage,
+  ): Promise<SentMessage>;
+  addReaction(
+    messageId: string,
+    reaction: string,
+    options?: LinqPartReactionOptions,
+  ): Promise<void>;
+  removeReaction(
+    messageId: string,
+    reaction: string,
+    options?: LinqPartReactionOptions,
+  ): Promise<void>;
+}
+
+type ChatWithThreads = ChatInstance & { thread(threadId: string): Thread };
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   readonly name: string = "linq";
   readonly userName: string = "linq";
@@ -78,7 +109,7 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   private readonly webhookVerificationAuthority = {};
   private readonly linqEvents = new LinqEventRegistry();
 
-  private chat: ChatInstance | null = null;
+  private chat: ChatWithThreads | null = null;
   private state: StateAdapter | null = null;
   private logger: Logger;
   // chatId -> isGroup, learned from webhooks, fetchThread, and legacy thread IDs.
@@ -107,9 +138,43 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   }
 
   async initialize(chat: ChatInstance): Promise<void> {
-    this.chat = chat;
+    this.chat = chat as ChatWithThreads;
     this.state = chat.getState();
     this.logger = chat.getLogger("linq");
+  }
+
+  conversation(threadOrId: Thread | string): LinqConversation {
+    const thread = this.resolveConversationThread(threadOrId);
+    const threadId = thread.id;
+
+    return Object.freeze({
+      threadId,
+      replyToPart: async (
+        messageId: string,
+        partIndex: number,
+        content: AdapterPostableMessage,
+      ): Promise<SentMessage> => {
+        validateMessageId(messageId);
+        validatePartIndex(partIndex);
+        validatePostableContent(content);
+
+        return thread.reply(messageId, withLinqReplyPartIndex(content, partIndex));
+      },
+      addReaction: async (
+        messageId: string,
+        reaction: string,
+        options?: LinqPartReactionOptions,
+      ): Promise<void> => {
+        await this.reactToMessagePart(threadId, messageId, reaction, "add", options);
+      },
+      removeReaction: async (
+        messageId: string,
+        reaction: string,
+        options?: LinqPartReactionOptions,
+      ): Promise<void> => {
+        await this.reactToMessagePart(threadId, messageId, reaction, "remove", options);
+      },
+    });
   }
 
   onLinqEvent<TType extends LinqKnownEventType>(
@@ -236,7 +301,12 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     messageId: string,
     message: AdapterPostableMessage,
   ): Promise<RawMessage<LinqRawMessage>> {
-    return this.sendMessage(threadId, message, { message_id: messageId });
+    const partIndex = getLinqReplyPartIndex(message);
+
+    return this.sendMessage(threadId, message, {
+      message_id: messageId,
+      ...(partIndex === undefined ? {} : { part_index: partIndex }),
+    });
   }
 
   private async sendMessage(
@@ -249,7 +319,12 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     const sendOptions = compileLinqSendOptions(message);
     const card = extractCardElement(message);
     const cardImageUrls = card ? collectCardImageUrls(card) : [];
-    const plan = planLinqOutboundMessage(message, compiledText, cardImageUrls);
+    const plan = planLinqOutboundMessage(
+      message,
+      compiledText,
+      cardImageUrls,
+      sendOptions.richLink,
+    );
     const idempotencyKey = randomUUID();
 
     if (card) {
@@ -361,6 +436,58 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       operation: "remove",
       ...toLinqReaction(emoji),
     });
+  }
+
+  private resolveConversationThread(threadOrId: Thread | string): Thread {
+    if (typeof threadOrId === "string") {
+      validateCanonicalThreadId(threadOrId);
+      if (!this.chat) {
+        throw validationError("Linq conversations require an initialized Chat instance.");
+      }
+
+      return this.chat.thread(threadOrId);
+    }
+
+    if (!isRecord(threadOrId)) {
+      throw validationError("Linq conversations require a Thread or canonical thread ID.");
+    }
+    const thread = threadOrId as unknown as Thread;
+
+    if (thread.adapter !== this) {
+      throw validationError("Linq conversation threads must belong to this adapter instance.");
+    }
+    validateCanonicalThreadId(thread.id);
+
+    return thread;
+  }
+
+  private async reactToMessagePart(
+    threadId: string,
+    messageId: string,
+    reaction: string,
+    operation: "add" | "remove",
+    options?: LinqPartReactionOptions,
+  ): Promise<void> {
+    validateCanonicalThreadId(threadId);
+    validateMessageId(messageId);
+    validateReaction(reaction);
+    if (options?.partIndex !== undefined) {
+      validatePartIndex(options.partIndex);
+    }
+
+    try {
+      await this.apiClient.messages.addReaction(messageId, {
+        operation,
+        ...toLinqReaction(reaction),
+        ...(options?.partIndex === undefined ? {} : { part_index: options.partIndex }),
+      });
+    } catch (error) {
+      throw translateLinqError(error, {
+        action: `${operation} message reaction`,
+        resourceId: messageId,
+        resourceType: "message",
+      });
+    }
   }
 
   // Threads
@@ -732,4 +859,39 @@ function isCompatibilityReactionEvent(event: unknown): event is LinqReactionWebh
     typeof event.data.is_from_me === "boolean" &&
     typeof event.data.reaction_type === "string"
   );
+}
+
+function validateCanonicalThreadId(threadId: string): void {
+  const match = /^linq:([^:]+)$/.exec(threadId);
+  if (!match?.[1] || !UUID_PATTERN.test(match[1])) {
+    throw validationError("Linq conversations require a canonical linq:{chat UUID} thread ID.");
+  }
+}
+
+function validateMessageId(messageId: string): void {
+  if (!UUID_PATTERN.test(messageId)) {
+    throw validationError("Linq message IDs must be UUIDs.");
+  }
+}
+
+function validatePartIndex(partIndex: number): void {
+  if (!Number.isInteger(partIndex) || partIndex < 0) {
+    throw validationError("Linq message part indexes must be non-negative integers.");
+  }
+}
+
+function validateReaction(reaction: string): void {
+  if (typeof reaction !== "string" || reaction.trim().length === 0) {
+    throw validationError("Linq reactions must be non-empty strings.");
+  }
+}
+
+function validatePostableContent(content: AdapterPostableMessage): void {
+  if (typeof content !== "string" && !isRecord(content)) {
+    throw validationError("Linq replies require valid Chat SDK message content.");
+  }
+}
+
+function validationError(message: string): ValidationError {
+  return new ValidationError("linq", message);
 }

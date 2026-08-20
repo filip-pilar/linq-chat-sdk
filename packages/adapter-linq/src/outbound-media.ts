@@ -19,6 +19,7 @@ const MIN_UPLOAD_BYTES = 1;
 const URL_DOWNLOAD_LIMIT_BYTES = 10 * 1024 * 1024;
 
 type LinqOutboundPart =
+  | { type: "link"; value: string }
   | { type: "text"; value: string; text_decorations?: LinqCompiledDecoration[] }
   | { type: "media"; url: string }
   | { type: "media"; attachment_id: string };
@@ -40,6 +41,7 @@ type PlannedMediaPart = { type: "url"; url: string } | PlannedUpload;
 
 type LinqOutboundMessagePlan = {
   cardImageUrls: string[];
+  link?: string;
   media: PlannedMediaPart[];
   text?: CompiledLinqMessageText;
 };
@@ -91,6 +93,7 @@ export function planLinqOutboundMessage(
   message: AdapterPostableMessage,
   compiledText: CompiledLinqMessageText,
   cardImageUrls: string[],
+  richLink?: string,
 ): LinqOutboundMessagePlan {
   const { text } = compiledText;
   if (text && characterCount(text) > MAX_TEXT_CHARACTERS) {
@@ -106,6 +109,17 @@ export function planLinqOutboundMessage(
     ...attachments.map(planAttachment),
     ...files.map(planFile),
   ] satisfies PlannedMediaPart[];
+
+  if (richLink !== undefined) {
+    if (text || cardImageUrls.length > 0 || media.length > 0) {
+      throw validationError(
+        "Linq rich links must be the only message content and cannot include text, cards, files, or attachments.",
+      );
+    }
+
+    return { cardImageUrls: [], link: richLink, media: [] };
+  }
+
   const totalParts = (text ? 1 : 0) + cardImageUrls.length + media.length;
 
   if (totalParts === 0) {
@@ -137,6 +151,10 @@ export async function prepareLinqOutboundParts(
   onAttachmentCreated: (attachmentId: string) => void,
 ): Promise<LinqOutboundPart[]> {
   const parts: LinqOutboundPart[] = [];
+
+  if (plan.link) {
+    return [{ type: "link", value: plan.link }];
+  }
 
   if (plan.text) {
     parts.push({

@@ -1,5 +1,7 @@
 import type { AdapterPostableMessage } from "chat";
 
+const LINQ_REPLY_PART_INDEX = Symbol("linq.replyPartIndex");
+
 export type LinqPreferredService = "iMessage" | "RCS" | "SMS";
 
 export type LinqScreenEffectName =
@@ -90,4 +92,33 @@ function snapshotOptions(options: LinqMessageOptions): Readonly<LinqMessageOptio
     ...(decorations === undefined ? {} : { decorations }),
     ...(richLink === undefined ? {} : { richLink }),
   });
+}
+
+export function withLinqReplyPartIndex(
+  content: AdapterPostableMessage,
+  partIndex: number,
+): AdapterPostableMessage {
+  if (typeof content === "string") {
+    return {
+      raw: content,
+      [LINQ_REPLY_PART_INDEX]: partIndex,
+    } as unknown as AdapterPostableMessage;
+  }
+
+  if ("type" in content && content.type === "card") {
+    return {
+      card: content,
+      [LINQ_REPLY_PART_INDEX]: partIndex,
+    } as unknown as AdapterPostableMessage;
+  }
+
+  return { ...content, [LINQ_REPLY_PART_INDEX]: partIndex } as unknown as AdapterPostableMessage;
+}
+
+export function getLinqReplyPartIndex(content: AdapterPostableMessage): number | undefined {
+  return typeof content === "string"
+    ? undefined
+    : (content as AdapterPostableMessage & { [LINQ_REPLY_PART_INDEX]?: number })[
+        LINQ_REPLY_PART_INDEX
+      ];
 }

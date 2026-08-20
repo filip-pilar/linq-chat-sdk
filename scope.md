@@ -24,6 +24,10 @@ The adapter can already handle the core receive/reply path:
 - Render formatted Chat SDK content deterministically as plain text; Batch `010A` maps supported
   bold, italic, and strikethrough formatting plus validated manual decorations.
 - Add and remove reactions with `messages.addReaction()`.
+- Send standalone native rich links with validated HTTPS/length/content and documented protocol
+  fallback contracts.
+- Target explicit reply and reaction parts through `adapter.conversation(threadOrId)` while
+  preserving ordinary Chat SDK reply/reaction APIs for whole messages.
 - Route inbound `reaction.added` / `reaction.removed` webhooks into Chat SDK `onReaction()` handlers (tapbacks map to normalized emoji, custom emoji pass through, stickers are skipped).
 - Encode stable Linq thread IDs (`linq:{chatId}`) so webhook and API paths map to the same thread.
 - Track direct-message vs group-chat identity in-memory from webhooks and chat fetches (legacy `linq:{chatId}:dm/group` IDs still decode).
@@ -147,9 +151,10 @@ The public extensions are deliberately cohesive:
   `010A` contract-verifies deterministic raw/Markdown/AST/static-card text, UTF-16 style ranges,
   and validated manual styles/animations before side effects. `010B` maps omitted/explicit service
   selection and message-level effects, rejecting contradictory explicit RCS/SMS intent before side
-  effects. Linq's current edit operation remains text-only. Rich links remain later work. Ordinary
-  replies already use `Thread.reply()`; only part-index targeting remains a Linq-specific `007B`
-  gap.
+  effects. `007B` maps validated standalone rich links and adds only the conversation-facade methods
+  required for part-index replies/reactions, retaining canonical Chat SDK identity and standard
+  whole-message APIs. Linq's current edit operation remains text-only. `007C` retains inbound,
+  history, card, and buffered-stream fidelity work.
 - Batches `008`/`009`: `adapter.conversation(threadOrId)` with common operations directly on the
   facade, existing-group operations under `.group`, and location under `.location`.
 
