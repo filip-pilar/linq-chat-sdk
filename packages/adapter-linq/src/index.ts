@@ -1,5 +1,15 @@
 export { createLinqAdapter, LinqAdapter } from "./adapter.js";
-export type { LinqAdapterConfig, LinqConversation } from "./adapter.js";
+export type {
+  LinqAdapterConfig,
+  LinqConversation,
+  LinqGroupConversation,
+  LinqGroupUpdateOptions,
+  LinqLocationConversation,
+  LinqLocationSnapshot,
+  LinqSharedLocation,
+  LinqVoiceMemoResult,
+  LinqVoiceMemoSource,
+} from "./adapter.js";
 export { linqMessage } from "./message.js";
 export type { LinqRawMessage } from "./message-parser.js";
 export type {

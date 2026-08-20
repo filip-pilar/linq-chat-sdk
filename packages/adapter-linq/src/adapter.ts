@@ -77,6 +77,48 @@ type LinqPartReactionOptions = {
   readonly partIndex?: number;
 };
 
+export type LinqVoiceMemoSource =
+  | { readonly url: string | URL; readonly attachmentId?: never }
+  | { readonly attachmentId: string; readonly url?: never };
+
+export interface LinqVoiceMemoResult {
+  readonly messageId: string;
+  readonly threadId: string;
+  readonly attachmentId: string;
+}
+
+export interface LinqGroupUpdateOptions {
+  readonly displayName?: string;
+  readonly iconUrl?: string | URL;
+}
+
+export interface LinqGroupConversation {
+  update(options: LinqGroupUpdateOptions): Promise<void>;
+  addParticipant(handle: string): Promise<void>;
+  removeParticipant(handle: string): Promise<void>;
+  leave(): Promise<void>;
+}
+
+export interface LinqSharedLocation {
+  readonly handle: string;
+  readonly longitude: number;
+  readonly latitude: number;
+  readonly altitude?: number;
+  readonly address?: string;
+  readonly locality?: string;
+  readonly updatedAt?: string;
+}
+
+export interface LinqLocationSnapshot {
+  readonly threadId: string;
+  readonly locations: readonly LinqSharedLocation[];
+}
+
+export interface LinqLocationConversation {
+  request(): Promise<void>;
+  retrieve(): Promise<LinqLocationSnapshot>;
+}
+
 export interface LinqConversation {
   readonly threadId: string;
   replyToPart(
@@ -94,6 +136,11 @@ export interface LinqConversation {
     reaction: string,
     options?: LinqPartReactionOptions,
   ): Promise<void>;
+  stopTyping(): Promise<void>;
+  shareContactCard(): Promise<void>;
+  sendVoiceMemo(source: LinqVoiceMemoSource): Promise<LinqVoiceMemoResult>;
+  readonly group: LinqGroupConversation;
+  readonly location: LinqLocationConversation;
 }
 
 type ChatWithThreads = ChatInstance & { thread(threadId: string): Thread };
@@ -146,9 +193,33 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   conversation(threadOrId: Thread | string): LinqConversation {
     const thread = this.resolveConversationThread(threadOrId);
     const threadId = thread.id;
+    const group: LinqGroupConversation = Object.freeze({
+      update: async (_options: LinqGroupUpdateOptions): Promise<void> => {
+        throw new NotImplementedError("Linq group updates are not implemented");
+      },
+      addParticipant: async (_handle: string): Promise<void> => {
+        throw new NotImplementedError("Adding Linq group participants is not implemented");
+      },
+      removeParticipant: async (_handle: string): Promise<void> => {
+        throw new NotImplementedError("Removing Linq group participants is not implemented");
+      },
+      leave: async (): Promise<void> => {
+        throw new NotImplementedError("Leaving Linq groups is not implemented");
+      },
+    });
+    const location: LinqLocationConversation = Object.freeze({
+      request: async (): Promise<void> => {
+        throw new NotImplementedError("Linq location requests are not implemented");
+      },
+      retrieve: async (): Promise<LinqLocationSnapshot> => {
+        throw new NotImplementedError("Linq location retrieval is not implemented");
+      },
+    });
 
     return Object.freeze({
       threadId,
+      group,
+      location,
       replyToPart: async (
         messageId: string,
         partIndex: number,
@@ -173,6 +244,15 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
         options?: LinqPartReactionOptions,
       ): Promise<void> => {
         await this.reactToMessagePart(threadId, messageId, reaction, "remove", options);
+      },
+      stopTyping: async (): Promise<void> => {
+        throw new NotImplementedError("Stopping Linq typing is not implemented");
+      },
+      shareContactCard: async (): Promise<void> => {
+        throw new NotImplementedError("Sharing Linq contact cards is not implemented");
+      },
+      sendVoiceMemo: async (_source: LinqVoiceMemoSource): Promise<LinqVoiceMemoResult> => {
+        throw new NotImplementedError("Sending Linq voice memos is not implemented");
       },
     });
   }

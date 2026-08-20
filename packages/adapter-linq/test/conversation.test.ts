@@ -1,5 +1,5 @@
 import { ResourceNotFoundError, ValidationError } from "@chat-adapter/shared";
-import { Actions, Button, Card, Chat } from "chat";
+import { Actions, Button, Card, Chat, NotImplementedError } from "chat";
 import type { StateAdapter } from "chat";
 import { describe, expect, it, vi } from "vitest";
 
@@ -10,7 +10,7 @@ const THREAD_ID = `linq:${CHAT_ID}`;
 const MESSAGE_ID = "22222222-2222-2222-2222-222222222222";
 const PARENT_ID = "33333333-3333-3333-3333-333333333333";
 
-describe("Linq conversation part targeting", () => {
+describe("Linq conversation facade", () => {
   it.each([0, 3])(
     "replies to explicit part index %s through the Chat SDK thread",
     async (partIndex) => {
@@ -165,6 +165,51 @@ describe("Linq conversation part targeting", () => {
     expect(() => adapter.conversation(null as never)).toThrow(ValidationError);
   });
 
+  it("freezes the cohesive facade while leaving future operations side-effect free", async () => {
+    const { adapter, chat, providerIO } = await createHarness();
+    const conversation = adapter.conversation(chat.thread(THREAD_ID));
+
+    expect(conversation.threadId).toBe(THREAD_ID);
+    expect(Object.keys(conversation).sort()).toEqual([
+      "addReaction",
+      "group",
+      "location",
+      "removeReaction",
+      "replyToPart",
+      "sendVoiceMemo",
+      "shareContactCard",
+      "stopTyping",
+      "threadId",
+    ]);
+    expect(Object.keys(conversation.group).sort()).toEqual([
+      "addParticipant",
+      "leave",
+      "removeParticipant",
+      "update",
+    ]);
+    expect(Object.keys(conversation.location).sort()).toEqual(["request", "retrieve"]);
+    expect(Object.isFrozen(conversation)).toBe(true);
+    expect(Object.isFrozen(conversation.group)).toBe(true);
+    expect(Object.isFrozen(conversation.location)).toBe(true);
+
+    const operations = [
+      conversation.stopTyping(),
+      conversation.shareContactCard(),
+      conversation.sendVoiceMemo({ url: "https://example.com/memo.m4a" }),
+      conversation.group.update({ displayName: "Example" }),
+      conversation.group.addParticipant("+15550000001"),
+      conversation.group.removeParticipant("+15550000001"),
+      conversation.group.leave(),
+      conversation.location.request(),
+      conversation.location.retrieve(),
+    ];
+
+    for (const operation of operations) {
+      await expect(operation).rejects.toBeInstanceOf(NotImplementedError);
+    }
+    for (const providerCall of providerIO) expect(providerCall).not.toHaveBeenCalled();
+  });
+
   it("translates part-reaction provider failures", async () => {
     const { adapter, addReaction } = await createHarness();
     addReaction.mockRejectedValueOnce(Object.assign(new Error("missing"), { status: 404 }));
@@ -181,6 +226,7 @@ async function createHarness(): Promise<{
   chat: Chat<{ linq: LinqAdapter }>;
   send: ReturnType<typeof vi.fn>;
   update: ReturnType<typeof vi.fn>;
+  providerIO: ReturnType<typeof vi.fn>[];
 }> {
   const adapter = createLinqAdapter({ apiKey: "test-key", signingSecret: "test-secret" });
   const send = vi.fn().mockResolvedValue({
@@ -226,9 +272,30 @@ async function createHarness(): Promise<{
     ],
     next_cursor: null,
   });
+  const providerIO = Array.from({ length: 9 }, () => vi.fn());
+  const [
+    stopTyping,
+    shareContactCard,
+    sendVoicememo,
+    updateChat,
+    addParticipant,
+    removeParticipant,
+    leaveChat,
+    requestLocation,
+    retrieveLocation,
+  ] = providerIO;
 
   Object.assign(adapter.client, {
-    chats: { messages: { list, send } },
+    chats: {
+      leaveChat,
+      location: { request: requestLocation, retrieve: retrieveLocation },
+      messages: { list, send },
+      participants: { add: addParticipant, remove: removeParticipant },
+      sendVoicememo,
+      shareContactCard,
+      typing: { stop: stopTyping },
+      update: updateChat,
+    },
     messages: { addReaction, update },
   });
 
@@ -246,5 +313,5 @@ async function createHarness(): Promise<{
   });
   await chat.initialize();
 
-  return { adapter, addReaction, chat, send, update };
+  return { adapter, addReaction, chat, providerIO, send, update };
 }

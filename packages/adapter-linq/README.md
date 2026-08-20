@@ -99,7 +99,7 @@ same `preferredService` contract above. Linq documents rich previews on iMessage
 URL fallback on SMS. Those are provider request/fallback contracts, not a device-presentation claim.
 Standard cards, files, attachments, returned identity, history, and serialization remain unchanged.
 
-### Part-specific replies and reactions
+### Linq conversation facade
 
 Ordinary replies and reactions stay on Chat SDK's `Thread` and `SentMessage` APIs. Use the narrow
 conversation facade only when Linq's zero-based message-part index matters:
@@ -117,6 +117,17 @@ form `linq:{chat UUID}`. Message IDs must be UUIDs, and indexes must be non-nega
 Reaction options preserve omission separately from explicit `0`. `replyToPart()` still travels
 through Chat SDK reply processing and returns a canonical `SentMessage`; no provisional identity,
 database mutation, or delivery/presentation guarantee is added.
+
+The same frozen facade now declares the complete cohesive Linq conversation surface. Common
+operations are `stopTyping()`, `shareContactCard()`, and `sendVoiceMemo()`; existing-group
+operations are under `.group`; location request/retrieval is under `.location`. These newly frozen
+methods are contract-only and currently reject with `NotImplementedError` before provider I/O.
+Voice sources are exactly one public URL or existing attachment ID, with a future normalized result
+limited to `messageId`, canonical `threadId`, and `attachmentId`. Location retrieval is typed as a
+canonical thread plus immutable participant locations with longitude-first coordinates, optional
+altitude, address, locality, and provider timestamp.
+Mark-read remains `Thread.markAsRead()`, and account or administrative operations remain on
+`adapter.client`.
 
 Then route Linq webhooks to the adapter from any framework with fetch-style handlers:
 
@@ -348,9 +359,9 @@ contracts, tests, and documentation are complete. Provider, device, and host obs
 separate evidence labels defined in the parity matrix and are not universal completion gates.
 
 The extension surface is intentionally small: `onLinqEvent()` registration for verified generic
-events, the implemented `linqMessage(content, options)` send-time transport, and the
-`adapter.conversation(threadOrId)` facade for part-specific reply/reaction semantics that Chat SDK
-cannot express. Other native conversation behavior remains planned.
+events, the implemented `linqMessage(content, options)` send-time transport, and the cohesive
+`adapter.conversation(threadOrId)` facade. Part-specific reply/reaction behavior is implemented;
+the frozen common, `.group`, and `.location` contracts remain planned operations.
 Endpoint-shaped account and administrative behavior remains on `adapter.client`.
 
 ## Supported features
@@ -367,6 +378,7 @@ Endpoint-shaped account and administrative behavior remains on `adapter.client`.
 | Rich link previews                                 | ✅ standalone `linqMessage("", { richLink })`; request contract only                                          |
 | Standard replies                                   | ✅ `thread.reply(messageOrId, content)`                                                                       |
 | Part-specific replies/reactions                    | ✅ `adapter.conversation(threadOrId)` with explicit zero-based indexes                                        |
+| Common/group/location facade                       | ⚠️ contract frozen; newly declared operations remain unimplemented                                            |
 | Mark as read                                       | ✅ `thread.markAsRead(messageOrId)`; Linq marks the whole chat                                                |
 | Edit message                                       | ✅ text, first part only                                                                                      |
 | Fetch message / history / thread                   | ⚠️ defensive backward cursor history; forward/`allMessages` is explicitly unsupported                         |

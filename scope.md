@@ -28,6 +28,9 @@ The adapter can already handle the core receive/reply path:
   fallback contracts.
 - Target explicit reply and reaction parts through `adapter.conversation(threadOrId)` while
   preserving ordinary Chat SDK reply/reaction APIs for whole messages.
+- Freeze the complete canonical `adapter.conversation(threadOrId)` contract: common operations on
+  the facade, existing-group operations under `.group`, and location under `.location`. The newly
+  declared methods remain unimplemented and perform no provider I/O; mark-read stays on `Thread`.
 - Route inbound `reaction.added` / `reaction.removed` webhooks into Chat SDK `onReaction()` handlers (tapbacks map to normalized emoji, custom emoji pass through, stickers are skipped).
 - Encode stable Linq thread IDs (`linq:{chatId}`) so webhook and API paths map to the same thread.
 - Track direct-message vs group-chat identity in-memory from webhooks and chat fetches (legacy `linq:{chatId}:dm/group` IDs still decode).
@@ -157,8 +160,9 @@ The public extensions are deliberately cohesive:
   reaction, reconciliation, and sticker facts; isolates malformed/null parts and rows; freezes
   default backward history; and verifies static-card and buffered-stream compilation. Forward
   history remains explicitly unsupported. Linq's current edit operation remains text-only.
-- Batches `008`/`009`: `adapter.conversation(threadOrId)` with common operations directly on the
-  facade, existing-group operations under `.group`, and location under `.location`.
+- Batches `008B`/`008C`/`009`: implement the frozen `adapter.conversation(threadOrId)` operations.
+  Common operations stay directly on the facade, existing-group operations under `.group`, and
+  location under `.location`; account and administrative operations stay on `adapter.client`.
 
 Batch `000` is complete: Chat SDK `4.38.1` standard reply/read contracts, Linq SDK `0.42.0`, direct
 Standard Webhooks verification, explicit deprecated legacy mode, OpenAPI drift checking, CI, and

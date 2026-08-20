@@ -9,7 +9,11 @@ import type {
   LinqConversation,
   LinqEventMap,
   LinqFutureEvent,
+  LinqGroupConversation,
+  LinqGroupUpdateOptions,
   LinqKnownEventType,
+  LinqLocationConversation,
+  LinqLocationSnapshot,
   LinqMessageFailedEventData,
   LinqMessageLifecycleEventData,
   LinqMessageEditedEventData,
@@ -18,7 +22,10 @@ import type {
   LinqMessageReceivedWebhookData,
   LinqRawMessage,
   LinqReactionObservation,
+  LinqSharedLocation,
   LinqPostableMessage,
+  LinqVoiceMemoResult,
+  LinqVoiceMemoSource,
   LinqVerifiedUnhandledWebhook,
   LinqVerifiedWebhook,
   LinqWebhookVerificationResult,
@@ -237,6 +244,38 @@ function assertConversationErgonomics(
   expectTypeOf(
     byId.removeReaction("22222222-2222-2222-2222-222222222222", "heart"),
   ).resolves.toBeVoid();
+  expectTypeOf(byId.stopTyping()).resolves.toBeVoid();
+  expectTypeOf(byId.shareContactCard()).resolves.toBeVoid();
+  expectTypeOf(
+    byId.sendVoiceMemo({ url: new URL("https://example.com/memo.m4a") }),
+  ).resolves.toEqualTypeOf<LinqVoiceMemoResult>();
+  expectTypeOf(
+    byId.sendVoiceMemo({ attachmentId: "33333333-3333-3333-3333-333333333333" }),
+  ).resolves.toEqualTypeOf<LinqVoiceMemoResult>();
+  expectTypeOf(byId.group).toEqualTypeOf<LinqGroupConversation>();
+  expectTypeOf(
+    byId.group.update({ displayName: "Example", iconUrl: new URL("https://example.com/icon.png") }),
+  ).resolves.toBeVoid();
+  expectTypeOf(byId.group.addParticipant("+15550000001")).resolves.toBeVoid();
+  expectTypeOf(byId.group.removeParticipant("+15550000001")).resolves.toBeVoid();
+  expectTypeOf(byId.group.leave()).resolves.toBeVoid();
+  expectTypeOf(byId.location).toEqualTypeOf<LinqLocationConversation>();
+  expectTypeOf(byId.location.request()).resolves.toBeVoid();
+  expectTypeOf(byId.location.retrieve()).resolves.toEqualTypeOf<LinqLocationSnapshot>();
+
+  // @ts-expect-error -- voice memo sources are mutually exclusive.
+  byId.sendVoiceMemo({
+    url: "https://example.com/memo.m4a",
+    attachmentId: "33333333-3333-3333-3333-333333333333",
+  });
+  // @ts-expect-error -- raw bytes belong to the deferred media-lifecycle batch.
+  byId.sendVoiceMemo({ data: new Uint8Array([1]) });
+  // @ts-expect-error -- mark-read remains on the standard Chat SDK Thread.
+  byId.markAsRead("22222222-2222-2222-2222-222222222222");
+  // @ts-expect-error -- common conversation operations are not flat adapter aliases.
+  adapter.stopTyping("linq:11111111-1111-1111-1111-111111111111");
+  // @ts-expect-error -- group operations remain nested on the conversation facade.
+  adapter.addParticipant("linq:11111111-1111-1111-1111-111111111111", "+15550000001");
 
   // @ts-expect-error -- endpoint-shaped aliases are intentionally excluded.
   adapter.postReply("linq:11111111-1111-1111-1111-111111111111", content);
@@ -257,6 +296,42 @@ type Equal<Left, Right> =
   (<T>() => T extends Left ? 1 : 2) extends <T>() => T extends Right ? 1 : 2 ? true : false;
 
 type _KnownEventMapIsComplete = Assert<Equal<keyof LinqEventMap, LinqKnownEventType>>;
+type _ConversationSurfaceIsExact = Assert<
+  Equal<
+    keyof LinqConversation,
+    | "threadId"
+    | "replyToPart"
+    | "addReaction"
+    | "removeReaction"
+    | "stopTyping"
+    | "shareContactCard"
+    | "sendVoiceMemo"
+    | "group"
+    | "location"
+  >
+>;
+type _GroupSurfaceIsExact = Assert<
+  Equal<keyof LinqGroupConversation, "update" | "addParticipant" | "removeParticipant" | "leave">
+>;
+type _LocationSurfaceIsExact = Assert<
+  Equal<keyof LinqLocationConversation, "request" | "retrieve">
+>;
+
+const voiceMemoSourceContract = {} as LinqVoiceMemoSource;
+const voiceMemoResultContract = {} as LinqVoiceMemoResult;
+const groupUpdateContract = {} as LinqGroupUpdateOptions;
+const locationContract = {} as LinqSharedLocation;
+expectTypeOf(voiceMemoResultContract.messageId).toBeString();
+expectTypeOf(voiceMemoResultContract.threadId).toBeString();
+expectTypeOf(voiceMemoResultContract.attachmentId).toBeString();
+expectTypeOf(groupUpdateContract.displayName).toEqualTypeOf<string | undefined>();
+expectTypeOf(groupUpdateContract.iconUrl).toEqualTypeOf<string | URL | undefined>();
+expectTypeOf(locationContract.handle).toBeString();
+expectTypeOf(locationContract.longitude).toBeNumber();
+expectTypeOf(locationContract.latitude).toBeNumber();
+expectTypeOf(locationContract.altitude).toEqualTypeOf<number | undefined>();
+expectTypeOf(locationContract.updatedAt).toEqualTypeOf<string | undefined>();
+void voiceMemoSourceContract;
 
 const futureEventContract = {
   type: "future.provider_event",
