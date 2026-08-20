@@ -13,6 +13,8 @@ import type {
   LinqGroupUpdateOptions,
   LinqKnownEventType,
   LinqLocationConversation,
+  LinqLocationSharingStartedEventData,
+  LinqLocationSharingStoppedEventData,
   LinqLocationSnapshot,
   LinqMessageFailedEventData,
   LinqMessageLifecycleEventData,
@@ -268,6 +270,10 @@ function assertConversationErgonomics(
   expectTypeOf(byId.location).toEqualTypeOf<LinqLocationConversation>();
   expectTypeOf(byId.location.request()).resolves.toBeVoid();
   expectTypeOf(byId.location.retrieve()).resolves.toEqualTypeOf<LinqLocationSnapshot>();
+  // @ts-expect-error -- location requests take no adapter polling or consent options.
+  byId.location.request({ duration: 3_600 });
+  // @ts-expect-error -- retrieval is an on-demand snapshot, not a polling API.
+  byId.location.retrieve({ pollInterval: 1_000 });
 
   // @ts-expect-error -- voice memo sources are mutually exclusive.
   byId.sendVoiceMemo({
@@ -331,6 +337,8 @@ const voiceMemoSourceContract = {} as LinqVoiceMemoSource;
 const voiceMemoResultContract = {} as LinqVoiceMemoResult;
 const groupUpdateContract = {} as LinqGroupUpdateOptions;
 const locationContract = {} as LinqSharedLocation;
+const locationStartedContract = {} as LinqLocationSharingStartedEventData;
+const locationStoppedContract = {} as LinqLocationSharingStoppedEventData;
 expectTypeOf(voiceMemoResultContract.messageId).toBeString();
 expectTypeOf(voiceMemoResultContract.threadId).toBeString();
 expectTypeOf(voiceMemoResultContract.attachmentId).toBeString();
@@ -341,6 +349,18 @@ expectTypeOf(locationContract.longitude).toBeNumber();
 expectTypeOf(locationContract.latitude).toBeNumber();
 expectTypeOf(locationContract.altitude).toEqualTypeOf<number | undefined>();
 expectTypeOf(locationContract.updatedAt).toEqualTypeOf<string | undefined>();
+expectTypeOf(locationStartedContract.sharedBy).toBeString();
+expectTypeOf(locationStartedContract.sharedWith).toBeString();
+expectTypeOf(locationStartedContract.beganAt).toEqualTypeOf<string | null>();
+expectTypeOf(locationStartedContract.endsAt).toEqualTypeOf<string | null>();
+expectTypeOf(locationStoppedContract.sharedBy).toBeString();
+expectTypeOf(locationStoppedContract.sharedWith).toBeString();
+expectTypeOf(
+  {} as LinqEventMap["location.sharing.started"]["data"],
+).toEqualTypeOf<LinqLocationSharingStartedEventData>();
+expectTypeOf(
+  {} as LinqEventMap["location.sharing.stopped"]["data"],
+).toEqualTypeOf<LinqLocationSharingStoppedEventData>();
 void voiceMemoSourceContract;
 
 const futureEventContract = {

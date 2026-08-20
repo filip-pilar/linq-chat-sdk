@@ -4,6 +4,8 @@ import type {
   LinqMessageFailedEventData,
   LinqMessageLifecycleEventData,
   LinqMessageReceivedWebhookData,
+  LinqLocationSharingStartedEventData,
+  LinqLocationSharingStoppedEventData,
   LinqReactionWebhookData,
   LinqWebhookEnvelopeObservation,
   LinqWebhookRawEvent,
@@ -34,7 +36,11 @@ type LinqEventData<TType extends LinqKnownEventType> = TType extends "message.re
         ? LinqMessageEditedEventData
         : TType extends LinqReactionEventType
           ? LinqReactionWebhookData
-          : LinqWebhookRawValue;
+          : TType extends "location.sharing.started"
+            ? LinqLocationSharingStartedEventData
+            : TType extends "location.sharing.stopped"
+              ? LinqLocationSharingStoppedEventData
+              : LinqWebhookRawValue;
 
 export type LinqEventMap = {
   readonly [TType in LinqKnownEventType]: LinqEventBase<TType, LinqEventData<TType>>;
@@ -74,7 +80,10 @@ export function createLinqEvent(webhook: LinqVerifiedWebhook): LinqAnyEvent {
         ? webhook.failure
         : webhook.kind === "message.edited"
           ? webhook.edit
-          : (webhook.rawEvent.data ?? null);
+          : webhook.kind === "location.sharing.started" ||
+              webhook.kind === "location.sharing.stopped"
+            ? webhook.locationSharing
+            : (webhook.rawEvent.data ?? null);
 
   return Object.freeze({
     type: webhook.envelope.eventType,

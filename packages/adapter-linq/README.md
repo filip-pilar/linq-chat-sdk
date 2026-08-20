@@ -139,8 +139,8 @@ operations are under `.group`; location request/retrieval is under `.location`. 
 `shareContactCard()` are implemented through the official client with shared adapter errors. Voice
 memos accept exactly one public HTTPS URL or existing Linq attachment UUID and return only the
 accepted message ID, canonical thread ID, and voice-memo attachment ID. Existing-group methods map
-to the official update, participant, and leave operations. Location methods remain contract-only
-and reject with `NotImplementedError` before provider I/O.
+to the official update, participant, and leave operations. Location methods map to the official
+request and retrieval operations.
 
 Stopping typing works for direct and group chats and acknowledges only that Linq accepted the
 request. Contact-card sharing takes no body, requires a configured active card and prior outbound
@@ -166,7 +166,20 @@ for request acceptance only, and repeated calls remain repeated provider operati
 does not claim request-to-event correlation without an explicit provider correlation key.
 
 Location retrieval is typed as a canonical thread plus immutable participant locations with
-longitude-first coordinates, optional altitude, address, locality, and provider timestamp.
+longitude-first coordinates, optional valid altitude, address, locality, and the original valid
+provider timestamp string. Malformed rows are skipped independently without reordering usable
+siblings; no usable rows produce an immutable empty result. `request()` resolves only when Linq
+accepts the prompt request: it does not establish recipient consent, coordinates, sharing duration,
+or delivery. Requests are documented for one-to-one iMessage chats; known groups reject locally,
+while service compatibility for an opaque canonical chat remains provider-enforced without a
+capability probe. Retrieval is an independent on-demand snapshot for direct or group chats. Hosts
+that need fresh coordinates should poll conservatively while they need the data and stop according
+to their own lifecycle; the adapter owns no timer, interval, retry, cache, or identity resolution.
+
+Current `location.sharing.started` and `location.sharing.stopped` webhooks expose typed participant
+and consent-window facts through `onLinqEvent()`. They do not contain coordinates or correlate a
+request to a later event; coordinate refresh remains retrieval-based. The authenticated
+`rawEvent` stays available losslessly, and future webhook versions remain unsupported but retained.
 
 Mark-read remains `Thread.markAsRead()`, and account or administrative operations remain on
 `adapter.client`.
@@ -403,7 +416,7 @@ separate evidence labels defined in the parity matrix and are not universal comp
 The extension surface is intentionally small: `onLinqEvent()` registration for verified generic
 events, the implemented `linqMessage(content, options)` send-time transport, and the cohesive
 `adapter.conversation(threadOrId)` facade. Part-specific reply/reaction behavior is implemented;
-the frozen common, `.group`, and `.location` contracts remain planned operations.
+the frozen common, `.group`, and `.location` contracts are implemented.
 Endpoint-shaped account and administrative behavior remains on `adapter.client`.
 
 ## Supported features
@@ -420,7 +433,7 @@ Endpoint-shaped account and administrative behavior remains on `adapter.client`.
 | Rich link previews                                 | ✅ standalone `linqMessage("", { richLink })`; request contract only                                          |
 | Standard replies                                   | ✅ `thread.reply(messageOrId, content)`                                                                       |
 | Part-specific replies/reactions                    | ✅ `adapter.conversation(threadOrId)` with explicit zero-based indexes                                        |
-| Common/group/location facade                       | ⚠️ stop typing/contact sharing implemented; voice/group/location remain planned                               |
+| Common/group/location facade                       | ✅ typed common, voice, existing-group, and location operations                                               |
 | Mark as read                                       | ✅ `thread.markAsRead(messageOrId)`; Linq marks the whole chat                                                |
 | Edit message                                       | ✅ text, first part only                                                                                      |
 | Fetch message / history / thread                   | ⚠️ defensive backward cursor history; forward/`allMessages` is explicitly unsupported                         |

@@ -143,6 +143,20 @@ export interface LinqMessageFailedEventData {
   readonly failedAt: string;
 }
 
+/** Consent-window facts from a current Linq location-sharing start event. */
+export interface LinqLocationSharingStartedEventData {
+  readonly sharedBy: string;
+  readonly sharedWith: string;
+  readonly beganAt: string | null;
+  readonly endsAt: string | null;
+}
+
+/** Participant facts from a current Linq location-sharing stop event. */
+export interface LinqLocationSharingStoppedEventData {
+  readonly sharedBy: string;
+  readonly sharedWith: string;
+}
+
 export interface LinqMessageLifecycleObservation {
   readonly sentAt: string | null;
   readonly deliveredAt: string | null;
@@ -273,6 +287,16 @@ export interface LinqVerifiedReactionWebhook extends LinqVerifiedWebhookBase {
   readonly reaction: LinqReactionObservation;
 }
 
+export interface LinqVerifiedLocationSharingStartedWebhook extends LinqVerifiedWebhookBase {
+  readonly kind: "location.sharing.started";
+  readonly locationSharing: LinqLocationSharingStartedEventData;
+}
+
+export interface LinqVerifiedLocationSharingStoppedWebhook extends LinqVerifiedWebhookBase {
+  readonly kind: "location.sharing.stopped";
+  readonly locationSharing: LinqLocationSharingStoppedEventData;
+}
+
 export interface LinqVerifiedUnhandledWebhook extends LinqVerifiedWebhookBase {
   readonly kind: "unhandled";
 }
@@ -287,6 +311,8 @@ export type LinqVerifiedWebhook =
   | LinqVerifiedMessageFailedWebhook
   | LinqVerifiedMessageEditedWebhook
   | LinqVerifiedReactionWebhook
+  | LinqVerifiedLocationSharingStartedWebhook
+  | LinqVerifiedLocationSharingStoppedWebhook
   | LinqVerifiedUnhandledWebhook
   | LinqVerifiedUnsupportedVersionWebhook;
 
@@ -422,6 +448,32 @@ export function normalizeAuthenticatedLinqWebhook(
     return {
       ok: true,
       webhook: Object.freeze({ ...base, kind: envelope.eventType, reaction }),
+    };
+  }
+
+  if (envelope.eventType === "location.sharing.started") {
+    const locationSharing = parseLocationSharingEventData(envelope.eventType, rawEvent.data);
+
+    if (!locationSharing) {
+      return invalidPayload();
+    }
+
+    return {
+      ok: true,
+      webhook: Object.freeze({ ...base, kind: envelope.eventType, locationSharing }),
+    };
+  }
+
+  if (envelope.eventType === "location.sharing.stopped") {
+    const locationSharing = parseLocationSharingEventData(envelope.eventType, rawEvent.data);
+
+    if (!locationSharing) {
+      return invalidPayload();
+    }
+
+    return {
+      ok: true,
+      webhook: Object.freeze({ ...base, kind: envelope.eventType, locationSharing }),
     };
   }
 
@@ -754,6 +806,42 @@ function parseMessageFailedEventData(value: unknown): LinqMessageFailedEventData
   });
 }
 
+function parseLocationSharingEventData(
+  eventType: "location.sharing.started",
+  value: unknown,
+): LinqLocationSharingStartedEventData | null;
+function parseLocationSharingEventData(
+  eventType: "location.sharing.stopped",
+  value: unknown,
+): LinqLocationSharingStoppedEventData | null;
+function parseLocationSharingEventData(
+  eventType: "location.sharing.started" | "location.sharing.stopped",
+  value: unknown,
+): LinqLocationSharingStartedEventData | LinqLocationSharingStoppedEventData | null {
+  if (
+    !isRecord(value) ||
+    !isNonEmptyString(value.shared_by) ||
+    !isNonEmptyString(value.shared_with)
+  ) {
+    return null;
+  }
+
+  if (eventType === "location.sharing.stopped") {
+    return Object.freeze({ sharedBy: value.shared_by, sharedWith: value.shared_with });
+  }
+
+  if (!isOptionalValidTimestamp(value.began_at) || !isOptionalValidTimestamp(value.ends_at)) {
+    return null;
+  }
+
+  return Object.freeze({
+    sharedBy: value.shared_by,
+    sharedWith: value.shared_with,
+    beganAt: typeof value.began_at === "string" ? value.began_at : null,
+    endsAt: typeof value.ends_at === "string" ? value.ends_at : null,
+  });
+}
+
 function isValidMediaPart(part: Record<string, unknown>): boolean {
   return (
     isNonEmptyString(part.id) &&
@@ -937,6 +1025,15 @@ function isNullableTimestamp(value: unknown): boolean {
 
 function isOptionalTimestamp(value: unknown): boolean {
   return value === undefined || isNonEmptyString(value);
+}
+
+function isOptionalValidTimestamp(value: unknown): boolean {
+  return (
+    value === undefined ||
+    (isNonEmptyString(value) &&
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value) &&
+      Number.isFinite(Date.parse(value)))
+  );
 }
 
 function nullableTimestamp(value: unknown): string | null {

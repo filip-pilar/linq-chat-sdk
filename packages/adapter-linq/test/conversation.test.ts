@@ -7,7 +7,7 @@ import {
   ResourceNotFoundError,
   ValidationError,
 } from "@chat-adapter/shared";
-import { Actions, Button, Card, Chat, NotImplementedError } from "chat";
+import { Actions, Button, Card, Chat } from "chat";
 import type { StateAdapter } from "chat";
 import { describe, expect, it, vi } from "vitest";
 
@@ -291,6 +291,149 @@ describe("Linq conversation facade", () => {
     expect(retrieveChat).not.toHaveBeenCalled();
   });
 
+  it("requests location as an acknowledgement for known direct and opaque chats", async () => {
+    const { adapter, chat, requestLocation, retrieveChat } = await createHarness();
+    const directThreadId = adapter.encodeThreadId({ chatId: CHAT_ID, isGroup: false });
+
+    await expect(
+      adapter.conversation(chat.thread(directThreadId)).location.request(),
+    ).resolves.toBe(undefined);
+    await expect(adapter.conversation(THREAD_ID).location.request()).resolves.toBe(undefined);
+
+    expect(requestLocation.mock.calls).toEqual([[CHAT_ID], [CHAT_ID]]);
+    expect(retrieveChat).not.toHaveBeenCalled();
+  });
+
+  it("rejects a location request for a known group before provider work", async () => {
+    const { adapter, providerIO } = await createHarness();
+    const groupThreadId = adapter.encodeThreadId({ chatId: GROUP_CHAT_ID, isGroup: true });
+
+    await expect(adapter.conversation(groupThreadId).location.request()).rejects.toBeInstanceOf(
+      ValidationError,
+    );
+    for (const providerCall of providerIO) expect(providerCall).not.toHaveBeenCalled();
+  });
+
+  it("retrieves a frozen ordered location snapshot from direct or group chats", async () => {
+    const { adapter, chat, retrieveLocation } = await createHarness();
+    const groupThreadId = adapter.encodeThreadId({ chatId: GROUP_CHAT_ID, isGroup: true });
+    retrieveLocation.mockResolvedValueOnce({
+      success: true,
+      data: {
+        type: "FeatureCollection",
+        features: [
+          {
+            type: "Feature",
+            geometry: { type: "Point", coordinates: [-122.4194, 37.7749] },
+            properties: {
+              handle: "+15550000001",
+              address: "1 Market Street",
+              locality: "San Francisco",
+              updated_at: "2026-08-20T10:20:30.000Z",
+            },
+          },
+          {
+            type: "Feature",
+            geometry: { type: "Point", coordinates: [55.2708, 25.2048, 8.5] },
+            properties: { handle: "member@example.com" },
+          },
+        ],
+      },
+    });
+
+    const snapshot = await adapter.conversation(chat.thread(groupThreadId)).location.retrieve();
+
+    expect(retrieveLocation).toHaveBeenCalledWith(GROUP_CHAT_ID);
+    expect(snapshot).toEqual({
+      threadId: groupThreadId,
+      locations: [
+        {
+          handle: "+15550000001",
+          longitude: -122.4194,
+          latitude: 37.7749,
+          address: "1 Market Street",
+          locality: "San Francisco",
+          updatedAt: "2026-08-20T10:20:30.000Z",
+        },
+        { handle: "member@example.com", longitude: 55.2708, latitude: 25.2048, altitude: 8.5 },
+      ],
+    });
+    expect(Object.isFrozen(snapshot)).toBe(true);
+    expect(Object.isFrozen(snapshot.locations)).toBe(true);
+    expect(snapshot.locations.every(Object.isFrozen)).toBe(true);
+  });
+
+  it("isolates malformed GeoJSON rows while preserving valid sibling order and raw timestamps", async () => {
+    const { adapter, retrieveLocation } = await createHarness();
+    retrieveLocation.mockResolvedValueOnce({
+      success: true,
+      data: {
+        type: "FeatureCollection",
+        features: [
+          { type: "Feature", geometry: null, properties: { handle: "bad" } },
+          {
+            type: "Feature",
+            geometry: { type: "Point", coordinates: [151.2093, -33.8688, "unknown"] },
+            properties: {
+              handle: "first@example.com",
+              updated_at: "not-a-date",
+              address: 42,
+            },
+          },
+          {
+            type: "Feature",
+            geometry: { type: "Point", coordinates: [181, 20] },
+            properties: { handle: "outside@example.com" },
+          },
+          {
+            type: "Feature",
+            geometry: { type: "Point", coordinates: [-0.1276, 51.5072] },
+            properties: { handle: "+442071234567", updated_at: "2026-08-20T10:20:30+04:00" },
+          },
+        ],
+      },
+    });
+
+    const snapshot = await adapter.conversation(THREAD_ID).location.retrieve();
+
+    expect(snapshot.locations).toEqual([
+      { handle: "first@example.com", longitude: 151.2093, latitude: -33.8688 },
+      {
+        handle: "+442071234567",
+        longitude: -0.1276,
+        latitude: 51.5072,
+        updatedAt: "2026-08-20T10:20:30+04:00",
+      },
+    ]);
+  });
+
+  it.each([
+    undefined,
+    null,
+    {},
+    { data: null },
+    { success: false, data: { type: "FeatureCollection", features: [] } },
+    { data: { type: "FeatureCollection", features: null } },
+    {
+      data: {
+        type: "FeatureCollection",
+        features: [{ type: "Feature", geometry: { type: "Point", coordinates: [10] } }],
+      },
+    },
+  ])(
+    "returns an immutable empty snapshot when response %j has no usable rows",
+    async (response) => {
+      const { adapter, retrieveLocation } = await createHarness();
+      retrieveLocation.mockResolvedValueOnce(response);
+
+      const snapshot = await adapter.conversation(THREAD_ID).location.retrieve();
+
+      expect(snapshot).toEqual({ threadId: THREAD_ID, locations: [] });
+      expect(Object.isFrozen(snapshot)).toBe(true);
+      expect(Object.isFrozen(snapshot.locations)).toBe(true);
+    },
+  );
+
   it("sends a voice memo from a public HTTPS URL and returns frozen canonical identity", async () => {
     const { adapter, chat, sendVoicememo } = await createHarness();
     const source = Object.freeze({ url: "https://media.example.com/memo.m4a" });
@@ -433,8 +576,8 @@ describe("Linq conversation facade", () => {
     expect(() => adapter.conversation(null as never)).toThrow(ValidationError);
   });
 
-  it("freezes the cohesive facade while leaving future operations side-effect free", async () => {
-    const { adapter, chat, providerIO } = await createHarness();
+  it("freezes the cohesive facade and its nested surfaces", async () => {
+    const { adapter, chat } = await createHarness();
     const conversation = adapter.conversation(chat.thread(THREAD_ID));
 
     expect(conversation.threadId).toBe(THREAD_ID);
@@ -459,13 +602,6 @@ describe("Linq conversation facade", () => {
     expect(Object.isFrozen(conversation)).toBe(true);
     expect(Object.isFrozen(conversation.group)).toBe(true);
     expect(Object.isFrozen(conversation.location)).toBe(true);
-
-    const operations = [conversation.location.request(), conversation.location.retrieve()];
-
-    for (const operation of operations) {
-      await expect(operation).rejects.toBeInstanceOf(NotImplementedError);
-    }
-    for (const providerCall of providerIO) expect(providerCall).not.toHaveBeenCalled();
   });
 
   it("translates part-reaction provider failures", async () => {
@@ -503,6 +639,33 @@ describe("Linq conversation facade", () => {
       await expect(harness.adapter.conversation(THREAD_ID)[operation]()).rejects.toBeInstanceOf(
         ErrorType,
       );
+    },
+  );
+
+  it.each(["requestLocation", "retrieveLocation"] as const)(
+    "translates %s provider failures",
+    async (operation) => {
+      for (const [status, ErrorType] of [
+        [400, ValidationError],
+        [401, AuthenticationError],
+        [403, PermissionError],
+        [404, ResourceNotFoundError],
+        [409, AdapterError],
+        [429, AdapterRateLimitError],
+        [500, AdapterError],
+        [undefined, NetworkError],
+      ] as const) {
+        const harness = await createHarness();
+        harness[operation].mockRejectedValueOnce(
+          Object.assign(new Error("provider failure"), status === undefined ? {} : { status }),
+        );
+
+        const call =
+          operation === "requestLocation"
+            ? harness.adapter.conversation(THREAD_ID).location.request()
+            : harness.adapter.conversation(THREAD_ID).location.retrieve();
+        await expect(call).rejects.toBeInstanceOf(ErrorType);
+      }
     },
   );
 
@@ -582,6 +745,8 @@ async function createHarness(): Promise<{
   removeParticipant: ReturnType<typeof vi.fn>;
   leaveChat: ReturnType<typeof vi.fn>;
   retrieveChat: ReturnType<typeof vi.fn>;
+  requestLocation: ReturnType<typeof vi.fn>;
+  retrieveLocation: ReturnType<typeof vi.fn>;
 }> {
   const adapter = createLinqAdapter({ apiKey: "test-key", signingSecret: "test-secret" });
   const send = vi.fn().mockResolvedValue({
@@ -640,8 +805,11 @@ async function createHarness(): Promise<{
   const addParticipant = vi.fn();
   const removeParticipant = vi.fn();
   const leaveChat = vi.fn();
-  const requestLocation = vi.fn();
-  const retrieveLocation = vi.fn();
+  const requestLocation = vi.fn().mockResolvedValue({ success: true, message: "Requested" });
+  const retrieveLocation = vi.fn().mockResolvedValue({
+    success: true,
+    data: { type: "FeatureCollection", features: [] },
+  });
   const startTyping = vi.fn();
   const markAsRead = vi.fn();
   const retrieveChat = vi.fn();
@@ -699,6 +867,8 @@ async function createHarness(): Promise<{
     leaveChat,
     providerIO,
     removeParticipant,
+    requestLocation,
+    retrieveLocation,
     retrieveChat,
     send,
     sendVoicememo,

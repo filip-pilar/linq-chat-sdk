@@ -177,8 +177,11 @@ The public extensions are deliberately cohesive:
 - Batch `009A`: complete. Existing-group metadata, participant, and leave operations validate
   adapter-owned inputs and known direct-chat facts before exact SDK calls. Provider acceptance and
   later webhook observations are asynchronous facts without guaranteed request correlation.
-- Batch `009B`: implement the remaining frozen location operations under `.location`. Account and
-  administrative operations stay on `adapter.client`.
+- Batch `009B`: complete. The frozen location request/retrieval operations provide
+  acknowledgement-only prompt semantics, defensive immutable longitude-first snapshots, and
+  typed/raw sharing-state observations. Consent, coordinate freshness polling, and request/event
+  correlation remain host/provider concerns; account and administrative operations stay on
+  `adapter.client`.
 
 Batch `000` is complete: Chat SDK `4.38.1` standard reply/read contracts, Linq SDK `0.42.0`, direct
 Standard Webhooks verification, explicit deprecated legacy mode, OpenAPI drift checking, CI, and

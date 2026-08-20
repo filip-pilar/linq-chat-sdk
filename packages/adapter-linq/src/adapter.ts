@@ -253,10 +253,31 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     });
     const location: LinqLocationConversation = Object.freeze({
       request: async (): Promise<void> => {
-        throw new NotImplementedError("Linq location requests are not implemented");
+        if (isGroup === true) {
+          throw validationError("Linq location requests require a direct chat.");
+        }
+
+        try {
+          await this.apiClient.chats.location.request(chatId);
+        } catch (error) {
+          throw translateLinqError(error, {
+            action: "request chat location",
+            resourceId: chatId,
+            resourceType: "chat",
+          });
+        }
       },
       retrieve: async (): Promise<LinqLocationSnapshot> => {
-        throw new NotImplementedError("Linq location retrieval is not implemented");
+        try {
+          const response = await this.apiClient.chats.location.retrieve(chatId);
+          return normalizeLocationSnapshot(threadId, response);
+        } catch (error) {
+          throw translateLinqError(error, {
+            action: "retrieve chat location",
+            resourceId: chatId,
+            resourceType: "chat",
+          });
+        }
       },
     });
 
@@ -1164,6 +1185,84 @@ function validateKnownGroup(isGroup: boolean | undefined): void {
   if (isGroup === false) {
     throw validationError("Linq group operations require a group chat.");
   }
+}
+
+function normalizeLocationSnapshot(threadId: string, response: unknown): LinqLocationSnapshot {
+  const features =
+    isRecord(response) &&
+    response.success === true &&
+    isRecord(response.data) &&
+    response.data.type === "FeatureCollection" &&
+    Array.isArray(response.data.features)
+      ? response.data.features
+      : [];
+  const locations = features.flatMap((feature): LinqSharedLocation[] => {
+    if (
+      !isRecord(feature) ||
+      feature.type !== "Feature" ||
+      !isRecord(feature.geometry) ||
+      feature.geometry.type !== "Point" ||
+      !Array.isArray(feature.geometry.coordinates) ||
+      (feature.geometry.coordinates.length !== 2 && feature.geometry.coordinates.length !== 3) ||
+      !isRecord(feature.properties)
+    ) {
+      return [];
+    }
+
+    const [longitude, latitude, rawAltitude] = feature.geometry.coordinates;
+    const properties = feature.properties;
+    if (
+      typeof longitude !== "number" ||
+      !Number.isFinite(longitude) ||
+      longitude < -180 ||
+      longitude > 180 ||
+      typeof latitude !== "number" ||
+      !Number.isFinite(latitude) ||
+      latitude < -90 ||
+      latitude > 90 ||
+      typeof properties.handle !== "string" ||
+      properties.handle.length === 0
+    ) {
+      return [];
+    }
+
+    const location: {
+      handle: string;
+      longitude: number;
+      latitude: number;
+      altitude?: number;
+      address?: string;
+      locality?: string;
+      updatedAt?: string;
+    } = { handle: properties.handle, longitude, latitude };
+
+    if (typeof rawAltitude === "number" && Number.isFinite(rawAltitude)) {
+      location.altitude = rawAltitude;
+    }
+    if (typeof properties.address === "string") {
+      location.address = properties.address;
+    }
+    if (typeof properties.locality === "string") {
+      location.locality = properties.locality;
+    }
+    if (
+      typeof properties.updated_at === "string" &&
+      isValidProviderTimestamp(properties.updated_at)
+    ) {
+      location.updatedAt = properties.updated_at;
+    }
+
+    return [Object.freeze(location)];
+  });
+
+  return Object.freeze({ threadId, locations: Object.freeze(locations) });
+}
+
+function isValidProviderTimestamp(value: string): boolean {
+  return (
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value) &&
+    Number.isFinite(Date.parse(value))
+  );
 }
 
 function normalizePublicHTTPSURL(value: unknown, message: string): string {
