@@ -664,7 +664,11 @@ describe("LinqAdapter outbound media", () => {
       );
       expect(fetchSpy).toHaveBeenCalledWith(
         "https://uploads.linqapp.com/put/att-789",
-        expect.objectContaining({ method: "PUT", headers: { "content-type": "image/png" } }),
+        expect.objectContaining({
+          method: "PUT",
+          headers: { "content-type": "image/png" },
+          redirect: "error",
+        }),
       );
       expect(send).toHaveBeenCalledWith("chat-123", {
         message: {
@@ -706,17 +710,10 @@ describe("LinqAdapter outbound media", () => {
     });
   });
 
-  it("pre-uploads an oversized HTTPS attachment instead of sending its URL", async () => {
+  it("rejects an oversized URL-only attachment without fetching or calling Linq", async () => {
     const adapter = createTestAdapter();
     const send = vi.fn().mockResolvedValue(createSendResponse());
-    const create = vi.fn().mockResolvedValue({
-      attachment_id: "att-big",
-      upload_url: "https://uploads.linqapp.com/put/att-big",
-      http_method: "PUT",
-      required_headers: { "content-type": "video/mp4" },
-      download_url: "https://cdn.linqapp.com/att-big.mp4",
-      expires_at: "2026-06-14T00:15:00.000Z",
-    });
+    const create = vi.fn();
     (
       adapter as unknown as {
         apiClient: {
@@ -730,36 +727,26 @@ describe("LinqAdapter outbound media", () => {
     };
     vi.spyOn(adapter, "decodeThreadId").mockReturnValue({ chatId: "chat-123" });
     vi.spyOn(adapter, "encodeThreadId").mockReturnValue("linq:chat-123");
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input: unknown) => {
-      if (input === "https://cdn.linqapp.com/clip.mp4") {
-        return new Response(new Uint8Array([1, 2, 3, 4]), { status: 200 });
-      }
-
-      return new Response(null, { status: 200 });
-    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
 
     try {
-      await adapter.postMessage("linq:chat-123", {
-        markdown: "",
-        attachments: [
-          {
-            type: "video",
-            url: "https://cdn.linqapp.com/clip.mp4",
-            mimeType: "video/mp4",
-            size: 25 * 1024 * 1024,
-          },
-        ],
-      });
+      await expect(
+        adapter.postMessage("linq:chat-123", {
+          markdown: "",
+          attachments: [
+            {
+              type: "video",
+              url: "https://cdn.linqapp.com/clip.mp4",
+              mimeType: "video/mp4",
+              size: 25 * 1024 * 1024,
+            },
+          ],
+        }),
+      ).rejects.toThrow("requires data or fetchData for pre-upload");
 
-      // Downloaded from the source URL, then uploaded for an attachment_id.
-      expect(fetchSpy).toHaveBeenCalledWith("https://cdn.linqapp.com/clip.mp4");
-      expect(create).toHaveBeenCalledTimes(1);
-      expect(send).toHaveBeenCalledWith("chat-123", {
-        message: {
-          idempotency_key: expect.any(String),
-          parts: [{ type: "media", attachment_id: "att-big" }],
-        },
-      });
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(create).not.toHaveBeenCalled();
+      expect(send).not.toHaveBeenCalled();
     } finally {
       fetchSpy.mockRestore();
     }

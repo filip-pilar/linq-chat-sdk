@@ -13,9 +13,9 @@ const MAX_TEXT_CHARACTERS = 10_000;
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 const MIN_UPLOAD_BYTES = 1;
 
-// Linq downloads `url`-based media on send and caps those at 10MB. Anything
-// larger (or not reachable over public HTTPS) has to go through the pre-upload
-// flow, which allows up to 100MB.
+// Linq downloads `url`-based media on send and caps those at 10MB. Larger media
+// has to use caller-supplied bytes through the pre-upload flow, which allows up
+// to 100MB. The adapter never fetches arbitrary outbound source URLs itself.
 const URL_DOWNLOAD_LIMIT_BYTES = 10 * 1024 * 1024;
 
 type LinqOutboundPart =
@@ -215,11 +215,7 @@ function planAttachment(attachment: Attachment): PlannedMediaPart {
     throw validationError("Linq attachments must be attachment objects.");
   }
 
-  if (
-    typeof attachment.url === "string" &&
-    attachment.url.startsWith("https://") &&
-    !exceedsUrlDownloadLimit(attachment.size)
-  ) {
+  if (typeof attachment.url === "string" && !exceedsUrlDownloadLimit(attachment.size)) {
     assertValidHttpsUrl(attachment.url);
 
     return { type: "url", url: attachment.url };
@@ -271,11 +267,13 @@ async function uploadBytes(
     { maxRetries: 0 },
   );
   onAttachmentCreated(created.attachment_id);
+  assertValidUploadUrl(created.upload_url);
 
   const upload = await fetch(created.upload_url, {
     method: created.http_method,
     headers: created.required_headers,
     body: bytes,
+    redirect: "error",
   });
 
   if (!upload.ok) {
@@ -302,28 +300,8 @@ async function resolveUploadBytes(source: PlannedUpload["source"]): Promise<Uplo
     return toBytes(await attachment.fetchData());
   }
 
-  if (attachment.url) {
-    let response: Response;
-
-    try {
-      response = await fetch(attachment.url);
-    } catch (error) {
-      throw new Error(`Failed to download Linq attachment ${attachment.name ?? attachment.url}`, {
-        cause: error,
-      });
-    }
-
-    if (!response.ok) {
-      throw new Error(
-        `Failed to download Linq attachment ${attachment.name ?? attachment.url}: ${response.status}`,
-      );
-    }
-
-    return new Uint8Array(await response.arrayBuffer());
-  }
-
   throw validationError(
-    `Outbound attachment ${attachment.name ?? "(unnamed)"} has no data, fetchData, or url to send.`,
+    `Outbound attachment ${attachment.name ?? "(unnamed)"} requires data or fetchData for pre-upload.`,
   );
 }
 
@@ -350,15 +328,12 @@ function validateAttachmentSource(attachment: Attachment): void {
     return;
   }
 
-  if (
-    typeof attachment.fetchData === "function" ||
-    (typeof attachment.url === "string" && attachment.url.length > 0)
-  ) {
+  if (typeof attachment.fetchData === "function") {
     return;
   }
 
   throw validationError(
-    `Outbound attachment ${attachment.name ?? "(unnamed)"} has no data, fetchData, or url to send.`,
+    `Outbound attachment ${attachment.name ?? "(unnamed)"} requires data or fetchData for pre-upload.`,
   );
 }
 
@@ -424,6 +399,25 @@ function assertValidHttpsUrl(url: string): void {
   }
 
   throw validationError("Linq media URL parts must be valid public HTTPS URLs.");
+}
+
+function assertValidUploadUrl(url: string): void {
+  try {
+    const parsed = new URL(url);
+
+    if (
+      parsed.protocol === "https:" &&
+      parsed.hostname &&
+      parsed.username === "" &&
+      parsed.password === ""
+    ) {
+      return;
+    }
+  } catch {
+    // Fall through to the standard validation error.
+  }
+
+  throw validationError("Linq attachment upload URLs must be credential-free HTTPS URLs.");
 }
 
 function exceedsUrlDownloadLimit(size: number | undefined): boolean {

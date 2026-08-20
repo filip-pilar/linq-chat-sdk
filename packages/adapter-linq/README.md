@@ -595,12 +595,13 @@ await thread.post({
 How each attachment is delivered:
 
 - **Public HTTPS URL, ≤ 10MB** — sent by reference; Linq downloads it on send. No upload round-trip is needed.
-- **Raw bytes, non-HTTPS URLs, or files > 10MB** — uploaded via `POST /v3/attachments` (up to 100MB) and sent by `attachment_id`.
+- **Caller-supplied raw bytes** — uploaded via `POST /v3/attachments` (up to 100MB) and sent by `attachment_id`. URL-only attachments over 10MB must provide `data` or `fetchData`; the adapter never downloads arbitrary outbound source URLs.
 
 Attachment creation uses `maxRetries: 0`. If preparation fails after the
 adapter created an attachment but before message sending starts, that attachment
 is deleted best-effort without replacing the primary error. Once sending begins,
-the adapter does not delete attachments.
+the adapter does not delete attachments. Provider-issued pre-upload URLs must be
+credential-free HTTPS URLs, and upload redirects are rejected.
 
 A message can be media-only (no text). Inbound attachments persist only their
 stable Linq attachment ID in `fetchMetadata`; `fetchData()` and

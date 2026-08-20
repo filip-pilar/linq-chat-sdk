@@ -146,6 +146,29 @@ describe("reliable existing-chat send validation", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it("rejects non-HTTPS URL-only attachments without local network access", async () => {
+    const { adapter, send, create } = createOutboundTestAdapter();
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    await expect(
+      adapter.postMessage("linq:chat-123", {
+        markdown: "",
+        attachments: [
+          {
+            mimeType: "image/png",
+            name: "private.png",
+            type: "image",
+            url: "http://127.0.0.1:3000/private.png",
+          },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(ValidationError);
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("enforces filename and upload-size boundaries before attachment creation", async () => {
     const { adapter, create } = createOutboundTestAdapter();
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 200 }));
@@ -322,6 +345,30 @@ describe("reliable existing-chat send errors", () => {
 });
 
 describe("reliable existing-chat attachment cleanup", () => {
+  it("rejects an unsafe provider upload URL and cleans up the created attachment", async () => {
+    const { adapter, create, deleteAttachment, send } = createOutboundTestAdapter();
+    create.mockResolvedValueOnce({
+      attachment_id: "attachment-unsafe",
+      download_url: "https://cdn.linqapp.com/attachment-unsafe",
+      expires_at: "2026-08-02T18:00:00.000Z",
+      http_method: "PUT",
+      required_headers: { "content-type": "application/octet-stream" },
+      upload_url: "http://127.0.0.1:3000/upload",
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    await expect(
+      adapter.postMessage("linq:chat-123", {
+        markdown: "",
+        files: [{ data: Buffer.from([1]), filename: "file.png", mimeType: "image/png" }],
+      }),
+    ).rejects.toBeInstanceOf(ValidationError);
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(deleteAttachment).toHaveBeenCalledWith("attachment-unsafe");
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("best-effort deletes a created attachment when preparation later fails", async () => {
     const { adapter, send, deleteAttachment } = createOutboundTestAdapter();
     vi.spyOn(globalThis, "fetch").mockResolvedValue(

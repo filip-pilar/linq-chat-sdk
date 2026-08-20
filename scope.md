@@ -101,9 +101,9 @@ convenience deferred**
 `postMessage()` maps Chat SDK `attachments` and `files` to Linq media parts:
 
 - Public HTTPS URLs ≤ 10MB are sent by reference (Linq downloads on send) — no upload round-trip, so forwarding inbound Linq media is free.
-- Raw bytes, non-HTTPS URLs, and files > 10MB are pre-uploaded via `POST /v3/attachments` (up to 100MB) and sent by `attachment_id`.
+- Caller-supplied raw bytes are pre-uploaded via `POST /v3/attachments` (up to 100MB) and sent by `attachment_id`. URL-only media over 10MB must supply `data` or `fetchData`; the adapter does not fetch arbitrary outbound source URLs. Non-HTTPS URL parts reject locally.
 - Messages can be media-only (no text); text leads the parts array so ordering is `[text, media, ...]`.
-- Existing-chat sends centrally enforce non-empty content, 10,000 text characters, 100 total parts, 40 public-URL media parts (including card images), valid HTTPS URL parts, 1–255-character upload filenames, and 1-byte–100MB uploads before Linq side effects where the required data is already available.
+- Existing-chat sends centrally enforce non-empty content, 10,000 text characters, 100 total parts, 40 public-URL media parts (including card images), valid HTTPS URL parts, 1–255-character upload filenames, and 1-byte–100MB uploads before Linq side effects where the required data is already available. Provider-issued upload URLs must also be credential-free HTTPS and cannot redirect.
 - Each `postMessage()` call generates one UUID `idempotency_key`; the official Linq SDK owns message retries.
 - Attachment creation disables SDK retries. Attachments created during preparation are deleted best-effort only when preparation fails before message sending begins; the primary error is preserved.
 - Linq failures map to standard `@chat-adapter/shared` errors while retaining the original Linq error, provider code, trace ID, and applicable retry-after data.
