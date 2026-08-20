@@ -112,6 +112,12 @@ await conversation.addReaction(messageId, "heart", { partIndex: 0 });
 await conversation.removeReaction(messageId, "heart", { partIndex: 0 });
 await conversation.stopTyping();
 await conversation.shareContactCard();
+const fromUrl = await conversation.sendVoiceMemo({
+  url: "https://media.example.com/memo.m4a",
+});
+const fromAttachment = await conversation.sendVoiceMemo({
+  attachmentId: "33333333-3333-3333-3333-333333333333",
+});
 ```
 
 The facade accepts a Thread owned by this adapter instance or a canonical existing-chat ID in the
@@ -123,9 +129,10 @@ database mutation, or delivery/presentation guarantee is added.
 The same frozen facade now declares the complete cohesive Linq conversation surface. Common
 operations are `stopTyping()`, `shareContactCard()`, and `sendVoiceMemo()`; existing-group
 operations are under `.group`; location request/retrieval is under `.location`. `stopTyping()` and
-`shareContactCard()` are implemented through the official client with shared adapter errors.
-Voice, group, and location methods remain contract-only and reject with `NotImplementedError`
-before provider I/O.
+`shareContactCard()` are implemented through the official client with shared adapter errors. Voice
+memos accept exactly one public HTTPS URL or existing Linq attachment UUID and return only the
+accepted message ID, canonical thread ID, and voice-memo attachment ID. Group and location methods
+remain contract-only and reject with `NotImplementedError` before provider I/O.
 
 Stopping typing works for direct and group chats and acknowledges only that Linq accepted the
 request. Contact-card sharing takes no body, requires a configured active card and prior outbound
@@ -133,10 +140,14 @@ activity, and is useful only for iMessage; the adapter does not add capability p
 scheduling, or a recipient-save guarantee. Repeated calls remain repeated provider requests—Linq
 documents that calls within 24 hours do not present the option more than once.
 
-Voice sources are exactly one public URL or existing attachment ID, with a future normalized result
-limited to `messageId`, canonical `threadId`, and `attachmentId`. Location retrieval is typed as a
-canonical thread plus immutable participant locations with longitude-first coordinates, optional
-altitude, address, locality, and provider timestamp.
+Voice-memo URL, source-exclusivity, and UUID validation run before provider I/O. Linq documents a
+10 MB limit for direct URL sources and up to 100 MB for pre-uploaded attachments; remote size,
+format, reachability, attachment ownership, and content remain provider validations. Acceptance is
+not delivery, playback, retention, or recipient-presentation proof. Existing typed message
+lifecycle events can observe later provider outcomes without adapter polling or correlation
+workflows. Raw bytes, `FileUpload`, upload readiness, retries, and cleanup remain outside this API.
+Location retrieval is typed as a canonical thread plus immutable participant locations with
+longitude-first coordinates, optional altitude, address, locality, and provider timestamp.
 
 Mark-read remains `Thread.markAsRead()`, and account or administrative operations remain on
 `adapter.client`.
@@ -522,9 +533,10 @@ stable Linq attachment ID in `fetchMetadata`; `fetchData()` and
 require the exact `https://cdn.linqapp.com` origin, reject redirects, enforce a
 30-second timeout, verify the declared metadata and response headers, and
 stream-count the body. Audio is capped at 25MB; other supported media retains
-Linq's 100MB attachment ceiling. Audio is sent as a downloadable file
-attachment — the dedicated iMessage voice-memo bubble endpoint isn't wired up
-yet.
+Linq's 100MB attachment ceiling. Audio posted through standard Chat SDK files is
+sent as a downloadable attachment. For Linq's dedicated voice-memo request,
+use `adapter.conversation(threadOrId).sendVoiceMemo()` with a public HTTPS URL
+or an existing Linq attachment ID as documented above.
 
 Batch `012` retains streaming upload work, readiness, upload retries, complete
 format handling, retention, and all send-time cleanup. Existing inbound

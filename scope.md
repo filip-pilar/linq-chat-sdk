@@ -32,7 +32,9 @@ The adapter can already handle the core receive/reply path:
   the facade, existing-group operations under `.group`, and location under `.location`.
 - Stop typing and share the configured contact card through that facade with canonical chat IDs,
   exact official-client calls, repeated acknowledgement semantics, and shared error translation.
-  Voice, group, and location methods remain unimplemented; mark-read stays on `Thread`.
+- Send native voice memos through that facade from exactly one public HTTPS URL or existing Linq
+  attachment UUID, returning only the provider-established message, thread, and attachment IDs.
+  Group and location methods remain unimplemented; mark-read stays on `Thread`.
 - Route inbound `reaction.added` / `reaction.removed` webhooks into Chat SDK `onReaction()` handlers (tapbacks map to normalized emoji, custom emoji pass through, stickers are skipped).
 - Encode stable Linq thread IDs (`linq:{chatId}`) so webhook and API paths map to the same thread.
 - Track direct-message vs group-chat identity in-memory from webhooks and chat fetches (legacy `linq:{chatId}:dm/group` IDs still decode).
@@ -96,9 +98,13 @@ Status: **existing-chat send path implemented; full media lifecycle remains part
 
 Inbound attachments survive queue serialization via `rehydrateAttachment` and a stable Linq attachment ID.
 
+Native voice-memo requests (`POST /v3/chats/{chatId}/voicememo`) are implemented for public HTTPS
+URLs and existing Linq attachment IDs. The adapter validates the source shape locally and leaves
+remote size, media format, reachability, and attachment ownership to Linq. The immediate result is
+acceptance identity only; delivery and presentation remain lifecycle/provider/device observations.
+
 Still missing:
 
-- iMessage voice-memo bubbles (`POST /v3/chats/{chatId}/voicememo`) — audio currently sends as a downloadable file attachment
 - Batch `012` media lifecycle: streaming uploads, readiness, upload retries, complete format
   handling, retention, and all send-time cleanup. Existing inbound download security/bounding is
   implemented and covered by focused tests.
@@ -163,9 +169,12 @@ The public extensions are deliberately cohesive:
   reaction, reconciliation, and sticker facts; isolates malformed/null parts and rows; freezes
   default backward history; and verifies static-card and buffered-stream compilation. Forward
   history remains explicitly unsupported. Linq's current edit operation remains text-only.
-- Batches `008C`/`009`: implement the remaining frozen `adapter.conversation(threadOrId)`
-  operations. Voice stays directly on the facade, existing-group operations under `.group`, and
-  location under `.location`; account and administrative operations stay on `adapter.client`.
+- Batch `008`: complete. `008C` implements the frozen two-source voice-memo contract with local
+  validation, canonical accepted identities, shared provider errors, and lifecycle-event
+  coexistence without taking ownership of uploads, retries, delivery, or presentation.
+- Batch `009`: implement the remaining frozen `adapter.conversation(threadOrId)` operations.
+  Existing-group operations stay under `.group`, location under `.location`, and account and
+  administrative operations stay on `adapter.client`.
 
 Batch `000` is complete: Chat SDK `4.38.1` standard reply/read contracts, Linq SDK `0.42.0`, direct
 Standard Webhooks verification, explicit deprecated legacy mode, OpenAPI drift checking, CI, and

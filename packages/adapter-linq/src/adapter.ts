@@ -268,8 +268,28 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
           });
         }
       },
-      sendVoiceMemo: async (_source: LinqVoiceMemoSource): Promise<LinqVoiceMemoResult> => {
-        throw new NotImplementedError("Sending Linq voice memos is not implemented");
+      sendVoiceMemo: async (source: LinqVoiceMemoSource): Promise<LinqVoiceMemoResult> => {
+        const request = normalizeVoiceMemoSource(source);
+
+        try {
+          const response = await this.apiClient.chats.sendVoicememo(chatId, request);
+          const voiceMemo = response.voice_memo;
+
+          return Object.freeze({
+            messageId: voiceMemo.id,
+            threadId: this.encodeThreadId({
+              chatId: voiceMemo.chat.id,
+              isGroup: voiceMemo.chat.is_group,
+            }),
+            attachmentId: voiceMemo.voice_memo.id,
+          });
+        } catch (error) {
+          throw translateLinqError(error, {
+            action: "send chat voice memo",
+            resourceId: chatId,
+            resourceType: "chat",
+          });
+        }
       },
     });
   }
@@ -994,6 +1014,54 @@ function validatePostableContent(content: AdapterPostableMessage): void {
   if (typeof content !== "string" && !isRecord(content)) {
     throw validationError("Linq replies require valid Chat SDK message content.");
   }
+}
+
+type LinqVoiceMemoRequest = { voice_memo_url: string } | { attachment_id: string };
+
+function normalizeVoiceMemoSource(source: unknown): LinqVoiceMemoRequest {
+  if (!isRecord(source)) {
+    throw validationError("Linq voice memos require exactly one URL or attachment ID source.");
+  }
+
+  const hasUrl = Object.prototype.hasOwnProperty.call(source, "url");
+  const hasAttachmentId = Object.prototype.hasOwnProperty.call(source, "attachmentId");
+  if (hasUrl === hasAttachmentId) {
+    throw validationError("Linq voice memos require exactly one URL or attachment ID source.");
+  }
+
+  if (hasUrl) {
+    const value = source.url;
+    if (typeof value !== "string" && !(value instanceof URL)) {
+      throw validationError("Linq voice memo URLs must be valid public HTTPS URLs.");
+    }
+
+    const url = typeof value === "string" ? value : value.href;
+    if (url.length === 0 || (typeof value === "string" && value.trim() !== value)) {
+      throw validationError("Linq voice memo URLs must be valid public HTTPS URLs.");
+    }
+
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol === "https:" && parsed.hostname.length > 0) {
+        return { voice_memo_url: url };
+      }
+    } catch {
+      // Fall through to the stable adapter validation error.
+    }
+
+    throw validationError("Linq voice memo URLs must be valid public HTTPS URLs.");
+  }
+
+  const attachmentId = source.attachmentId;
+  if (
+    typeof attachmentId !== "string" ||
+    attachmentId.trim() !== attachmentId ||
+    !UUID_PATTERN.test(attachmentId)
+  ) {
+    throw validationError("Linq voice memo attachment IDs must be UUIDs.");
+  }
+
+  return { attachment_id: attachmentId };
 }
 
 function validationError(message: string): ValidationError {

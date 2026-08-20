@@ -270,6 +270,10 @@ function assertConversationErgonomics(
   });
   // @ts-expect-error -- raw bytes belong to the deferred media-lifecycle batch.
   byId.sendVoiceMemo({ data: new Uint8Array([1]) });
+  // @ts-expect-error -- a voice memo source cannot be omitted.
+  byId.sendVoiceMemo({});
+  // @ts-expect-error -- FileUpload-like source objects are intentionally unsupported.
+  byId.sendVoiceMemo({ file: { data: new Uint8Array([1]), name: "memo.m4a" } });
   // @ts-expect-error -- mark-read remains on the standard Chat SDK Thread.
   byId.markAsRead("22222222-2222-2222-2222-222222222222");
   // @ts-expect-error -- common conversation operations are not flat adapter aliases.

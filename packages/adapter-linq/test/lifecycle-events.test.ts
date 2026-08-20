@@ -13,6 +13,7 @@ import sentFixture from "./fixtures/message-sent-2026-02-03.json";
 const SIGNING_KEY = "test_linq_webhook_secret";
 const SIGNING_SECRET = `whsec_${Buffer.from(SIGNING_KEY).toString("base64")}`;
 const EVENT_DEDUPE_TTL_MS = 60 * 60 * 1000;
+const VOICE_MEMO_ATTACHMENT_ID = "66666666-6666-6666-6666-666666666666";
 
 describe("typed Linq message lifecycle events", () => {
   it.each([
@@ -179,6 +180,57 @@ describe("typed Linq message lifecycle events", () => {
       expect.objectContaining({
         type: "message.read",
         data: expect.objectContaining({ readAt: readFixture.data.read_at }),
+      }),
+    );
+  });
+
+  it("keeps accepted voice memo identity compatible with typed lossless lifecycle events", async () => {
+    const adapter = createTestAdapter();
+    const sendVoicememo = vi.fn().mockResolvedValue({
+      voice_memo: {
+        id: sentFixture.data.id,
+        chat: { id: sentFixture.data.chat.id, is_group: sentFixture.data.chat.is_group },
+        voice_memo: { id: VOICE_MEMO_ATTACHMENT_ID },
+      },
+    });
+    Object.assign(adapter.client.chats, { sendVoicememo });
+    const handler = vi.fn();
+    const tasks: Promise<unknown>[] = [];
+    const state = {
+      appendToList: vi.fn().mockResolvedValue(undefined),
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      set: vi.fn().mockResolvedValue(undefined),
+      setIfNotExists: vi.fn().mockResolvedValue(true),
+    } as unknown as StateAdapter;
+    const chat = new Chat({
+      adapters: { linq: adapter },
+      logger: "silent",
+      state,
+      userName: "linq-voice-lifecycle-test",
+    });
+    await chat.initialize();
+    adapter.onLinqEvent("message.sent", handler);
+
+    const result = await adapter
+      .conversation(`linq:${sentFixture.data.chat.id}`)
+      .sendVoiceMemo({ attachmentId: VOICE_MEMO_ATTACHMENT_ID });
+    const response = await chat.webhooks.linq(
+      createStandardRequest(sentFixture, "voice-lifecycle-webhook-id"),
+      { waitUntil: (task) => tasks.push(task) },
+    );
+    await Promise.all(tasks);
+
+    expect(result).toEqual({
+      messageId: sentFixture.data.id,
+      threadId: `linq:${sentFixture.data.chat.id}`,
+      attachmentId: VOICE_MEMO_ATTACHMENT_ID,
+    });
+    expect(response.status).toBe(200);
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ providerMessageId: result.messageId }),
+        rawEvent: sentFixture,
       }),
     );
   });

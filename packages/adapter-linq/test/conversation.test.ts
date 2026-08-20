@@ -17,6 +17,7 @@ const GROUP_CHAT_ID = "55555555-5555-5555-5555-555555555555";
 const THREAD_ID = `linq:${CHAT_ID}`;
 const MESSAGE_ID = "22222222-2222-2222-2222-222222222222";
 const PARENT_ID = "33333333-3333-3333-3333-333333333333";
+const ATTACHMENT_ID = "66666666-6666-6666-6666-666666666666";
 
 describe("Linq conversation facade", () => {
   it.each([0, 3])(
@@ -139,6 +140,71 @@ describe("Linq conversation facade", () => {
     });
   });
 
+  it("sends a voice memo from a public HTTPS URL and returns frozen canonical identity", async () => {
+    const { adapter, chat, sendVoicememo } = await createHarness();
+    const source = Object.freeze({ url: "https://media.example.com/memo.m4a" });
+
+    const result = await adapter.conversation(chat.thread(THREAD_ID)).sendVoiceMemo(source);
+
+    expect(sendVoicememo).toHaveBeenCalledWith(CHAT_ID, {
+      voice_memo_url: "https://media.example.com/memo.m4a",
+    });
+    expect(result).toEqual({
+      messageId: MESSAGE_ID,
+      threadId: THREAD_ID,
+      attachmentId: ATTACHMENT_ID,
+    });
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(source).toEqual({ url: "https://media.example.com/memo.m4a" });
+  });
+
+  it("sends a voice memo from an existing attachment ID without mutating the source", async () => {
+    const { adapter, sendVoicememo } = await createHarness();
+    const source = Object.freeze({ attachmentId: ATTACHMENT_ID });
+
+    const result = await adapter.conversation(THREAD_ID).sendVoiceMemo(source);
+
+    expect(sendVoicememo).toHaveBeenCalledWith(CHAT_ID, { attachment_id: ATTACHMENT_ID });
+    expect(result.threadId).toBe(THREAD_ID);
+    expect(source).toEqual({ attachmentId: ATTACHMENT_ID });
+  });
+
+  it("accepts a URL object by snapshotting its HTTPS href", async () => {
+    const { adapter, sendVoicememo } = await createHarness();
+    const url = new URL("https://media.example.com/memo.m4a?version=1");
+
+    await adapter.conversation(THREAD_ID).sendVoiceMemo({ url });
+
+    expect(sendVoicememo).toHaveBeenCalledWith(CHAT_ID, { voice_memo_url: url.href });
+  });
+
+  it.each([
+    undefined,
+    null,
+    {},
+    { url: "https://media.example.com/memo.m4a", attachmentId: ATTACHMENT_ID },
+    { url: "" },
+    { url: " https://media.example.com/memo.m4a" },
+    { url: "http://media.example.com/memo.m4a" },
+    { url: "ftp://media.example.com/memo.m4a" },
+    { url: "not a URL" },
+    { url: new URL("http://media.example.com/memo.m4a") },
+    { url: 42 },
+    { attachmentId: "" },
+    { attachmentId: ` ${ATTACHMENT_ID}` },
+    { attachmentId: "not-a-uuid" },
+    { attachmentId: 42 },
+  ])("rejects invalid voice memo source %j before provider work", async (source) => {
+    const { adapter, providerIO } = await createHarness();
+
+    await expect(
+      (adapter.conversation(THREAD_ID).sendVoiceMemo as (value: unknown) => Promise<unknown>)(
+        source,
+      ),
+    ).rejects.toBeInstanceOf(ValidationError);
+    for (const providerCall of providerIO) expect(providerCall).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["reply message ID", "not-a-uuid", 0],
     ["negative reply index", PARENT_ID, -1],
@@ -244,7 +310,6 @@ describe("Linq conversation facade", () => {
     expect(Object.isFrozen(conversation.location)).toBe(true);
 
     const operations = [
-      conversation.sendVoiceMemo({ url: "https://example.com/memo.m4a" }),
       conversation.group.update({ displayName: "Example" }),
       conversation.group.addParticipant("+15550000001"),
       conversation.group.removeParticipant("+15550000001"),
@@ -296,6 +361,31 @@ describe("Linq conversation facade", () => {
       );
     },
   );
+
+  it.each([
+    [400, ValidationError],
+    [401, AuthenticationError],
+    [403, PermissionError],
+    [404, ResourceNotFoundError],
+    [413, AdapterError],
+    [422, ValidationError],
+    [500, AdapterError],
+    [undefined, NetworkError],
+  ] as const)(
+    "translates voice memo provider failures with status %s",
+    async (status, ErrorType) => {
+      const { adapter, sendVoicememo } = await createHarness();
+      const error = Object.assign(
+        new Error("provider failure"),
+        status === undefined ? {} : { status },
+      );
+      sendVoicememo.mockRejectedValueOnce(error);
+
+      await expect(
+        adapter.conversation(THREAD_ID).sendVoiceMemo({ attachmentId: ATTACHMENT_ID }),
+      ).rejects.toBeInstanceOf(ErrorType);
+    },
+  );
 });
 
 async function createHarness(): Promise<{
@@ -307,6 +397,7 @@ async function createHarness(): Promise<{
   providerIO: ReturnType<typeof vi.fn>[];
   markAsRead: ReturnType<typeof vi.fn>;
   shareContactCard: ReturnType<typeof vi.fn>;
+  sendVoicememo: ReturnType<typeof vi.fn>;
   startTyping: ReturnType<typeof vi.fn>;
   stopTyping: ReturnType<typeof vi.fn>;
 }> {
@@ -356,7 +447,13 @@ async function createHarness(): Promise<{
   });
   const stopTyping = vi.fn();
   const shareContactCard = vi.fn();
-  const sendVoicememo = vi.fn();
+  const sendVoicememo = vi.fn().mockResolvedValue({
+    voice_memo: {
+      id: MESSAGE_ID,
+      chat: { id: CHAT_ID, is_group: false },
+      voice_memo: { id: ATTACHMENT_ID },
+    },
+  });
   const updateChat = vi.fn();
   const addParticipant = vi.fn();
   const removeParticipant = vi.fn();
@@ -415,6 +512,7 @@ async function createHarness(): Promise<{
     markAsRead,
     providerIO,
     send,
+    sendVoicememo,
     shareContactCard,
     startTyping,
     stopTyping,
