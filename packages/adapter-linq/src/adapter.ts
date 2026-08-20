@@ -546,7 +546,12 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     event: LinqWebhookEvent,
     options?: WebhookOptions,
   ): Promise<LinqVerifiedWebhookDispatchResult> {
-    if (this.chat && isMessageReceivedWebhookEvent(event) && event.data.direction === "inbound") {
+    if (
+      this.chat &&
+      isMessageReceivedWebhookEvent(event) &&
+      event.data.direction === "inbound" &&
+      event.data.reconciled_at === undefined
+    ) {
       const chatId = event.data.chat.id;
       const isGroup = event.data.chat.is_group ?? undefined;
 

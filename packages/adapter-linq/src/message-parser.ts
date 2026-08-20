@@ -124,8 +124,6 @@ function normalizeMessage(value: LinqRawMessage): {
   }
 
   if (isRetrievedMessage(value)) {
-    const edited = value.updated_at !== value.created_at;
-
     return {
       id: value.id,
       chatId: value.chat_id,
@@ -134,8 +132,9 @@ function normalizeMessage(value: LinqRawMessage): {
       isMe: value.is_from_me || value.from_handle?.is_me === true,
       sender: value.from_handle,
       sentAt: value.sent_at || value.created_at,
-      edited,
-      editedAt: edited ? value.updated_at : undefined,
+      // `updated_at` also changes for delivery state. Only message.edited webhooks
+      // confirm an edit, and the retrieved Message schema exposes no edit timestamp.
+      edited: false,
     };
   }
 

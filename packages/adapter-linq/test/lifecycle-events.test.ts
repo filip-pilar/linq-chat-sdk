@@ -39,6 +39,7 @@ describe("typed Linq message lifecycle events", () => {
             sentAt: fixture.data.sent_at,
             deliveredAt,
             readAt,
+            reconciledAt: null,
           },
           envelope: { traceId: fixture.trace_id },
           rawEvent: fixture,

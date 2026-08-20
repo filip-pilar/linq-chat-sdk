@@ -149,12 +149,25 @@ remains the mutable Linq message data object, preserving current consumer
 behavior.
 
 Current `message.sent`, `message.delivered`, and `message.read` callbacks expose curated message/chat
-correlation, actual and preferred service, idempotency key, and sent/delivered/read timestamps.
+correlation, actual and preferred service, idempotency key, and sent/delivered/read/reconciliation
+timestamps.
 `message.failed` exposes nullable message/chat correlation, numeric provider code, opaque detail
 code, reason, actual/preferred service, and failure timestamp. The authenticated trace remains on
 `event.envelope.traceId`; every callback retains the complete immutable `rawEvent`.
 
-The adapter does not derive retry safety, ordering, or a terminal delivery state from these events.
+`message.edited` confirms one text-part edit with message/chat IDs, sender, direction, zero-based
+part index, replacement text, and edit time. The event is not a full message snapshot. Use its
+provider message ID with `adapter.fetchMessage()` or `adapter.client.messages.retrieve()` when a
+current snapshot is needed; a deleted message may return no result. The retrieval schema has no
+edit timestamp, so the adapter does not infer an edit merely because `updated_at` changed.
+
+When a `message.received` payload has `reconciled_at`, it is genuine recovered history that may
+arrive after earlier webhook or history reads. It remains available through `onLinqEvent()` and the
+verified raw/normalized observations, but it does not enter ordinary Chat SDK new-message handlers.
+Applications decide whether and how to merge refreshed, edited, and reconciled observations.
+
+The adapter does not derive retry safety, ordering, conflict resolution, or a terminal delivery
+state from these events.
 Linq documents code-specific recovery guidance, and a `message.delivered` event can rarely follow
 `message.failed` for the same message. SMS/MMS also do not produce delivered/read receipts. Treat
 callbacks as authenticated observations and keep application workflow policy outside the adapter.

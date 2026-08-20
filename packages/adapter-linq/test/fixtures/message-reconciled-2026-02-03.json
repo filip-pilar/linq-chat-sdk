@@ -1,0 +1,50 @@
+{
+  "api_version": "v3",
+  "webhook_version": "2026-02-03",
+  "event_type": "message.received",
+  "event_id": "60000000-0000-4000-8000-000000000002",
+  "created_at": "2026-05-08T18:00:00.000Z",
+  "trace_id": "trace-message-reconciled",
+  "partner_id": "20000000-0000-4000-8000-000000000001",
+  "data": {
+    "id": "30000000-0000-4000-8000-000000000002",
+    "chat": {
+      "id": "40000000-0000-4000-8000-000000000002",
+      "is_group": false,
+      "owner_handle": {
+        "id": "50000000-0000-4000-8000-000000000001",
+        "is_me": true,
+        "handle": "+15550001000",
+        "status": "active",
+        "left_at": null,
+        "service": "iMessage",
+        "joined_at": "2026-05-01T12:00:00.000Z"
+      },
+      "health_status": {
+        "status": "HEALTHY",
+        "doc_url": "https://docs.linqapp.com/guides/chats/chat-health#healthy",
+        "updated_at": "2026-05-08T17:59:59.000Z"
+      }
+    },
+    "parts": [{ "type": "text", "value": "Recovered history fixture" }],
+    "effect": null,
+    "read_at": null,
+    "sent_at": "2026-05-08T12:00:00.000Z",
+    "delivered_at": null,
+    "reconciled_at": "2026-05-08T18:00:00.000Z",
+    "service": "iMessage",
+    "reply_to": null,
+    "direction": "inbound",
+    "sender_handle": {
+      "id": "50000000-0000-4000-8000-000000000002",
+      "is_me": false,
+      "handle": "+15550002000",
+      "status": "active",
+      "left_at": null,
+      "service": "iMessage",
+      "joined_at": "2026-05-01T12:00:00.000Z"
+    },
+    "idempotency_key": null,
+    "preferred_service": null
+  }
+}

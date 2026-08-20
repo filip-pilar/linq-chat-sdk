@@ -2,6 +2,7 @@ import type { LinqAPIV3 } from "@linqapp/sdk";
 
 import { LINQ_KNOWN_EVENT_TYPES, type LinqKnownEventType } from "./linq-event-types.generated.js";
 import type {
+  LinqMessageEditedEventData,
   LinqMessageFailedEventData,
   LinqMessageLifecycleEventData,
   LinqReactionWebhookData,
@@ -30,9 +31,11 @@ type LinqEventData<TType extends LinqKnownEventType> = TType extends "message.re
     ? LinqMessageLifecycleEventData
     : TType extends "message.failed"
       ? LinqMessageFailedEventData
-      : TType extends LinqReactionEventType
-        ? LinqReactionWebhookData
-        : LinqWebhookRawValue;
+      : TType extends "message.edited"
+        ? LinqMessageEditedEventData
+        : TType extends LinqReactionEventType
+          ? LinqReactionWebhookData
+          : LinqWebhookRawValue;
 
 export type LinqEventMap = {
   readonly [TType in LinqKnownEventType]: LinqEventBase<TType, LinqEventData<TType>>;
@@ -70,7 +73,9 @@ export function createLinqEvent(webhook: LinqVerifiedWebhook): LinqAnyEvent {
       ? webhook.lifecycle
       : webhook.kind === "message.failed"
         ? webhook.failure
-        : (webhook.rawEvent.data ?? null);
+        : webhook.kind === "message.edited"
+          ? webhook.edit
+          : (webhook.rawEvent.data ?? null);
 
   return Object.freeze({
     type: webhook.envelope.eventType,

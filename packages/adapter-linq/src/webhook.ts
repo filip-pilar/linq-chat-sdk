@@ -109,6 +109,19 @@ export interface LinqMessageLifecycleEventData {
   readonly sentAt: string;
   readonly deliveredAt: string | null;
   readonly readAt: string | null;
+  readonly reconciledAt: string | null;
+}
+
+/** A confirmed edit to one text part; retrieve the message separately for a current snapshot. */
+export interface LinqMessageEditedEventData {
+  readonly providerMessageId: string;
+  readonly chatId: string;
+  readonly conversationKind: "direct" | "group";
+  readonly direction: "inbound" | "outbound";
+  readonly senderHandle: LinqChatHandleObservation;
+  readonly partIndex: number;
+  readonly text: string;
+  readonly editedAt: string;
 }
 
 /** Provider failure facts; consumers must interpret retry safety from current Linq guidance. */
@@ -201,6 +214,11 @@ export interface LinqVerifiedMessageFailedWebhook extends LinqVerifiedWebhookBas
   readonly failure: LinqMessageFailedEventData;
 }
 
+export interface LinqVerifiedMessageEditedWebhook extends LinqVerifiedWebhookBase {
+  readonly kind: "message.edited";
+  readonly edit: LinqMessageEditedEventData;
+}
+
 export interface LinqVerifiedReactionWebhook extends LinqVerifiedWebhookBase {
   readonly kind: "reaction.added" | "reaction.removed";
   readonly reaction: LinqReactionObservation;
@@ -218,6 +236,7 @@ export type LinqVerifiedWebhook =
   | LinqVerifiedMessageWebhook
   | LinqVerifiedMessageLifecycleWebhook
   | LinqVerifiedMessageFailedWebhook
+  | LinqVerifiedMessageEditedWebhook
   | LinqVerifiedReactionWebhook
   | LinqVerifiedUnhandledWebhook
   | LinqVerifiedUnsupportedVersionWebhook;
@@ -331,6 +350,19 @@ export function normalizeAuthenticatedLinqWebhook(
     };
   }
 
+  if (envelope.eventType === "message.edited") {
+    const edit = parseMessageEditedEventData(rawEvent.data);
+
+    if (!edit) {
+      return invalidPayload();
+    }
+
+    return {
+      ok: true,
+      webhook: Object.freeze({ ...base, kind: "message.edited", edit }),
+    };
+  }
+
   if (envelope.eventType === "reaction.added" || envelope.eventType === "reaction.removed") {
     const reaction = parseReactionObservation(rawEvent.data);
 
@@ -428,7 +460,7 @@ function parseMessageObservation(value: unknown): LinqMessageObservation | null 
     !isNullableTimestamp(value.sent_at) ||
     !isNullableTimestamp(value.delivered_at) ||
     !isNullableTimestamp(value.read_at) ||
-    !isNullableTimestamp(value.reconciled_at) ||
+    !isOptionalTimestamp(value.reconciled_at) ||
     !isMessageParts(value.parts) ||
     (replyTo !== null && !isReplyContext(replyTo))
   ) {
@@ -521,6 +553,43 @@ function parseMessageLifecycleEventData(
     sentAt: message.timestamps.sentAt,
     deliveredAt: message.timestamps.deliveredAt,
     readAt: message.timestamps.readAt,
+    reconciledAt: message.timestamps.reconciledAt,
+  });
+}
+
+function parseMessageEditedEventData(value: unknown): LinqMessageEditedEventData | null {
+  if (!isRecord(value) || !isRecord(value.chat) || !isRecord(value.part)) {
+    return null;
+  }
+
+  const chat = value.chat;
+  const part = value.part;
+
+  if (
+    !isNonEmptyString(value.id) ||
+    !isNonEmptyString(chat.id) ||
+    typeof chat.is_group !== "boolean" ||
+    !isChatHandle(chat.owner_handle) ||
+    !isRecord(chat.health_status) ||
+    (value.direction !== "inbound" && value.direction !== "outbound") ||
+    !isChatHandle(value.sender_handle) ||
+    !Number.isInteger(part.index) ||
+    (part.index as number) < 0 ||
+    typeof part.text !== "string" ||
+    !isNonEmptyString(value.edited_at)
+  ) {
+    return null;
+  }
+
+  return Object.freeze({
+    providerMessageId: value.id,
+    chatId: chat.id,
+    conversationKind: chat.is_group ? "group" : "direct",
+    direction: value.direction,
+    senderHandle: chatHandleObservation(value.sender_handle),
+    partIndex: part.index as number,
+    text: part.text,
+    editedAt: value.edited_at,
   });
 }
 
@@ -738,7 +807,11 @@ function isNullableBoolean(value: unknown): boolean {
 }
 
 function isNullableTimestamp(value: unknown): boolean {
-  return value === undefined || value === null || typeof value === "string";
+  return value === undefined || value === null || isNonEmptyString(value);
+}
+
+function isOptionalTimestamp(value: unknown): boolean {
+  return value === undefined || isNonEmptyString(value);
 }
 
 function nullableTimestamp(value: unknown): string | null {

@@ -47,7 +47,6 @@
     "read_at": null,
     "sent_at": "2026-05-08T16:21:12.499Z",
     "delivered_at": "2026-05-08T16:21:12.599Z",
-    "reconciled_at": "2026-05-08T16:21:12.699Z",
     "service": "iMessage",
     "reply_to": {
       "message_id": "509fdf31-f033-43ab-bf6b-52939fefb8cf",

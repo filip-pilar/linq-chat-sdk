@@ -1,0 +1,45 @@
+{
+  "api_version": "v3",
+  "webhook_version": "2026-02-03",
+  "event_type": "message.edited",
+  "event_id": "60000000-0000-4000-8000-000000000001",
+  "created_at": "2026-05-08T16:25:00.500Z",
+  "trace_id": "trace-message-edited",
+  "partner_id": "20000000-0000-4000-8000-000000000001",
+  "data": {
+    "chat": {
+      "id": "40000000-0000-4000-8000-000000000001",
+      "is_group": false,
+      "owner_handle": {
+        "id": "50000000-0000-4000-8000-000000000001",
+        "is_me": true,
+        "handle": "+15550001000",
+        "status": "active",
+        "left_at": null,
+        "service": "iMessage",
+        "joined_at": "2026-05-01T12:00:00.000Z"
+      },
+      "health_status": {
+        "status": "HEALTHY",
+        "doc_url": "https://docs.linqapp.com/guides/chats/chat-health#healthy",
+        "updated_at": "2026-05-08T16:24:59.000Z"
+      }
+    },
+    "id": "30000000-0000-4000-8000-000000000001",
+    "direction": "outbound",
+    "sender_handle": {
+      "id": "50000000-0000-4000-8000-000000000001",
+      "is_me": true,
+      "handle": "+15550001000",
+      "status": "active",
+      "left_at": null,
+      "service": "iMessage",
+      "joined_at": "2026-05-01T12:00:00.000Z"
+    },
+    "part": {
+      "index": 0,
+      "text": "Edited lifecycle fixture"
+    },
+    "edited_at": "2026-05-08T16:25:00.487Z"
+  }
+}

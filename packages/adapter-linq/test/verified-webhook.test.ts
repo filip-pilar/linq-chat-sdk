@@ -368,7 +368,7 @@ describe("LinqAdapter verified webhook ingress", () => {
         sentAt: fixture.data.sent_at,
         deliveredAt: fixture.data.delivered_at,
         readAt: null,
-        reconciledAt: fixture.data.reconciled_at,
+        reconciledAt: null,
       },
       replyContext: {
         messageId: fixture.data.reply_to.message_id,

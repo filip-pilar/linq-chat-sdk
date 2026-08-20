@@ -466,7 +466,7 @@ describe("LinqAdapter.parseMessage", () => {
     });
   });
 
-  it("marks retrieved messages as edited when updated_at differs from created_at", () => {
+  it("does not infer an edit from a retrieved message updated_at change", () => {
     const adapter = createTestAdapter();
     vi.spyOn(adapter, "encodeThreadId").mockReturnValue("linq:chat-123");
 
@@ -491,8 +491,8 @@ describe("LinqAdapter.parseMessage", () => {
     const message = adapter.parseMessage(rawMessage);
 
     expect(message.text).toBe("edited text");
-    expect(message.metadata.edited).toBe(true);
-    expect(message.metadata.editedAt?.toISOString()).toBe("2026-05-08T16:22:12.499Z");
+    expect(message.metadata.edited).toBe(false);
+    expect(message.metadata.editedAt).toBeUndefined();
   });
 });
 
