@@ -402,8 +402,8 @@ its empty generated `Webhooks` resource contradicts documentation that still des
 
 Proactive sending is intentionally not adapter behavior: `chat.openDM()` remains unsupported for
 Linq. Reduced Batch `004` documents and validates the native-client create/send operation followed
-by canonical Chat SDK thread construction; it will not add provisional IDs, aliases, locks, or a
-proactive adapter wrapper.
+by canonical Chat SDK thread construction; it adds no provisional IDs, aliases, locks, or proactive
+adapter wrapper.
 
 See [`FEATURE_PARITY.md`](./FEATURE_PARITY.md) for the authoritative capability status
 of every Linq endpoint, message feature, and webhook, including its architectural
@@ -454,7 +454,8 @@ The adapter posts only to canonical existing-chat thread IDs (`linq:{chatId}`). 
 does not implement `openDM()` or create a Linq chat behind `thread.post()`.
 
 Applications that need proactive sending today can use the configured official client directly.
-Use `messages.create()` when Linq should auto-select the sending number:
+Use `messages.create()` when Linq should auto-select the sending number. Construct a Chat SDK thread
+only after that operation returns its canonical `chat_id`:
 
 ```ts
 import { randomUUID } from "node:crypto";
@@ -474,18 +475,52 @@ await thread.post("A normal follow-up through Chat SDK");
 ```
 
 Retain and reuse `logicalSendId` if that logical initial send must be retried; generate a new value
-for each distinct intentional send.
+for each distinct intentional send. Never reuse a key across separate intended messages.
 
 When the application must choose the sending number explicitly, use
-`adapter.client.chats.create()` and follow the official client's initial-message constraints. These
-calls retain the official client's native request, response, validation, error, and retry behavior;
-they do not create a Chat SDK thread automatically; construct one only from the returned canonical
-`chat_id`.
+`adapter.client.chats.create()` and follow the official client's initial-message constraints:
 
-Reduced Batch `004` adds recipe/compile-time contracts. Selective sandbox observations of new
-creation, active-chat reuse, same-key retry, failover, or concurrent distinct intentional sends are
-optional provider evidence. It adds no runtime adapter behavior, first-send lock, identity
-migration, or Chat SDK change. See
+```ts
+import { randomUUID } from "node:crypto";
+
+const logicalSendId = randomUUID();
+const result = await adapter.client.chats.create({
+  from: sendingLine,
+  to: [recipient],
+  message: {
+    idempotency_key: logicalSendId,
+    parts: [{ type: "text", value: "Hello from the selected Linq line" }],
+  },
+});
+
+const thread = chat.thread(`linq:${result.chat.id}`);
+await thread.subscribe();
+await thread.post("A normal follow-up through Chat SDK");
+```
+
+These calls retain the official client's native request, response, validation, error, and retry
+behavior; they do not create a Chat SDK thread automatically. Linq currently documents fixed-line
+reuse by the explicit `from` plus exact `to` set, with named groups, changed participants, and a
+departed sending line among the cases that can produce a new chat. That creation/reuse behavior is
+provider-owned and is not exercised or guaranteed by this adapter recipe.
+
+Do not create a recipient-derived provisional ID or Thread before the native call succeeds. Chat
+SDK Thread identity is immutable, so a provisional Thread cannot adopt the returned Linq chat ID.
+Posting through it later can repeat creation, while subscriptions and state remain attached to a
+different identity. The adapter therefore provides no `openDM()`, provisional thread, recipient
+alias, identity migration, hidden first-send transport, lock, persistence scheme, or failover
+wrapper.
+
+The compile-time recipe contract verifies the installed native request/response shapes, the
+different `result.chat_id` and `result.chat.id` return paths, post-success canonical thread
+construction, later ordinary Chat SDK operations, immutable Thread identity, and absence of
+`LinqAdapter.openDM()`. Linq owns and this batch does not verify auto-line selection, creation versus
+reuse, same-key deduplication, concurrency, failover, delivery, or service/device presentation.
+
+Batch `004A` is `Documented` and `Contract-verified` through recipe/compile-time contracts.
+Selective sandbox observations of new creation, active-chat reuse, same-key retry, failover, or
+concurrent distinct intentional sends are optional `004B` provider evidence and remain incomplete.
+`004A` adds no runtime adapter behavior, first-send lock, identity migration, or Chat SDK change. See
 [Batch `004` proactive native-client recipe](./FEATURE_PARITY.md#batch-004-proactive-native-client-recipe).
 
 ## Recipes

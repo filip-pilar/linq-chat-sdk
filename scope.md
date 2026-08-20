@@ -126,7 +126,7 @@ Linq-specific notes:
 
 ### 4. Proactive direct-message sending
 
-Status: **adapter behavior intentionally unsupported; native-client recipe planned in Batch `004`**
+Status: **adapter behavior intentionally unsupported; native-client recipe complete in Batch `004A`**
 
 Keep `chat.openDM()` unsupported for Linq. Do not add provisional thread IDs, aliases, identity
 migration, persistent mappings, first-send locks, or a Chat SDK dependency change.
@@ -135,15 +135,23 @@ For an auto-selected sending line, call `adapter.client.messages.create()` with 
 per logical send. After Linq returns its canonical `chat_id`, construct the corresponding Chat SDK
 thread with ``chat.thread(`linq:${result.chat_id}`)``. Subscriptions, history, typing, reactions,
 edits, and subsequent posts then use normal Chat SDK behavior. Explicit fixed-line creation remains
-on `adapter.client.chats.create()`.
+on `adapter.client.chats.create()`; its canonical result path is `result.chat.id`. A key is reused
+only to retry the same logical operation and never across distinct intentional sends.
+
+Both recipes are documented and compile-checked against the installed native client and Chat SDK.
+No Thread exists until the native operation succeeds. A provisional recipient-derived Thread is
+unsafe because its readonly identity cannot adopt the returned chat ID, which can repeat creation
+on later posts and split subscriptions/state. The adapter adds no `openDM()`, provisional identity,
+alias, migration, hidden send transport, retry, lock, or persistence behavior.
 
 Guarded fixed-line smoke operations also use `chats.create({ from, ... })`; they must not substitute
 the auto-line operation because Linq may reuse a more recently active chat on another healthy line.
 
-Reduced Batch `004` contains only recipe documentation and compile-time contracts. Selective
-sandbox observations of creation, active-chat reuse, same-key idempotent retry, failover, or
-concurrent distinct intentional sends are optional `Provider-observed` evidence. A first-class
-proactive adapter extension is deferred until real usage justifies it.
+Completed Batch `004A` contains only `Documented` and `Contract-verified` recipe/compile-time
+contracts. Selective sandbox observations of creation, active-chat reuse, same-key idempotent retry,
+failover, or concurrent distinct intentional sends remain optional incomplete `004B`
+`Provider-observed` evidence. A first-class proactive adapter extension is deferred until real
+usage justifies it.
 
 ## Approved remaining implementation
 
