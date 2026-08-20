@@ -180,7 +180,7 @@ describe("LinqAdapter.postMessage with cards", () => {
       title: "Order #1234",
       imageUrl: "https://example.com/header.png",
       children: [
-        CardText("Your order has been received!"),
+        CardText("Your order has been **received**!"),
         Image({ url: "https://example.com/receipt.png", alt: "Receipt" }),
       ],
     });
@@ -191,7 +191,11 @@ describe("LinqAdapter.postMessage with cards", () => {
       message: {
         idempotency_key: expect.any(String),
         parts: [
-          { type: "text", value: "Order #1234\nYour order has been received!" },
+          {
+            type: "text",
+            value: "Order #1234\nYour order has been received!",
+            text_decorations: [{ range: [32, 40], style: "bold" }],
+          },
           { type: "media", url: "https://example.com/header.png" },
           { type: "media", url: "https://example.com/receipt.png" },
         ],

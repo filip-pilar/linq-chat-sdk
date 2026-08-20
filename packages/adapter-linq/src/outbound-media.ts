@@ -3,6 +3,7 @@ import { LinqAPIV3 } from "@linqapp/sdk";
 import type { AdapterPostableMessage, Attachment, FileUpload } from "chat";
 
 import { isRecord } from "./guards.js";
+import type { CompiledLinqMessageText, LinqCompiledDecoration } from "./message-compiler.js";
 
 const ADAPTER_NAME = "linq";
 const MAX_FILENAME_CHARACTERS = 255;
@@ -18,7 +19,7 @@ const MIN_UPLOAD_BYTES = 1;
 const URL_DOWNLOAD_LIMIT_BYTES = 10 * 1024 * 1024;
 
 type LinqOutboundPart =
-  | { type: "text"; value: string }
+  | { type: "text"; value: string; text_decorations?: LinqCompiledDecoration[] }
   | { type: "media"; url: string }
   | { type: "media"; attachment_id: string };
 
@@ -40,7 +41,7 @@ type PlannedMediaPart = { type: "url"; url: string } | PlannedUpload;
 type LinqOutboundMessagePlan = {
   cardImageUrls: string[];
   media: PlannedMediaPart[];
-  text?: string;
+  text?: CompiledLinqMessageText;
 };
 
 // A subset of Linq's supported types, keyed by file extension. Linq validates
@@ -88,9 +89,10 @@ const EXTENSION_CONTENT_TYPES: Record<string, string> = {
 
 export function planLinqOutboundMessage(
   message: AdapterPostableMessage,
-  text: string,
+  compiledText: CompiledLinqMessageText,
   cardImageUrls: string[],
 ): LinqOutboundMessagePlan {
+  const { text } = compiledText;
   if (text && characterCount(text) > MAX_TEXT_CHARACTERS) {
     throw validationError(`Linq message text cannot exceed ${MAX_TEXT_CHARACTERS} characters.`);
   }
@@ -125,7 +127,7 @@ export function planLinqOutboundMessage(
   return {
     cardImageUrls: [...cardImageUrls],
     media,
-    text: text || undefined,
+    text: text ? compiledText : undefined,
   };
 }
 
@@ -137,7 +139,13 @@ export async function prepareLinqOutboundParts(
   const parts: LinqOutboundPart[] = [];
 
   if (plan.text) {
-    parts.push({ type: "text", value: plan.text });
+    parts.push({
+      type: "text",
+      value: plan.text.text,
+      ...(plan.text.decorations.length > 0
+        ? { text_decorations: plan.text.decorations.map((decoration) => ({ ...decoration })) }
+        : {}),
+    });
   }
 
   for (const url of plan.cardImageUrls) {

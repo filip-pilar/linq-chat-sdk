@@ -29,7 +29,6 @@ import {
   type LinqEventMap,
   type LinqKnownEventType,
 } from "./events.js";
-import { LinqFormatConverter } from "./format-converter.js";
 import { isRecord } from "./guards.js";
 import { createLinqAttachmentFetcher } from "./inbound-media.js";
 import {
@@ -39,6 +38,7 @@ import {
   type LinqRawMessage,
 } from "./message-parser.js";
 import { planLinqOutboundMessage, prepareLinqOutboundParts } from "./outbound-media.js";
+import { compileLinqMessageText } from "./message-compiler.js";
 import { fromLinqReaction, toLinqReaction } from "./reactions.js";
 import { authenticateLinqWebhookRequest } from "./verification.js";
 import {
@@ -73,7 +73,6 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   readonly name: string = "linq";
   readonly userName: string = "linq";
   private readonly apiClient: LinqAPIV3;
-  private readonly converter = new LinqFormatConverter();
   private readonly signingSecret: string;
   private readonly webhookVerificationMode: LinqWebhookVerificationScheme;
   private readonly webhookVerificationAuthority = {};
@@ -246,11 +245,11 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     replyTo?: { message_id: string; part_index?: number },
   ): Promise<RawMessage<LinqRawMessage>> {
     const { chatId } = this.decodeThreadId(threadId);
-    const idempotencyKey = randomUUID();
-    const text = this.converter.renderPostable(message).trim();
+    const compiledText = compileLinqMessageText(message);
     const card = extractCardElement(message);
     const cardImageUrls = card ? collectCardImageUrls(card) : [];
-    const plan = planLinqOutboundMessage(message, text, cardImageUrls);
+    const plan = planLinqOutboundMessage(message, compiledText, cardImageUrls);
+    const idempotencyKey = randomUUID();
 
     if (card) {
       // Feedback instead of silence: the card still sends, but its buttons and
@@ -314,7 +313,7 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     message: AdapterPostableMessage,
   ): Promise<RawMessage<LinqRawMessage>> {
     const { chatId } = this.decodeThreadId(threadId);
-    const text = this.converter.renderPostable(message).trim();
+    const { text } = compileLinqMessageText(message);
 
     if (!text) {
       throw new Error("Linq message text cannot be empty.");

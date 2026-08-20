@@ -21,7 +21,8 @@ The adapter can already handle the core receive/reply path:
 - Fetch recent chat history with `chats.messages.list()`.
 - Fetch a single message with `messages.retrieve()`.
 - Edit text messages with `messages.update()`.
-- Render formatted Chat SDK content as plain text today; Batch `010` owns faithful supported styles.
+- Render formatted Chat SDK content deterministically as plain text; Batch `010A` maps supported
+  bold, italic, and strikethrough formatting plus validated manual decorations.
 - Add and remove reactions with `messages.addReaction()`.
 - Route inbound `reaction.added` / `reaction.removed` webhooks into Chat SDK `onReaction()` handlers (tapbacks map to normalized emoji, custom emoji pass through, stickers are skipped).
 - Encode stable Linq thread IDs (`linq:{chatId}`) so webhook and API paths map to the same thread.
@@ -143,9 +144,10 @@ The public extensions are deliberately cohesive:
 - Batches `007`/`010`: the contract-verified `007A` transport creates one immutable
   `LinqMessageOptions` snapshot through `linqMessage(content, options)` while retaining ordinary
   Chat SDK post/reply/edit, callback processing, identity, history, and serialization behavior.
-  Provider translation for rich links, service, effects, animations, and manual decorations remains
-  later work. Ordinary replies already use `Thread.reply()`; only part-index targeting remains a
-  Linq-specific `007B` gap.
+  `010A` contract-verifies deterministic raw/Markdown/AST/static-card text, UTF-16 style ranges,
+  and validated manual styles/animations before side effects. Linq's current edit operation remains
+  text-only. Rich links, service, and effects remain later work. Ordinary replies already use
+  `Thread.reply()`; only part-index targeting remains a Linq-specific `007B` gap.
 - Batches `008`/`009`: `adapter.conversation(threadOrId)` with common operations directly on the
   facade, existing-group operations under `.group`, and location under `.location`.
 

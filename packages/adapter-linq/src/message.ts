@@ -39,7 +39,7 @@ export type LinqTextDecoration =
         | "jitter";
     };
 
-/** Linq-only send metadata. Provider translation is implemented by later capability batches. */
+/** Linq-only send metadata. Each field is translated only when its capability is implemented. */
 export interface LinqMessageOptions {
   readonly preferredService?: LinqPreferredService;
   readonly effect?: LinqMessageEffect;

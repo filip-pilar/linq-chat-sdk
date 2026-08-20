@@ -146,6 +146,31 @@ function assertLinqMessageErgonomics(
 
   // @ts-expect-error -- the helper exposes a read-only metadata snapshot.
   direct.linq.preferredService = "SMS";
+
+  linqMessage("hello", {
+    decorations: [
+      { range: [0, 5], style: "underline" },
+      { range: [0, 5], animation: "shake" },
+    ],
+  });
+  linqMessage("hello", {
+    decorations: [
+      // @ts-expect-error -- decoration ranges are exactly two endpoints.
+      { range: [0, 1, 2], style: "bold" },
+    ],
+  });
+  linqMessage("hello", {
+    decorations: [
+      // @ts-expect-error -- decoration styles are a closed provider contract.
+      { range: [0, 5], style: "sparkly" },
+    ],
+  });
+  linqMessage("hello", {
+    decorations: [
+      // @ts-expect-error -- decoration animations are a closed provider contract.
+      { range: [0, 5], animation: "spin" },
+    ],
+  });
 }
 
 void assertLinqMessageErgonomics;

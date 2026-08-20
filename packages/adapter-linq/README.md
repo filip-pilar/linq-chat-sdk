@@ -49,15 +49,32 @@ their standard shapes. The result works with `thread.post()`, `thread.reply()`, 
 import { linqMessage } from "@forma/linq-chat-sdk-adapter";
 
 await thread.post(
-  linqMessage({ markdown: "**Deployment complete**" }, { preferredService: "iMessage" }),
+  linqMessage(
+    { markdown: "**Deployment complete**" },
+    { decorations: [{ range: [0, 10], style: "underline" }] },
+  ),
 );
 ```
 
 The options are a send-time adapter input; they are not added to the returned `SentMessage` or
-provider-backed history. Batch `007A` freezes this transport only. Provider translation for
-`preferredService`, effects, decorations, and rich links remains unimplemented, so those options do
-not yet change the Linq request or recipient presentation. Standard content, cards, files,
-attachments, replies, and edits continue through their existing adapter paths.
+provider-backed history. The adapter renders raw text, Markdown/AST, and static card text to the
+final plain-text part, then maps standard bold, italic, and strikethrough nodes to Linq decorations.
+Manual `decorations` add underline, the same standard styles, or a supported animation. Their
+`[start, end)` ranges target the final trimmed text and use UTF-16 code units, so most emoji occupy
+two positions and combining marks are not normalized.
+
+Exact duplicate decorations collapse. Style ranges may overlap, including derived/manual and
+nested styles. Animation ranges may be adjacent but cannot overlap any style or animation. Ranges
+must contain two integer endpoints, satisfy `0 <= start < end <= text.length`, and name exactly one
+supported style or animation. Invalid decorations fail before attachment preparation or a Linq API
+call. These rules are `Contract-verified`; recipient rendering has not been device-verified and is
+not an adapter completion gate.
+
+Posting and replies send the compiled text and decorations through the ordinary Chat SDK path.
+Edits use the same deterministic plain-text rendering, but Linq SDK `0.42.0` exposes a text-only
+message-part update contract and therefore cannot replace decorations. Provider translation for
+`preferredService`, effects, and rich links remains planned for `010B`/`007B`. Standard cards,
+files, attachments, returned identity, history, and serialization behavior remain unchanged.
 
 Then route Linq webhooks to the adapter from any framework with fetch-style handlers:
 
@@ -267,8 +284,8 @@ contracts, tests, and documentation are complete. Provider, device, and host obs
 separate evidence labels defined in the parity matrix and are not universal completion gates.
 
 The extension surface is intentionally small: `onLinqEvent()` registration for verified generic
-events, the implemented `linqMessage(content, options)` send-time transport for provider-only rich
-message options, and planned `adapter.conversation(threadOrId)` native conversation behavior.
+events, the implemented `linqMessage(content, options)` send-time transport and decorations, and
+planned `adapter.conversation(threadOrId)` native conversation behavior.
 Endpoint-shaped account and administrative behavior remains on `adapter.client`.
 
 ## Supported features

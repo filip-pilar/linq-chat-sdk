@@ -87,7 +87,7 @@ describe("linqMessage", () => {
 });
 
 describe("linqMessage Chat SDK transport", () => {
-  it("uses the ordinary Linq send path without translating future provider options", async () => {
+  it("uses the ordinary Linq send path and translates only implemented decoration options", async () => {
     const adapter = createLinqAdapter({ apiKey: "test-key", signingSecret: "test-secret" });
     const send = vi.spyOn(adapter.client.chats.messages, "send").mockResolvedValue({
       chat_id: "chat-123",
@@ -115,7 +115,7 @@ describe("linqMessage Chat SDK transport", () => {
     const sent = await chat.thread(THREAD_ID).post(
       linqMessage(
         {
-          markdown: "ordinary send",
+          markdown: "**ordinary** send",
           attachments: [{ type: "image", url: "https://example.com/image.png" }],
         },
         OPTIONS,
@@ -126,7 +126,14 @@ describe("linqMessage Chat SDK transport", () => {
       message: {
         idempotency_key: expect.any(String),
         parts: [
-          { type: "text", value: "ordinary send" },
+          {
+            type: "text",
+            value: "ordinary send",
+            text_decorations: [
+              { range: [0, 5], style: "bold" },
+              { range: [0, 8], style: "bold" },
+            ],
+          },
           { type: "media", url: "https://example.com/image.png" },
         ],
       },
