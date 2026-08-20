@@ -30,11 +30,11 @@ export const WEBHOOK_EVENT_COVERAGE: Record<LinqAPIV3.WebhookEventType, WebhookE
   "reaction.removed": "handled",
 
   // Message lifecycle. Chat SDK has no delivery-status dispatch, so these
-  // surface on the adapter itself rather than through ChatInstance.
-  "message.sent": { ignored: NOT_YET_IMPLEMENTED },
-  "message.delivered": { ignored: NOT_YET_IMPLEMENTED },
-  "message.read": { ignored: NOT_YET_IMPLEMENTED },
-  "message.failed": { ignored: NOT_YET_IMPLEMENTED },
+  // surface on the adapter through `onDeliveryStatus`.
+  "message.sent": "handled",
+  "message.delivered": "handled",
+  "message.read": "handled",
+  "message.failed": "handled",
   "message.edited": { ignored: NOT_YET_IMPLEMENTED },
 
   // Membership. `participant.added` maps to ChatInstance.processMemberJoinedChannel.

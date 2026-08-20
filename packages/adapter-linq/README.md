@@ -89,12 +89,38 @@ createLinqAdapter({
 | Fetch message / history / thread                   | ✅                                                                                                                         |
 | Typing indicators                                  | ✅ DMs only (Linq rejects typing in groups)                                                                                |
 | Webhook signature verification + replay protection | ✅                                                                                                                         |
+| Delivery status (sent / delivered / read / failed) | ✅ via `adapter.onDeliveryStatus()`                                                                                        |
 | Streaming                                          | ⚠️ buffered — recipients see one final message                                                                             |
 | Sticker reactions                                  | ❌ skipped (no Chat SDK equivalent)                                                                                        |
 | Delete message                                     | ❌ Linq cannot unsend on the recipient's device                                                                            |
 | `openDM()` / creating chats                        | ✅ returns a pending thread; the chat is created on its first message                                                      |
 | Cards                                              | ⚠️ rendered natively as plain text + image media parts — buttons/selects show their labels but cannot trigger `onAction()` |
 | Modals, slash commands                             | ❌ no Linq equivalent                                                                                                      |
+
+## Delivery status
+
+Chat SDK has no delivery-status dispatch, so outbound message outcomes surface
+on the adapter. Without this a caller cannot tell a delivered message from one
+the carrier rejected — every send looks like a success:
+
+```ts
+const adapter = createLinqAdapter({ apiKey, signingSecret });
+
+adapter.onDeliveryStatus((event) => {
+  if (event.status === "failed") {
+    console.error(`send failed on ${event.threadId}`, event.error);
+  }
+});
+```
+
+From a Chat SDK app, reach it with `chat.getAdapter("linq")`, which keeps the
+concrete adapter type rather than the `Adapter` interface. Subscribing returns
+an unsubscribe function, and a listener that throws is logged rather than
+allowed to fail the webhook — a non-2xx response would make Linq retry the
+delivery.
+
+Requires subscribing to `message.sent`, `message.delivered`, `message.read`, and
+`message.failed` on the webhook subscription.
 
 ## Webhook event coverage
 

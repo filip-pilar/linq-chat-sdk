@@ -29,6 +29,30 @@ import { buildLinqMediaParts } from "./outbound-media.js";
 import { fromLinqReaction, toLinqReaction } from "./reactions.js";
 import { verifyLinqWebhookRequest, type LinqWebhookVerificationResult } from "./verification.js";
 
+const DELIVERY_STATUS_EVENTS: Partial<Record<LinqAPIV3.WebhookEventType, LinqDeliveryStatus>> = {
+  "message.sent": "sent",
+  "message.delivered": "delivered",
+  "message.read": "read",
+  "message.failed": "failed",
+};
+
+/** Delivery outcome Linq reported for an outbound message. */
+export type LinqDeliveryStatus = "sent" | "delivered" | "read" | "failed";
+
+/** A delivery-status change for a message this adapter sent. */
+export interface LinqDeliveryStatusEvent {
+  readonly status: LinqDeliveryStatus;
+  readonly threadId: string;
+  readonly messageId: string;
+  /** Present on `failed`, carrying Linq's error code and message. */
+  readonly error?: { readonly code?: number; readonly message?: string };
+  /** The raw webhook envelope, for anything this shape does not carry. */
+  readonly raw: unknown;
+}
+
+/** Receives delivery-status changes. Return value is ignored. */
+export type LinqDeliveryStatusListener = (event: LinqDeliveryStatusEvent) => void;
+
 type LinqOutboundPart =
   | { type: "text"; value: string }
   | { type: "media"; url: string }
@@ -86,6 +110,7 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   private logger: Logger;
   // chatId -> isGroup, learned from webhooks, fetchThread, and legacy thread IDs.
   private readonly chatKinds = new Map<string, boolean>();
+  private readonly deliveryStatusListeners = new Set<LinqDeliveryStatusListener>();
 
   constructor(config: LinqAdapterConfig) {
     if (!config.credentials && !config.apiKey) {
@@ -490,6 +515,12 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       this.chat.processMessage(this, threadId, factory, options);
     } else if (this.chat && isReactionWebhookEvent(event)) {
       this.processReactionWebhook(this.chat, event, options);
+    } else {
+      const deliveryStatus = DELIVERY_STATUS_EVENTS[event.event_type];
+
+      if (deliveryStatus) {
+        this.processDeliveryStatusWebhook(event, deliveryStatus);
+      }
     }
 
     return new Response("OK", { status: 200 });
@@ -515,6 +546,67 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     } catch {
       return { ok: false, response: new Response("Invalid JSON", { status: 400 }) };
     }
+  }
+
+  /**
+   * Subscribes to delivery-status changes for outbound messages.
+   *
+   * Chat SDK has no delivery-status dispatch, so this surfaces on the adapter.
+   * Reach it from a Chat SDK app with `bot.getAdapter("linq")`, which keeps the
+   * concrete adapter type. Without it a caller cannot distinguish a delivered
+   * message from one the carrier rejected.
+   *
+   * @returns a function that removes the listener.
+   */
+  onDeliveryStatus(listener: LinqDeliveryStatusListener): () => void {
+    this.deliveryStatusListeners.add(listener);
+
+    return () => {
+      this.deliveryStatusListeners.delete(listener);
+    };
+  }
+
+  private emitDeliveryStatus(event: LinqDeliveryStatusEvent): void {
+    for (const listener of this.deliveryStatusListeners) {
+      try {
+        listener(event);
+      } catch (error) {
+        // A listener must never cost us the webhook. Linq retries non-2xx
+        // deliveries, so throwing here would replay the whole event.
+        this.logger.warn("Linq delivery-status listener threw", { error });
+      }
+    }
+  }
+
+  private processDeliveryStatusWebhook(
+    event: LinqAPIV3.UnwrapWebhookEvent,
+    status: LinqDeliveryStatus,
+  ): void {
+    if (this.deliveryStatusListeners.size === 0) return;
+
+    const data = event.data as {
+      id?: string;
+      chat?: { id?: string };
+      error?: { code?: number; message?: string };
+    };
+    const chatId = data.chat?.id;
+    const messageId = data.id;
+
+    if (!chatId || !messageId) {
+      this.logger.debug(`Ignoring Linq ${event.event_type} webhook without chat/message ID`);
+
+      return;
+    }
+
+    const delivery: LinqDeliveryStatusEvent = {
+      status,
+      threadId: this.encodeThreadId({ chatId }),
+      messageId,
+      raw: event,
+      ...(data.error ? { error: data.error } : {}),
+    };
+
+    this.emitDeliveryStatus(delivery);
   }
 
   private processReactionWebhook(

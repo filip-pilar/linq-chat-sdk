@@ -30,28 +30,36 @@ describe("webhook event coverage", () => {
 
   it("dispatches every event it claims to handle", async () => {
     for (const event of handledWebhookEvents()) {
-      const { adapter, processMessage, processReaction } = createInstrumentedAdapter();
+      const { adapter, processMessage, processReaction, onDeliveryStatus } =
+        createInstrumentedAdapter();
 
       const response = await adapter.handleWebhook(signed(payloadFor(event)));
       await tick();
 
       expect(response.status, `${event} should be accepted`).toBe(200);
-      const dispatched = processMessage.mock.calls.length + processReaction.mock.calls.length;
+      // "Handled" means the adapter acts on it, whether that lands on the Chat
+      // SDK or on an adapter-owned surface such as delivery status.
+      const dispatched =
+        processMessage.mock.calls.length +
+        processReaction.mock.calls.length +
+        onDeliveryStatus.mock.calls.length;
       expect(dispatched, `${event} claims "handled" but reached nothing`).toBeGreaterThan(0);
     }
   });
 
   it("accepts but does not dispatch an ignored event", async () => {
-    const { adapter, processMessage, processReaction } = createInstrumentedAdapter();
+    const { adapter, processMessage, processReaction, onDeliveryStatus } =
+      createInstrumentedAdapter();
 
-    // message.sent is a real delivery Linq sends on every outbound message.
-    // Acknowledging it is required; acting on it is not yet implemented.
-    const response = await adapter.handleWebhook(signed(payloadFor("message.sent")));
+    // chat.created is a real delivery Linq sends. Acknowledging it is
+    // required; acting on it is not yet implemented.
+    const response = await adapter.handleWebhook(signed(payloadFor("chat.created")));
     await tick();
 
     expect(response.status).toBe(200);
     expect(processMessage).not.toHaveBeenCalled();
     expect(processReaction).not.toHaveBeenCalled();
+    expect(onDeliveryStatus).not.toHaveBeenCalled();
   });
 });
 
@@ -59,8 +67,10 @@ function createInstrumentedAdapter() {
   const adapter = createLinqAdapter({ apiKey: API_KEY, signingSecret: SIGNING_SECRET });
   const processMessage = vi.fn();
   const processReaction = vi.fn();
+  const onDeliveryStatus = vi.fn();
   withChat(adapter, { processMessage, processReaction } as never);
-  return { adapter, processMessage, processReaction };
+  adapter.onDeliveryStatus(onDeliveryStatus);
+  return { adapter, processMessage, processReaction, onDeliveryStatus };
 }
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 10));
