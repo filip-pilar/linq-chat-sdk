@@ -1,7 +1,8 @@
 import { LinqAPIV3 } from "@linqapp/sdk";
+import type { AdapterPostableMessage, SentMessage, Thread } from "chat";
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
 
-import { createLinqAdapter, LINQ_WEBHOOK_VERSION, LinqAdapter } from "../src/index.js";
+import { createLinqAdapter, linqMessage, LINQ_WEBHOOK_VERSION, LinqAdapter } from "../src/index.js";
 import type {
   LinqAnyEvent,
   LinqAdapterConfig,
@@ -11,6 +12,8 @@ import type {
   LinqMessageFailedEventData,
   LinqMessageLifecycleEventData,
   LinqMessageEditedEventData,
+  LinqMessageOptions,
+  LinqPostableMessage,
   LinqVerifiedUnhandledWebhook,
   LinqVerifiedWebhook,
   LinqWebhookVerificationResult,
@@ -124,6 +127,28 @@ function assertTypedEventRegistration(adapter: LinqAdapter): void {
 }
 
 void assertTypedEventRegistration;
+
+function assertLinqMessageErgonomics(
+  thread: Thread,
+  sent: SentMessage,
+  content: AdapterPostableMessage,
+  options: LinqMessageOptions,
+): void {
+  const direct = linqMessage("hello", { preferredService: "iMessage" });
+  const variable = linqMessage(content, options);
+
+  expectTypeOf(direct).toEqualTypeOf<LinqPostableMessage>();
+  expectTypeOf(variable).toEqualTypeOf<LinqPostableMessage>();
+  expectTypeOf(direct).toMatchTypeOf<AdapterPostableMessage>();
+  expectTypeOf(thread.post(direct)).resolves.toMatchTypeOf<SentMessage>();
+  expectTypeOf(thread.reply("message-id", variable)).resolves.toMatchTypeOf<SentMessage>();
+  expectTypeOf(sent.edit(variable)).resolves.toMatchTypeOf<SentMessage>();
+
+  // @ts-expect-error -- the helper exposes a read-only metadata snapshot.
+  direct.linq.preferredService = "SMS";
+}
+
+void assertLinqMessageErgonomics;
 
 type Assert<T extends true> = T;
 type Equal<Left, Right> =

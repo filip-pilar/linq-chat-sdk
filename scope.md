@@ -140,11 +140,12 @@ The public extensions are deliberately cohesive:
   reconciled observations from ordinary new-message dispatch. Immutable raw access and existing
   dedupe/Chat webhook paths remain intact; no ordering, retry, terminal-state, conflict-resolution,
   database, or application workflow guarantee is implied.
-- Batches `007`/`010`: one `LinqMessageOptions` model created by
-  `linqMessage(content, options)` for rich links, service, effects, animations, and manual
-  decorations. Ordinary replies already use Chat SDK `Thread.reply()`; only part-index targeting
-  remains a Linq-specific `007B` gap. The ordinary transport must be contract-tested before it is
-  frozen.
+- Batches `007`/`010`: the contract-verified `007A` transport creates one immutable
+  `LinqMessageOptions` snapshot through `linqMessage(content, options)` while retaining ordinary
+  Chat SDK post/reply/edit, callback processing, identity, history, and serialization behavior.
+  Provider translation for rich links, service, effects, animations, and manual decorations remains
+  later work. Ordinary replies already use `Thread.reply()`; only part-index targeting remains a
+  Linq-specific `007B` gap.
 - Batches `008`/`009`: `adapter.conversation(threadOrId)` with common operations directly on the
   facade, existing-group operations under `.group`, and location under `.location`.
 

@@ -38,6 +38,27 @@ chat.onReaction(["thumbs_up"], async (event) => {
 });
 ```
 
+### Linq message options transport
+
+`linqMessage(content, options)` attaches immutable Linq-specific send metadata to an ordinary Chat
+SDK postable. Strings become `{ raw }` messages; Markdown/AST, cards, files, and attachments keep
+their standard shapes. The result works with `thread.post()`, `thread.reply()`, and
+`SentMessage.edit()` and keeps their normal returned identity, history, and serialization behavior.
+
+```ts
+import { linqMessage } from "@forma/linq-chat-sdk-adapter";
+
+await thread.post(
+  linqMessage({ markdown: "**Deployment complete**" }, { preferredService: "iMessage" }),
+);
+```
+
+The options are a send-time adapter input; they are not added to the returned `SentMessage` or
+provider-backed history. Batch `007A` freezes this transport only. Provider translation for
+`preferredService`, effects, decorations, and rich links remains unimplemented, so those options do
+not yet change the Linq request or recipient presentation. Standard content, cards, files,
+attachments, replies, and edits continue through their existing adapter paths.
+
 Then route Linq webhooks to the adapter from any framework with fetch-style handlers:
 
 ```ts
@@ -246,9 +267,9 @@ contracts, tests, and documentation are complete. Provider, device, and host obs
 separate evidence labels defined in the parity matrix and are not universal completion gates.
 
 The extension surface is intentionally small: `onLinqEvent()` registration for verified generic
-events, planned `linqMessage(content, options)` for provider-only rich message options, and
-`adapter.conversation(threadOrId)` for native conversation behavior. Endpoint-shaped account and
-administrative behavior remains on `adapter.client`.
+events, the implemented `linqMessage(content, options)` send-time transport for provider-only rich
+message options, and planned `adapter.conversation(threadOrId)` native conversation behavior.
+Endpoint-shaped account and administrative behavior remains on `adapter.client`.
 
 ## Supported features
 
