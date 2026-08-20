@@ -440,33 +440,52 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       throw new NotImplementedError("Linq message history does not support forward pagination");
     }
 
-    let page: Awaited<ReturnType<LinqAPIV3["chats"]["messages"]["list"]>>;
-    try {
-      page = await this.apiClient.chats.messages.list(chatId, {
-        cursor: options?.cursor,
-        limit: options?.limit,
-      });
-    } catch (error) {
-      throw translateLinqError(error, {
-        action: "list chat messages",
-        resourceId: chatId,
-        resourceType: "chat",
-      });
-    }
-    const messages: Message<LinqRawMessage>[] = [];
+    let cursor = options?.cursor;
+    const visitedCursors = new Set<string>();
 
-    for (const raw of Array.isArray(page.messages) ? page.messages : []) {
+    for (;;) {
+      let page: Awaited<ReturnType<LinqAPIV3["chats"]["messages"]["list"]>>;
       try {
-        messages.push(this.parseMessage(raw));
+        page = await this.apiClient.chats.messages.list(chatId, {
+          cursor,
+          limit: options?.limit,
+        });
       } catch (error) {
-        this.logger.warn("Skipping malformed Linq history row", { error });
+        throw translateLinqError(error, {
+          action: "list chat messages",
+          resourceId: chatId,
+          resourceType: "chat",
+        });
       }
-    }
+      const messages: Message<LinqRawMessage>[] = [];
 
-    return {
-      messages,
-      nextCursor: page.next_cursor || undefined,
-    };
+      for (const raw of Array.isArray(page.messages) ? page.messages : []) {
+        try {
+          messages.push(this.parseMessage(raw));
+        } catch (error) {
+          this.logger.warn("Skipping malformed Linq history row", { error });
+        }
+      }
+
+      const nextCursor = page.next_cursor || undefined;
+
+      if (messages.length > 0 || nextCursor === undefined) {
+        return { messages, nextCursor };
+      }
+
+      // Chat SDK stops iteration on an empty adapter page even when a cursor is
+      // present. Skip provider pages whose rows were all malformed so a later
+      // usable page is not silently lost, while refusing cursor cycles.
+      if (nextCursor === cursor || visitedCursors.has(nextCursor)) {
+        this.logger.warn("Stopping Linq history pagination after a repeated cursor", {
+          cursor: nextCursor,
+        });
+        return { messages: [], nextCursor: undefined };
+      }
+
+      visitedCursors.add(nextCursor);
+      cursor = nextCursor;
+    }
   }
 
   async fetchMessage(threadId: string, messageId: string): Promise<Message<LinqRawMessage> | null> {

@@ -83,6 +83,53 @@ describe("Linq history fidelity", () => {
     );
     expect(list).toHaveBeenCalledTimes(1);
   });
+
+  it("skips all-malformed provider pages so Chat SDK iteration reaches usable history", async () => {
+    const adapter = createLinqAdapter({ apiKey: "test-key", signingSecret: "test-secret" });
+    const usable = historyFixture.messages[0];
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce({ messages: [{ id: null }], next_cursor: "cursor-after-bad" })
+      .mockResolvedValueOnce({ messages: [usable], next_cursor: null });
+    const warn = vi.fn();
+    Object.assign(adapter.client, { chats: { messages: { list } } });
+    const chat = new Chat({
+      adapters: { linq: adapter },
+      logger: "silent",
+      state: stateStub(),
+      userName: "history-fidelity-test",
+    });
+    await chat.initialize();
+    (adapter as unknown as { logger: { warn: typeof warn } }).logger = { warn };
+
+    const ids: string[] = [];
+    for await (const message of chat.thread(THREAD_ID).messages) ids.push(message.id);
+
+    expect(ids).toEqual([usable?.id]);
+    expect(list).toHaveBeenNthCalledWith(1, CHAT_ID, { cursor: undefined, limit: undefined });
+    expect(list).toHaveBeenNthCalledWith(2, CHAT_ID, {
+      cursor: "cursor-after-bad",
+      limit: undefined,
+    });
+    expect(warn).toHaveBeenCalledWith("Skipping malformed Linq history row", {
+      error: expect.any(Error),
+    });
+  });
+
+  it("stops safely when an empty filtered page repeats its cursor", async () => {
+    const { adapter, list, warn } = createHistoryAdapter({
+      messages: [{ id: null }],
+      next_cursor: "cursor-cycle",
+    });
+
+    const result = await adapter.fetchMessages(THREAD_ID, { cursor: "cursor-cycle" });
+
+    expect(result).toEqual({ messages: [], nextCursor: undefined });
+    expect(list).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith("Stopping Linq history pagination after a repeated cursor", {
+      cursor: "cursor-cycle",
+    });
+  });
 });
 
 function createHistoryAdapter(page: unknown) {
