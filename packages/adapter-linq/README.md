@@ -96,6 +96,30 @@ createLinqAdapter({
 | Cards                                              | ⚠️ rendered natively as plain text + image media parts — buttons/selects show their labels but cannot trigger `onAction()` |
 | Modals, slash commands                             | ❌ no Linq equivalent                                                                                                      |
 
+## Webhook event coverage
+
+Linq sends far more event types than a Chat SDK adapter can act on.
+`src/webhook-events.ts` records a disposition for every one — either `handled`,
+or ignored with the reason.
+
+The record is keyed by the SDK's own `WebhookEventType`, so it must name every
+event Linq can send. When an `@linqapp/sdk` upgrade adds one, the record is
+missing a key and **typecheck fails**, surfacing the drift on the upgrade's own
+pull request instead of as silence in production. `@linqapp/sdk` went from 25
+event types in 0.22.1 to 44 in 0.40.0 — nineteen arrived in one upgrade and
+nothing noticed.
+
+Events are ignored for one of two reasons:
+
+- **Not yet mapped** — Linq supports it and Chat SDK can express it; the adapter
+  has not wired it up.
+- **No Chat SDK primitive** — payments, polls, location sharing, and calls have
+  no equivalent in a messaging abstraction. Reach them through the concrete
+  adapter with `bot.getAdapter("linq")`, which keeps its real type.
+
+Unhandled events are still acknowledged with a `200`, so Linq does not retry
+them.
+
 ## Thread IDs
 
 Thread IDs are stable and always take the form `linq:{chatId}`, regardless of whether the thread was first seen via webhook or API. Group vs DM identity is tracked internally from webhook payloads and `chats.retrieve()` calls; legacy `linq:{chatId}:group` / `linq:{chatId}:dm` IDs from older versions still decode.
