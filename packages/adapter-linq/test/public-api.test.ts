@@ -259,6 +259,12 @@ function assertConversationErgonomics(
   expectTypeOf(byId.group.addParticipant("+15550000001")).resolves.toBeVoid();
   expectTypeOf(byId.group.removeParticipant("+15550000001")).resolves.toBeVoid();
   expectTypeOf(byId.group.leave()).resolves.toBeVoid();
+  // @ts-expect-error -- endpoint-shaped update fields are not part of the facade.
+  byId.group.update({ display_name: "Example" });
+  // @ts-expect-error -- participant service/capability selection remains provider-owned.
+  byId.group.addParticipant({ handle: "+15550000001", service: "iMessage" });
+  // @ts-expect-error -- participant methods accept one canonical handle, not recipient lists.
+  byId.group.removeParticipant(["+15550000001"]);
   expectTypeOf(byId.location).toEqualTypeOf<LinqLocationConversation>();
   expectTypeOf(byId.location.request()).resolves.toBeVoid();
   expectTypeOf(byId.location.retrieve()).resolves.toEqualTypeOf<LinqLocationSnapshot>();

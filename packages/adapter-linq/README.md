@@ -118,6 +118,13 @@ const fromUrl = await conversation.sendVoiceMemo({
 const fromAttachment = await conversation.sendVoiceMemo({
   attachmentId: "33333333-3333-3333-3333-333333333333",
 });
+await conversation.group.update({
+  displayName: "Team Discussion",
+  iconUrl: "https://media.example.com/group.png",
+});
+await conversation.group.addParticipant("+15550000001");
+await conversation.group.removeParticipant("former@example.com");
+await conversation.group.leave();
 ```
 
 The facade accepts a Thread owned by this adapter instance or a canonical existing-chat ID in the
@@ -131,8 +138,9 @@ operations are `stopTyping()`, `shareContactCard()`, and `sendVoiceMemo()`; exis
 operations are under `.group`; location request/retrieval is under `.location`. `stopTyping()` and
 `shareContactCard()` are implemented through the official client with shared adapter errors. Voice
 memos accept exactly one public HTTPS URL or existing Linq attachment UUID and return only the
-accepted message ID, canonical thread ID, and voice-memo attachment ID. Group and location methods
-remain contract-only and reject with `NotImplementedError` before provider I/O.
+accepted message ID, canonical thread ID, and voice-memo attachment ID. Existing-group methods map
+to the official update, participant, and leave operations. Location methods remain contract-only
+and reject with `NotImplementedError` before provider I/O.
 
 Stopping typing works for direct and group chats and acknowledges only that Linq accepted the
 request. Contact-card sharing takes no body, requires a configured active card and prior outbound
@@ -146,6 +154,17 @@ format, reachability, attachment ownership, and content remain provider validati
 not delivery, playback, retention, or recipient-presentation proof. Existing typed message
 lifecycle events can observe later provider outcomes without adapter polling or correlation
 workflows. Raw bytes, `FileUpload`, upload readiness, retries, and cleanup remain outside this API.
+
+Group updates accept only `displayName` and a public HTTPS `iconUrl`; empty updates reject locally.
+Participant handles must be an E.164 phone number or email address. Linq currently supports
+participant management only for iMessage groups, requires at least three remaining members, and
+requires at least four active members including the sending line before leaving. The adapter
+rejects a direct chat only when its existing canonical facts identify it as direct; an opaque owned
+canonical ID goes to Linq without a classification probe. Every successful method resolves `void`
+for request acceptance only, and repeated calls remain repeated provider operations. Later
+`chat.group_*` or `participant.*` webhook observations are separate asynchronous facts; the adapter
+does not claim request-to-event correlation without an explicit provider correlation key.
+
 Location retrieval is typed as a canonical thread plus immutable participant locations with
 longitude-first coordinates, optional altitude, address, locality, and provider timestamp.
 

@@ -34,7 +34,9 @@ The adapter can already handle the core receive/reply path:
   exact official-client calls, repeated acknowledgement semantics, and shared error translation.
 - Send native voice memos through that facade from exactly one public HTTPS URL or existing Linq
   attachment UUID, returning only the provider-established message, thread, and attachment IDs.
-  Group and location methods remain unimplemented; mark-read stays on `Thread`.
+- Update existing group metadata, add/remove one canonical participant handle, and leave through
+  the nested `.group` facade as acknowledgement-only operations. Location remains unimplemented;
+  mark-read stays on `Thread`.
 - Route inbound `reaction.added` / `reaction.removed` webhooks into Chat SDK `onReaction()` handlers (tapbacks map to normalized emoji, custom emoji pass through, stickers are skipped).
 - Encode stable Linq thread IDs (`linq:{chatId}`) so webhook and API paths map to the same thread.
 - Track direct-message vs group-chat identity in-memory from webhooks and chat fetches (legacy `linq:{chatId}:dm/group` IDs still decode).
@@ -172,8 +174,10 @@ The public extensions are deliberately cohesive:
 - Batch `008`: complete. `008C` implements the frozen two-source voice-memo contract with local
   validation, canonical accepted identities, shared provider errors, and lifecycle-event
   coexistence without taking ownership of uploads, retries, delivery, or presentation.
-- Batch `009`: implement the remaining frozen `adapter.conversation(threadOrId)` operations.
-  Existing-group operations stay under `.group`, location under `.location`, and account and
+- Batch `009A`: complete. Existing-group metadata, participant, and leave operations validate
+  adapter-owned inputs and known direct-chat facts before exact SDK calls. Provider acceptance and
+  later webhook observations are asynchronous facts without guaranteed request correlation.
+- Batch `009B`: implement the remaining frozen location operations under `.location`. Account and
   administrative operations stay on `adapter.client`.
 
 Batch `000` is complete: Chat SDK `4.38.1` standard reply/read contracts, Linq SDK `0.42.0`, direct

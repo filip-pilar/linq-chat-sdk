@@ -1,5 +1,6 @@
 import {
   AdapterError,
+  AdapterRateLimitError,
   AuthenticationError,
   NetworkError,
   PermissionError,
@@ -138,6 +139,156 @@ describe("Linq conversation facade", () => {
       operation: "add",
       type: "love",
     });
+  });
+
+  it("updates supported group metadata with exact immutable request fields", async () => {
+    const { adapter, chat, updateChat } = await createHarness();
+    const threadId = adapter.encodeThreadId({ chatId: GROUP_CHAT_ID, isGroup: true });
+    const iconUrl = new URL("https://media.example.com/group.png?version=1");
+    const options = Object.freeze({ displayName: "Team Discussion", iconUrl });
+
+    await expect(adapter.conversation(chat.thread(threadId)).group.update(options)).resolves.toBe(
+      undefined,
+    );
+
+    expect(updateChat).toHaveBeenCalledWith(GROUP_CHAT_ID, {
+      display_name: "Team Discussion",
+      group_chat_icon: iconUrl.href,
+    });
+    expect(options).toEqual({ displayName: "Team Discussion", iconUrl });
+  });
+
+  it("preserves partial updates and repeated acknowledgements as repeated provider calls", async () => {
+    const { adapter, updateChat } = await createHarness();
+    const group = adapter.conversation(THREAD_ID).group;
+
+    await group.update({ displayName: "First" });
+    await group.update({ iconUrl: "https://media.example.com/icon.png" });
+    await group.update({ displayName: "First" });
+
+    expect(updateChat.mock.calls).toEqual([
+      [CHAT_ID, { display_name: "First" }],
+      [CHAT_ID, { group_chat_icon: "https://media.example.com/icon.png" }],
+      [CHAT_ID, { display_name: "First" }],
+    ]);
+  });
+
+  it("adds, removes, and leaves through the exact existing-group SDK operations", async () => {
+    const { adapter, addParticipant, chat, leaveChat, removeParticipant } = await createHarness();
+    const threadId = adapter.encodeThreadId({ chatId: GROUP_CHAT_ID, isGroup: true });
+    const group = adapter.conversation(chat.thread(threadId)).group;
+
+    await group.addParticipant("+15550000001");
+    await group.addParticipant("member@example.com");
+    await group.removeParticipant("+15550000002");
+    await group.removeParticipant("former@example.com");
+    await group.leave();
+    await group.leave();
+
+    expect(addParticipant.mock.calls).toEqual([
+      [GROUP_CHAT_ID, { handle: "+15550000001" }],
+      [GROUP_CHAT_ID, { handle: "member@example.com" }],
+    ]);
+    expect(removeParticipant.mock.calls).toEqual([
+      [GROUP_CHAT_ID, { handle: "+15550000002" }],
+      [GROUP_CHAT_ID, { handle: "former@example.com" }],
+    ]);
+    expect(leaveChat.mock.calls).toEqual([[GROUP_CHAT_ID], [GROUP_CHAT_ID]]);
+  });
+
+  it("coexists with ordinary Chat SDK group posting without changing its transport", async () => {
+    const { adapter, chat, send, updateChat } = await createHarness();
+    const threadId = adapter.encodeThreadId({ chatId: GROUP_CHAT_ID, isGroup: true });
+    const thread = chat.thread(threadId);
+
+    await adapter.conversation(thread).group.update({ displayName: "Group" });
+    await thread.post("ordinary group message");
+
+    expect(updateChat).toHaveBeenCalledWith(GROUP_CHAT_ID, { display_name: "Group" });
+    expect(send).toHaveBeenCalledWith(
+      GROUP_CHAT_ID,
+      expect.objectContaining({
+        message: expect.objectContaining({
+          parts: [{ type: "text", value: "ordinary group message" }],
+        }),
+      }),
+    );
+  });
+
+  it.each([
+    undefined,
+    null,
+    {},
+    { displayName: undefined },
+    { iconUrl: undefined },
+    { displayName: 42 },
+    { iconUrl: 42 },
+    { iconUrl: "" },
+    { iconUrl: " https://media.example.com/icon.png" },
+    { iconUrl: "http://media.example.com/icon.png" },
+    { iconUrl: "not a URL" },
+    { iconUrl: new URL("http://media.example.com/icon.png") },
+    { display_name: "endpoint-shaped" },
+    { displayName: "Group", unsupported: true },
+  ])("rejects invalid group update %j before provider work", async (options) => {
+    const { adapter, providerIO } = await createHarness();
+
+    await expect(
+      (adapter.conversation(THREAD_ID).group.update as (value: unknown) => Promise<void>)(options),
+    ).rejects.toBeInstanceOf(ValidationError);
+    for (const providerCall of providerIO) expect(providerCall).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    undefined,
+    null,
+    "",
+    " +15550000001",
+    "+0123456789",
+    "+1555-000-0001",
+    "+1234567890123456",
+    "not-a-handle",
+    "member@localhost",
+    "member@@example.com",
+    "SMS:+15550000001",
+    42,
+  ])("rejects invalid participant handle %j before provider work", async (handle) => {
+    const { adapter, providerIO } = await createHarness();
+    const group = adapter.conversation(THREAD_ID).group;
+
+    await expect(
+      (group.addParticipant as (value: unknown) => Promise<void>)(handle),
+    ).rejects.toBeInstanceOf(ValidationError);
+    await expect(
+      (group.removeParticipant as (value: unknown) => Promise<void>)(handle),
+    ).rejects.toBeInstanceOf(ValidationError);
+    for (const providerCall of providerIO) expect(providerCall).not.toHaveBeenCalled();
+  });
+
+  it("rejects every group operation locally for a known direct chat", async () => {
+    const { adapter, providerIO } = await createHarness();
+    const directThreadId = adapter.encodeThreadId({ chatId: CHAT_ID, isGroup: false });
+    const group = adapter.conversation(directThreadId).group;
+
+    const operations = [
+      group.update({ displayName: "Not a group" }),
+      group.addParticipant("+15550000001"),
+      group.removeParticipant("+15550000001"),
+      group.leave(),
+    ];
+    for (const operation of operations) {
+      await expect(operation).rejects.toBeInstanceOf(ValidationError);
+    }
+    for (const providerCall of providerIO) expect(providerCall).not.toHaveBeenCalled();
+  });
+
+  it("does not probe classification for an opaque owned canonical string ID", async () => {
+    const { adapter, retrieveChat, updateChat } = await createHarness();
+
+    await adapter.conversation(THREAD_ID).group.update({ displayName: "Opaque group" });
+
+    expect(updateChat).toHaveBeenCalledWith(CHAT_ID, { display_name: "Opaque group" });
+    expect(retrieveChat).not.toHaveBeenCalled();
   });
 
   it("sends a voice memo from a public HTTPS URL and returns frozen canonical identity", async () => {
@@ -309,14 +460,7 @@ describe("Linq conversation facade", () => {
     expect(Object.isFrozen(conversation.group)).toBe(true);
     expect(Object.isFrozen(conversation.location)).toBe(true);
 
-    const operations = [
-      conversation.group.update({ displayName: "Example" }),
-      conversation.group.addParticipant("+15550000001"),
-      conversation.group.removeParticipant("+15550000001"),
-      conversation.group.leave(),
-      conversation.location.request(),
-      conversation.location.retrieve(),
-    ];
+    const operations = [conversation.location.request(), conversation.location.retrieve()];
 
     for (const operation of operations) {
       await expect(operation).rejects.toBeInstanceOf(NotImplementedError);
@@ -362,6 +506,39 @@ describe("Linq conversation facade", () => {
     },
   );
 
+  it.each(["updateChat", "addParticipant", "removeParticipant", "leaveChat"] as const)(
+    "translates %s group provider failures",
+    async (operation) => {
+      for (const [status, ErrorType] of [
+        [400, ValidationError],
+        [401, AuthenticationError],
+        [403, PermissionError],
+        [404, ResourceNotFoundError],
+        [409, AdapterError],
+        [429, AdapterRateLimitError],
+        [500, AdapterError],
+        [undefined, NetworkError],
+      ] as const) {
+        const harness = await createHarness();
+        const providerCall = harness[operation];
+        providerCall.mockRejectedValueOnce(
+          Object.assign(new Error("provider failure"), status === undefined ? {} : { status }),
+        );
+        const group = harness.adapter.conversation(THREAD_ID).group;
+        const request =
+          operation === "updateChat"
+            ? group.update({ displayName: "Group" })
+            : operation === "addParticipant"
+              ? group.addParticipant("+15550000001")
+              : operation === "removeParticipant"
+                ? group.removeParticipant("+15550000001")
+                : group.leave();
+
+        await expect(request).rejects.toBeInstanceOf(ErrorType);
+      }
+    },
+  );
+
   it.each([
     [400, ValidationError],
     [401, AuthenticationError],
@@ -400,6 +577,11 @@ async function createHarness(): Promise<{
   sendVoicememo: ReturnType<typeof vi.fn>;
   startTyping: ReturnType<typeof vi.fn>;
   stopTyping: ReturnType<typeof vi.fn>;
+  updateChat: ReturnType<typeof vi.fn>;
+  addParticipant: ReturnType<typeof vi.fn>;
+  removeParticipant: ReturnType<typeof vi.fn>;
+  leaveChat: ReturnType<typeof vi.fn>;
+  retrieveChat: ReturnType<typeof vi.fn>;
 }> {
   const adapter = createLinqAdapter({ apiKey: "test-key", signingSecret: "test-secret" });
   const send = vi.fn().mockResolvedValue({
@@ -462,6 +644,7 @@ async function createHarness(): Promise<{
   const retrieveLocation = vi.fn();
   const startTyping = vi.fn();
   const markAsRead = vi.fn();
+  const retrieveChat = vi.fn();
   const providerIO = [
     stopTyping,
     shareContactCard,
@@ -474,6 +657,7 @@ async function createHarness(): Promise<{
     retrieveLocation,
     startTyping,
     markAsRead,
+    retrieveChat,
   ];
 
   Object.assign(adapter.client, {
@@ -487,6 +671,7 @@ async function createHarness(): Promise<{
       typing: { start: startTyping, stop: stopTyping },
       update: updateChat,
       markAsRead,
+      retrieve: retrieveChat,
     },
     messages: { addReaction, update },
   });
@@ -508,14 +693,19 @@ async function createHarness(): Promise<{
   return {
     adapter,
     addReaction,
+    addParticipant,
     chat,
     markAsRead,
+    leaveChat,
     providerIO,
+    removeParticipant,
+    retrieveChat,
     send,
     sendVoicememo,
     shareContactCard,
     startTyping,
     stopTyping,
+    updateChat,
     update,
   };
 }

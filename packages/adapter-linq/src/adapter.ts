@@ -193,19 +193,62 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   conversation(threadOrId: Thread | string): LinqConversation {
     const thread = this.resolveConversationThread(threadOrId);
     const threadId = thread.id;
-    const { chatId } = this.decodeThreadId(threadId);
+    const { chatId, isGroup } = this.decodeThreadId(threadId);
     const group: LinqGroupConversation = Object.freeze({
-      update: async (_options: LinqGroupUpdateOptions): Promise<void> => {
-        throw new NotImplementedError("Linq group updates are not implemented");
+      update: async (options: LinqGroupUpdateOptions): Promise<void> => {
+        const request = normalizeGroupUpdate(options);
+        validateKnownGroup(isGroup);
+
+        try {
+          await this.apiClient.chats.update(chatId, request);
+        } catch (error) {
+          throw translateLinqError(error, {
+            action: "update group chat",
+            resourceId: chatId,
+            resourceType: "chat",
+          });
+        }
       },
-      addParticipant: async (_handle: string): Promise<void> => {
-        throw new NotImplementedError("Adding Linq group participants is not implemented");
+      addParticipant: async (handle: string): Promise<void> => {
+        validateParticipantHandle(handle);
+        validateKnownGroup(isGroup);
+
+        try {
+          await this.apiClient.chats.participants.add(chatId, { handle });
+        } catch (error) {
+          throw translateLinqError(error, {
+            action: "add group chat participant",
+            resourceId: chatId,
+            resourceType: "chat",
+          });
+        }
       },
-      removeParticipant: async (_handle: string): Promise<void> => {
-        throw new NotImplementedError("Removing Linq group participants is not implemented");
+      removeParticipant: async (handle: string): Promise<void> => {
+        validateParticipantHandle(handle);
+        validateKnownGroup(isGroup);
+
+        try {
+          await this.apiClient.chats.participants.remove(chatId, { handle });
+        } catch (error) {
+          throw translateLinqError(error, {
+            action: "remove group chat participant",
+            resourceId: chatId,
+            resourceType: "chat",
+          });
+        }
       },
       leave: async (): Promise<void> => {
-        throw new NotImplementedError("Leaving Linq groups is not implemented");
+        validateKnownGroup(isGroup);
+
+        try {
+          await this.apiClient.chats.leaveChat(chatId);
+        } catch (error) {
+          throw translateLinqError(error, {
+            action: "leave group chat",
+            resourceId: chatId,
+            resourceType: "chat",
+          });
+        }
       },
     });
     const location: LinqLocationConversation = Object.freeze({
@@ -1062,6 +1105,87 @@ function normalizeVoiceMemoSource(source: unknown): LinqVoiceMemoRequest {
   }
 
   return { attachment_id: attachmentId };
+}
+
+type LinqGroupUpdateRequest = {
+  display_name?: string;
+  group_chat_icon?: string;
+};
+
+function normalizeGroupUpdate(options: unknown): LinqGroupUpdateRequest {
+  if (!isRecord(options)) {
+    throw validationError("Linq group updates require an options object.");
+  }
+
+  const supportedKeys = new Set(["displayName", "iconUrl"]);
+  if (Object.keys(options).some((key) => !supportedKeys.has(key))) {
+    throw validationError("Linq group updates support only displayName and iconUrl.");
+  }
+
+  const request: LinqGroupUpdateRequest = {};
+  if (options.displayName !== undefined) {
+    if (typeof options.displayName !== "string") {
+      throw validationError("Linq group display names must be strings.");
+    }
+    request.display_name = options.displayName;
+  }
+
+  if (options.iconUrl !== undefined) {
+    request.group_chat_icon = normalizePublicHTTPSURL(
+      options.iconUrl,
+      "Linq group icons must be valid public HTTPS URLs.",
+    );
+  }
+
+  if (request.display_name === undefined && request.group_chat_icon === undefined) {
+    throw validationError("Linq group updates require a displayName or iconUrl.");
+  }
+
+  return request;
+}
+
+function validateParticipantHandle(handle: unknown): asserts handle is string {
+  if (typeof handle !== "string" || handle.trim() !== handle) {
+    throw validationError(
+      "Linq participant handles must be E.164 phone numbers or email addresses.",
+    );
+  }
+
+  const isE164 = /^\+[1-9]\d{1,14}$/.test(handle);
+  const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(handle);
+  if (!isE164 && !isEmail) {
+    throw validationError(
+      "Linq participant handles must be E.164 phone numbers or email addresses.",
+    );
+  }
+}
+
+function validateKnownGroup(isGroup: boolean | undefined): void {
+  if (isGroup === false) {
+    throw validationError("Linq group operations require a group chat.");
+  }
+}
+
+function normalizePublicHTTPSURL(value: unknown, message: string): string {
+  if (typeof value !== "string" && !(value instanceof URL)) {
+    throw validationError(message);
+  }
+
+  const url = typeof value === "string" ? value : value.href;
+  if (url.length === 0 || (typeof value === "string" && value.trim() !== value)) {
+    throw validationError(message);
+  }
+
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === "https:" && parsed.hostname.length > 0) {
+      return url;
+    }
+  } catch {
+    // Fall through to the stable adapter validation error.
+  }
+
+  throw validationError(message);
 }
 
 function validationError(message: string): ValidationError {
