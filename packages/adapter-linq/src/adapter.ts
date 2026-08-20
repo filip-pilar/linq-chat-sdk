@@ -145,6 +145,7 @@ export interface LinqConversation {
 
 type ChatWithThreads = ChatInstance & { thread(threadId: string): Thread };
 
+const MAX_CONSECUTIVE_FILTERED_HISTORY_PAGES = 10;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
@@ -442,6 +443,7 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
     let cursor = options?.cursor;
     const visitedCursors = new Set<string>();
+    let filteredPageCount = 0;
 
     for (;;) {
       let page: Awaited<ReturnType<LinqAPIV3["chats"]["messages"]["list"]>>;
@@ -479,6 +481,14 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       if (nextCursor === cursor || visitedCursors.has(nextCursor)) {
         this.logger.warn("Stopping Linq history pagination after a repeated cursor", {
           cursor: nextCursor,
+        });
+        return { messages: [], nextCursor: undefined };
+      }
+
+      filteredPageCount += 1;
+      if (filteredPageCount >= MAX_CONSECUTIVE_FILTERED_HISTORY_PAGES) {
+        this.logger.warn("Stopping Linq history pagination after too many filtered pages", {
+          count: filteredPageCount,
         });
         return { messages: [], nextCursor: undefined };
       }

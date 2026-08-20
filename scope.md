@@ -202,10 +202,10 @@ The public extensions are deliberately cohesive:
   required for part-index replies/reactions, retaining canonical Chat SDK identity and standard
   whole-message APIs. `007C` preserves typed/raw reply, effect, service, decoration, per-part
   reaction, reconciliation, and sticker facts; isolates malformed/null parts and rows; freezes
-  default backward history; skips all-malformed provider pages so Chat SDK iteration reaches later
-  usable history; stops repeated cursors safely; and verifies static-card and buffered-stream
-  compilation. Forward history remains explicitly unsupported. Linq's current edit operation
-  remains text-only.
+  default backward history; skips up to ten consecutive all-malformed provider pages so Chat SDK
+  iteration can reach later usable history; stops repeated cursors safely; and verifies static-card
+  and buffered-stream compilation. Forward history remains explicitly unsupported. Linq's current
+  edit operation remains text-only.
 - Batch `008`: complete. `008C` implements the frozen two-source voice-memo contract with local
   validation, canonical accepted identities, shared provider errors, and lifecycle-event
   coexistence without taking ownership of uploads, retries, delivery, or presentation.

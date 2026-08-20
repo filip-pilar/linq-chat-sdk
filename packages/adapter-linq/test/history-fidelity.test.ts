@@ -130,6 +130,26 @@ describe("Linq history fidelity", () => {
       cursor: "cursor-cycle",
     });
   });
+
+  it("bounds consecutive filtered pages even when every cursor is unique", async () => {
+    const adapter = createLinqAdapter({ apiKey: "test-key", signingSecret: "test-secret" });
+    const list = vi.fn().mockImplementation(async () => ({
+      messages: [{ id: null }],
+      next_cursor: `cursor-${list.mock.calls.length}`,
+    }));
+    const warn = vi.fn();
+    Object.assign(adapter.client, { chats: { messages: { list } } });
+    (adapter as unknown as { logger: { warn: typeof warn } }).logger = { warn };
+
+    const result = await adapter.fetchMessages(THREAD_ID);
+
+    expect(result).toEqual({ messages: [], nextCursor: undefined });
+    expect(list).toHaveBeenCalledTimes(10);
+    expect(warn).toHaveBeenCalledWith(
+      "Stopping Linq history pagination after too many filtered pages",
+      { count: 10 },
+    );
+  });
 });
 
 function createHistoryAdapter(page: unknown) {
