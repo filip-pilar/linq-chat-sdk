@@ -30,7 +30,12 @@ export interface LinqWebhookEvent<TData = unknown> {
   readonly data: TData;
 }
 
-export type LinqMessageReceivedWebhookEvent = LinqWebhookEvent<LinqAPIV3.MessageEventV2> & {
+export type LinqMessageReceivedWebhookData = Omit<LinqAPIV3.MessageEventV2, "parts"> & {
+  /** Canonical events use an array; null is retained defensively for provider tombstones. */
+  parts: LinqAPIV3.MessageEventV2["parts"] | null;
+};
+
+export type LinqMessageReceivedWebhookEvent = LinqWebhookEvent<LinqMessageReceivedWebhookData> & {
   readonly event_type: "message.received";
 };
 
@@ -44,6 +49,7 @@ export interface LinqReactionWebhookData {
   readonly reacted_at?: string | null;
   readonly service?: LinqAPIV3.ServiceType | null;
   readonly from_handle?: LinqAPIV3.ChatHandle | null;
+  readonly sticker?: LinqAPIV3.Reaction["sticker"];
   /** Deprecated legacy sender handle retained for old webhook versions. */
   readonly from?: string;
 }
@@ -149,6 +155,43 @@ export interface LinqReplyContextObservation {
   readonly partIndex: number | null;
 }
 
+export interface LinqMessageEffectObservation {
+  readonly name: string | null;
+  readonly type: "screen" | "bubble" | null;
+}
+
+export interface LinqTextDecorationObservation {
+  readonly range: readonly number[];
+  readonly style: string | null;
+  readonly animation: string | null;
+}
+
+export interface LinqStickerObservation {
+  readonly filename: string | null;
+  readonly mimeType: string | null;
+  readonly url: string | null;
+  readonly width: number | null;
+  readonly height: number | null;
+}
+
+export interface LinqPartReactionObservation {
+  readonly type: string;
+  readonly customEmoji: string | null;
+  readonly isMe: boolean | null;
+  readonly senderHandle: LinqChatHandleObservation | null;
+  readonly sticker: LinqStickerObservation | null;
+}
+
+/** Defensive typed view of one part; `raw` remains the complete authenticated value. */
+export interface LinqMessagePartObservation {
+  readonly index: number;
+  readonly type: string | null;
+  readonly value: string | null;
+  readonly textDecorations: readonly LinqTextDecorationObservation[];
+  readonly reactions: readonly LinqPartReactionObservation[];
+  readonly raw: LinqWebhookRawValue;
+}
+
 export interface LinqAttachmentObservation {
   readonly id: string;
   readonly filename: string;
@@ -165,12 +208,17 @@ export interface LinqMessageObservation {
   readonly conversationKind: LinqConversationKind;
   readonly direction: "inbound" | "outbound";
   readonly service: LinqAPIV3.ServiceType;
+  readonly preferredService: LinqServicePreference | null;
+  readonly effect: LinqMessageEffectObservation | null;
   readonly receivingEndpoint: LinqEndpointObservation | null;
   readonly remoteEndpoint: LinqEndpointObservation | null;
   readonly ownerHandle: LinqChatHandleObservation | null;
   readonly senderHandle: LinqChatHandleObservation;
   readonly timestamps: LinqMessageLifecycleObservation;
-  readonly parts: readonly Readonly<Record<string, unknown>>[];
+  /** Canonical raw provider parts retained for backward-compatible direct inspection. */
+  readonly parts: readonly LinqWebhookRawEvent[];
+  /** Defensive typed view, including null and malformed part positions. */
+  readonly partObservations: readonly LinqMessagePartObservation[];
   readonly attachments: readonly LinqAttachmentObservation[];
   readonly replyContext: LinqReplyContextObservation | null;
 }
@@ -186,6 +234,7 @@ export interface LinqReactionObservation {
   readonly isFromMe: boolean;
   readonly senderHandle: LinqChatHandleObservation | null;
   readonly remoteEndpoint: LinqEndpointObservation | null;
+  readonly sticker: LinqStickerObservation | null;
 }
 
 interface LinqVerifiedWebhookBase {
@@ -448,6 +497,8 @@ function parseMessageObservation(value: unknown): LinqMessageObservation | null 
   const chat = value.chat;
   const ownerHandle = valueOrNull(chat.owner_handle);
   const replyTo = valueOrNull(value.reply_to);
+  const effect = valueOrNull(value.effect);
+  const rawParts = value.parts;
 
   if (
     !isNonEmptyString(value.id) ||
@@ -461,7 +512,9 @@ function parseMessageObservation(value: unknown): LinqMessageObservation | null 
     !isNullableTimestamp(value.delivered_at) ||
     !isNullableTimestamp(value.read_at) ||
     !isOptionalTimestamp(value.reconciled_at) ||
-    !isMessageParts(value.parts) ||
+    !isNullableServicePreference(value.preferred_service) ||
+    (effect !== null && !isRecord(effect)) ||
+    (rawParts !== null && rawParts !== undefined && !Array.isArray(rawParts)) ||
     (replyTo !== null && !isReplyContext(replyTo))
   ) {
     return null;
@@ -469,8 +522,15 @@ function parseMessageObservation(value: unknown): LinqMessageObservation | null 
 
   const parsedOwner = ownerHandle === null ? null : chatHandleObservation(ownerHandle);
   const parsedSender = chatHandleObservation(value.sender_handle);
-  const attachments = value.parts.flatMap((part): LinqAttachmentObservation[] => {
-    if (part.type !== "media") {
+  const partValues = Array.isArray(rawParts) ? rawParts : [];
+  const partObservations = Object.freeze(
+    partValues.map((part, index) => messagePartObservation(part as LinqWebhookRawValue, index)),
+  );
+  const parts = Object.freeze(
+    partValues.filter(isRecord).map((part) => part as LinqWebhookRawEvent),
+  );
+  const attachments = partValues.flatMap((part): LinqAttachmentObservation[] => {
+    if (!isRecord(part) || part.type !== "media" || !isValidMediaPart(part)) {
       return [];
     }
 
@@ -494,6 +554,14 @@ function parseMessageObservation(value: unknown): LinqMessageObservation | null 
       chat.is_group === true ? "group" : chat.is_group === false ? "direct" : "unknown",
     direction: value.direction,
     service: value.service,
+    preferredService: isServicePreference(value.preferred_service) ? value.preferred_service : null,
+    effect:
+      effect === null
+        ? null
+        : Object.freeze({
+            name: typeof effect.name === "string" ? effect.name : null,
+            type: effect.type === "screen" || effect.type === "bubble" ? effect.type : null,
+          }),
     receivingEndpoint: parsedOwner?.endpoint ?? null,
     remoteEndpoint: value.direction === "inbound" ? parsedSender.endpoint : null,
     ownerHandle: parsedOwner,
@@ -504,7 +572,8 @@ function parseMessageObservation(value: unknown): LinqMessageObservation | null 
       readAt: nullableTimestamp(value.read_at),
       reconciledAt: nullableTimestamp(value.reconciled_at),
     }),
-    parts: value.parts,
+    parts,
+    partObservations,
     attachments: Object.freeze(attachments),
     replyContext:
       replyTo === null
@@ -513,6 +582,71 @@ function parseMessageObservation(value: unknown): LinqMessageObservation | null 
             messageId: isNonEmptyString(replyTo.message_id) ? replyTo.message_id : null,
             partIndex: Number.isInteger(replyTo.part_index) ? (replyTo.part_index as number) : null,
           }),
+  });
+}
+
+function messagePartObservation(
+  raw: LinqWebhookRawValue,
+  index: number,
+): LinqMessagePartObservation {
+  if (!isRecord(raw)) {
+    return Object.freeze({
+      index,
+      type: null,
+      value: null,
+      textDecorations: Object.freeze([]),
+      reactions: Object.freeze([]),
+      raw,
+    });
+  }
+
+  const decorations = Array.isArray(raw.text_decorations)
+    ? raw.text_decorations.flatMap((decoration): LinqTextDecorationObservation[] => {
+        if (!isRecord(decoration)) return [];
+
+        return [
+          Object.freeze({
+            range: Object.freeze(
+              Array.isArray(decoration.range)
+                ? decoration.range.filter(
+                    (endpoint): endpoint is number => typeof endpoint === "number",
+                  )
+                : [],
+            ),
+            style: typeof decoration.style === "string" ? decoration.style : null,
+            animation: typeof decoration.animation === "string" ? decoration.animation : null,
+          }),
+        ];
+      })
+    : [];
+  const reactions = Array.isArray(raw.reactions)
+    ? raw.reactions.flatMap((reaction): LinqPartReactionObservation[] => {
+        if (!isRecord(reaction) || typeof reaction.type !== "string") return [];
+
+        const handle = isChatHandle(reaction.handle)
+          ? chatHandleObservation(reaction.handle)
+          : null;
+        const sticker = stickerObservation(reaction.sticker);
+
+        return [
+          Object.freeze({
+            type: reaction.type,
+            customEmoji: typeof reaction.custom_emoji === "string" ? reaction.custom_emoji : null,
+            isMe: typeof reaction.is_me === "boolean" ? reaction.is_me : null,
+            senderHandle: handle,
+            sticker,
+          }),
+        ];
+      })
+    : [];
+
+  return Object.freeze({
+    index,
+    type: typeof raw.type === "string" ? raw.type : null,
+    value: typeof raw.value === "string" ? raw.value : null,
+    textDecorations: Object.freeze(decorations),
+    reactions: Object.freeze(reactions),
+    raw: raw as LinqWebhookRawEvent,
   });
 }
 
@@ -620,38 +754,16 @@ function parseMessageFailedEventData(value: unknown): LinqMessageFailedEventData
   });
 }
 
-function isMessageParts(value: unknown): value is Record<string, unknown>[] {
-  if (!Array.isArray(value)) {
-    return false;
-  }
-
-  return value.every((part) => {
-    if (!isRecord(part) || !isNonEmptyString(part.type)) {
-      return false;
-    }
-
-    if (part.type === "text" || part.type === "link") {
-      return typeof part.value === "string";
-    }
-
-    if (part.type === "media") {
-      return (
-        isNonEmptyString(part.id) &&
-        isNonEmptyString(part.filename) &&
-        isNonEmptyString(part.mime_type) &&
-        typeof part.size_bytes === "number" &&
-        Number.isFinite(part.size_bytes) &&
-        part.size_bytes >= 0 &&
-        isNonEmptyString(part.url)
-      );
-    }
-
-    if (part.type === "imessage_app") {
-      return isNonEmptyString(part.url) && isRecord(part.app) && isRecord(part.layout);
-    }
-
-    return true;
-  });
+function isValidMediaPart(part: Record<string, unknown>): boolean {
+  return (
+    isNonEmptyString(part.id) &&
+    isNonEmptyString(part.filename) &&
+    isNonEmptyString(part.mime_type) &&
+    typeof part.size_bytes === "number" &&
+    Number.isFinite(part.size_bytes) &&
+    part.size_bytes >= 0 &&
+    isNonEmptyString(part.url)
+  );
 }
 
 function isChatHandle(value: unknown): value is Record<string, unknown> & {
@@ -767,6 +879,19 @@ function parseReactionObservation(value: unknown): LinqReactionObservation | nul
     isFromMe: value.is_from_me,
     senderHandle: parsedSender,
     remoteEndpoint: value.is_from_me ? null : (parsedSender?.endpoint ?? deprecatedFrom),
+    sticker: stickerObservation(value.sticker),
+  });
+}
+
+function stickerObservation(value: unknown): LinqStickerObservation | null {
+  if (!isRecord(value)) return null;
+
+  return Object.freeze({
+    filename: typeof value.file_name === "string" ? value.file_name : null,
+    mimeType: typeof value.mime_type === "string" ? value.mime_type : null,
+    url: typeof value.url === "string" ? value.url : null,
+    width: optionalFiniteNumber(value.width),
+    height: optionalFiniteNumber(value.height),
   });
 }
 

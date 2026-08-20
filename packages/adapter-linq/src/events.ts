@@ -1,10 +1,9 @@
-import type { LinqAPIV3 } from "@linqapp/sdk";
-
 import { LINQ_KNOWN_EVENT_TYPES, type LinqKnownEventType } from "./linq-event-types.generated.js";
 import type {
   LinqMessageEditedEventData,
   LinqMessageFailedEventData,
   LinqMessageLifecycleEventData,
+  LinqMessageReceivedWebhookData,
   LinqReactionWebhookData,
   LinqWebhookEnvelopeObservation,
   LinqWebhookRawEvent,
@@ -26,7 +25,7 @@ type LinqReactionEventType = "reaction.added" | "reaction.removed";
 type LinqMessageLifecycleEventType = "message.sent" | "message.delivered" | "message.read";
 
 type LinqEventData<TType extends LinqKnownEventType> = TType extends "message.received"
-  ? LinqAPIV3.MessageEventV2
+  ? LinqMessageReceivedWebhookData
   : TType extends LinqMessageLifecycleEventType
     ? LinqMessageLifecycleEventData
     : TType extends "message.failed"

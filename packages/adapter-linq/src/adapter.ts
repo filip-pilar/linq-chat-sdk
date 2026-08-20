@@ -254,20 +254,27 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     options?: FetchOptions,
   ): Promise<FetchResult<LinqRawMessage>> {
     const { chatId } = this.decodeThreadId(threadId);
+
+    if (options?.direction === "forward") {
+      throw new NotImplementedError("Linq message history does not support forward pagination");
+    }
+
     const page = await this.apiClient.chats.messages.list(chatId, {
       cursor: options?.cursor,
       limit: options?.limit,
     });
+    const messages: Message<LinqRawMessage>[] = [];
+
+    for (const raw of Array.isArray(page.messages) ? page.messages : []) {
+      try {
+        messages.push(this.parseMessage(raw));
+      } catch (error) {
+        this.logger.warn("Skipping malformed Linq history row", { error });
+      }
+    }
 
     return {
-      messages: page.messages
-        .map((message) => this.parseMessage(message))
-        .sort(function compareMessages(
-          left: Message<LinqRawMessage>,
-          right: Message<LinqRawMessage>,
-        ): number {
-          return left.metadata.dateSent.getTime() - right.metadata.dateSent.getTime();
-        }),
+      messages,
       nextCursor: page.next_cursor || undefined,
     };
   }
@@ -844,7 +851,7 @@ function isCompatibilityMessageReceivedEvent(
   return (
     (data.direction === "inbound" || data.direction === "outbound") &&
     typeof data.id === "string" &&
-    Array.isArray(data.parts) &&
+    (Array.isArray(data.parts) || data.parts === null) &&
     isRecord(data.chat) &&
     typeof data.chat.id === "string" &&
     isRecord(data.sender_handle)

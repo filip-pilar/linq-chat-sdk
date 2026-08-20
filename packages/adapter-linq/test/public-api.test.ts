@@ -13,7 +13,11 @@ import type {
   LinqMessageFailedEventData,
   LinqMessageLifecycleEventData,
   LinqMessageEditedEventData,
+  LinqMessageObservation,
   LinqMessageOptions,
+  LinqMessageReceivedWebhookData,
+  LinqRawMessage,
+  LinqReactionObservation,
   LinqPostableMessage,
   LinqVerifiedUnhandledWebhook,
   LinqVerifiedWebhook,
@@ -84,7 +88,8 @@ void assertAutoVerificationModeDoesNotCompile;
 function assertTypedEventRegistration(adapter: LinqAdapter): void {
   const unsubscribeMessage = adapter.onLinqEvent("message.received", (event) => {
     expectTypeOf(event.type).toEqualTypeOf<"message.received">();
-    expectTypeOf(event.data).toEqualTypeOf<LinqAPIV3.MessageEventV2>();
+    expectTypeOf(event.data).toEqualTypeOf<LinqMessageReceivedWebhookData>();
+    expectTypeOf(event.data.parts).toEqualTypeOf<LinqAPIV3.MessageEventV2["parts"] | null>();
     expectTypeOf(event.rawEvent).not.toBeAny();
     expectTypeOf(event.data.reconciled_at).toEqualTypeOf<string | undefined>();
   });
@@ -128,6 +133,22 @@ function assertTypedEventRegistration(adapter: LinqAdapter): void {
 }
 
 void assertTypedEventRegistration;
+
+function assertFidelityObservations(
+  message: LinqMessageObservation,
+  reaction: LinqReactionObservation,
+  raw: LinqRawMessage,
+): void {
+  expectTypeOf(message.effect?.type).toEqualTypeOf<"screen" | "bubble" | null | undefined>();
+  expectTypeOf(message.partObservations[0]?.raw).not.toBeAny();
+  expectTypeOf(message.partObservations[0]?.reactions[0]?.sticker?.url).toEqualTypeOf<
+    string | null | undefined
+  >();
+  expectTypeOf(reaction.sticker?.mimeType).toEqualTypeOf<string | null | undefined>();
+  expectTypeOf(raw).not.toBeAny();
+}
+
+void assertFidelityObservations;
 
 function assertLinqMessageErgonomics(
   thread: Thread,

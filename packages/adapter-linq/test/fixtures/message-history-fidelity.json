@@ -1,0 +1,79 @@
+{
+  "messages": [
+    {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "chat_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "created_at": "2026-08-01T10:00:00.000Z",
+      "updated_at": "2026-08-01T10:00:00.000Z",
+      "delivery_status": "received",
+      "is_delivered": true,
+      "is_from_me": false,
+      "is_read": false,
+      "sent_at": "2026-08-01T10:00:00.000Z",
+      "service": "iMessage",
+      "preferred_service": "iMessage",
+      "reconciled_at": "2026-08-01T10:05:00.000Z",
+      "reply_to": {
+        "message_id": "99999999-9999-4999-8999-999999999999",
+        "part_index": 0
+      },
+      "effect": { "type": "screen", "name": "confetti" },
+      "parts": [
+        {
+          "type": "text",
+          "value": "first",
+          "text_decorations": [{ "range": [0, 5], "style": "bold" }],
+          "reactions": [
+            {
+              "type": "sticker",
+              "is_me": false,
+              "handle": {
+                "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                "handle": "+15550002000",
+                "joined_at": "2026-07-01T00:00:00.000Z",
+                "service": "iMessage",
+                "is_me": false
+              },
+              "sticker": {
+                "file_name": "cat.heic",
+                "mime_type": "image/heic",
+                "url": "https://cdn.linqapp.com/sticker/cat",
+                "width": 120,
+                "height": 100
+              }
+            }
+          ]
+        },
+        null,
+        { "unexpected": true },
+        { "type": "future_part", "payload": { "kept": true } },
+        { "type": "text", "value": 42 },
+        { "type": "media", "id": "broken-media" }
+      ]
+    },
+    {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "chat_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "created_at": "2026-08-01T10:01:00.000Z",
+      "updated_at": "2026-08-01T10:01:00.000Z",
+      "delivery_status": "received",
+      "is_delivered": true,
+      "is_from_me": false,
+      "is_read": false,
+      "parts": null
+    },
+    { "id": null, "parts": [{ "type": "text", "value": "bad row" }] },
+    {
+      "id": "33333333-3333-4333-8333-333333333333",
+      "chat_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "created_at": "2026-08-01T10:02:00.000Z",
+      "updated_at": "2026-08-01T10:02:00.000Z",
+      "delivery_status": "received",
+      "is_delivered": true,
+      "is_from_me": false,
+      "is_read": false,
+      "parts": [{ "type": "text", "value": "last", "reactions": null }]
+    }
+  ],
+  "next_cursor": "cursor-older"
+}

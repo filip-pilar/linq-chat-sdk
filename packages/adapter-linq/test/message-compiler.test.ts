@@ -209,6 +209,26 @@ describe("Linq decoration transport", () => {
     expect(update).toHaveBeenCalledWith("message-1", { text: "Edited text", part_index: 0 });
   });
 
+  it("buffers a stream once and sends its final Markdown through the same compiler", async () => {
+    const { adapter, send } = createAdapterHarness();
+
+    await adapter.stream("linq:chat-123", formattedStream());
+
+    expect(send).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledWith("chat-123", {
+      message: {
+        idempotency_key: expect.any(String),
+        parts: [
+          {
+            type: "text",
+            value: "Hello world",
+            text_decorations: [{ range: [0, 5], style: "bold" }],
+          },
+        ],
+      },
+    });
+  });
+
   it("rejects invalid ranges before provider send or attachment preparation", async () => {
     const { adapter, createAttachment, send } = createAdapterHarness();
     const invalid = {
@@ -256,4 +276,10 @@ function createAdapterHarness() {
   });
 
   return { adapter, createAttachment, send, update };
+}
+
+async function* formattedStream() {
+  yield { type: "markdown_text", text: "**Hello" } as const;
+  yield { type: "markdown_text", text: "** world" } as const;
+  yield { type: "task_update", id: "ignored", status: "complete", title: "Ignored" } as const;
 }

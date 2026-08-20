@@ -153,8 +153,10 @@ The public extensions are deliberately cohesive:
   selection and message-level effects, rejecting contradictory explicit RCS/SMS intent before side
   effects. `007B` maps validated standalone rich links and adds only the conversation-facade methods
   required for part-index replies/reactions, retaining canonical Chat SDK identity and standard
-  whole-message APIs. Linq's current edit operation remains text-only. `007C` retains inbound,
-  history, card, and buffered-stream fidelity work.
+  whole-message APIs. `007C` preserves typed/raw reply, effect, service, decoration, per-part
+  reaction, reconciliation, and sticker facts; isolates malformed/null parts and rows; freezes
+  default backward history; and verifies static-card and buffered-stream compilation. Forward
+  history remains explicitly unsupported. Linq's current edit operation remains text-only.
 - Batches `008`/`009`: `adapter.conversation(threadOrId)` with common operations directly on the
   facade, existing-group operations under `.group`, and location under `.location`.
 

@@ -306,6 +306,25 @@ describe("LinqAdapter.parseMessage", () => {
     expect(message.links).toEqual([]);
   });
 
+  it("keeps inbound Markdown markers literal instead of inventing formatting", () => {
+    const adapter = createTestAdapter();
+    const payload = createMessageReceivedPayload();
+    payload.data.parts = [{ type: "text", value: "**literal**", text_decorations: null }];
+
+    const message = adapter.parseMessage(payload.data);
+
+    expect(message.text).toBe("**literal**");
+    expect(message.formatted).toEqual({
+      type: "root",
+      children: [
+        {
+          type: "paragraph",
+          children: [{ type: "text", value: "**literal**" }],
+        },
+      ],
+    });
+  });
+
   it("normalizes URLs in text as links", () => {
     const adapter = createTestAdapter();
     vi.spyOn(adapter, "encodeThreadId").mockReturnValue("linq:chat-123");

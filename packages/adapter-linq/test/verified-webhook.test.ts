@@ -389,6 +389,104 @@ describe("LinqAdapter verified webhook ingress", () => {
     ]);
   });
 
+  it("preserves typed effect, service, decoration, reaction, sticker, and raw part facts", async () => {
+    const payload = cloneFixture();
+    payload.data.preferred_service = "iMessage";
+    payload.data.effect = { type: "bubble", name: "slam" };
+    payload.data.parts = [
+      {
+        type: "text",
+        value: "styled",
+        text_decorations: [
+          { range: [0, 6], style: "bold" },
+          { range: [1, 3], animation: "shake" },
+        ],
+        reactions: [
+          {
+            type: "sticker",
+            is_me: false,
+            handle: fixture.data.sender_handle,
+            sticker: {
+              file_name: "cat.heic",
+              mime_type: "image/heic",
+              url: "https://cdn.linqapp.com/sticker/cat",
+              width: 120,
+              height: 100,
+            },
+          },
+        ],
+      },
+      null,
+      { unexpected: true },
+      { type: "future_part", payload: { retained: true } },
+    ];
+
+    const result = await createTestAdapter().verifyWebhook(createStandardRequest(payload));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok || result.webhook.kind !== "message.received") {
+      throw new Error("Expected a verified message webhook");
+    }
+    expect(result.webhook.message).toMatchObject({
+      preferredService: "iMessage",
+      effect: { type: "bubble", name: "slam" },
+      partObservations: [
+        {
+          index: 0,
+          type: "text",
+          value: "styled",
+          textDecorations: [
+            { range: [0, 6], style: "bold", animation: null },
+            { range: [1, 3], style: null, animation: "shake" },
+          ],
+          reactions: [
+            {
+              type: "sticker",
+              isMe: false,
+              sticker: {
+                filename: "cat.heic",
+                mimeType: "image/heic",
+                url: "https://cdn.linqapp.com/sticker/cat",
+                width: 120,
+                height: 100,
+              },
+            },
+          ],
+        },
+        { index: 1, type: null, raw: null },
+        { index: 2, type: null, raw: { unexpected: true } },
+        { index: 3, type: "future_part", raw: { type: "future_part" } },
+      ],
+    });
+    expect(result.webhook.rawEvent.data).toMatchObject({ parts: payload.data.parts });
+    expect(Object.isFrozen(result.webhook.message.partObservations)).toBe(true);
+    expect(Object.isFrozen(result.webhook.message.partObservations[0]?.raw)).toBe(true);
+  });
+
+  it("dispatches an unexpected null-parts current webhook as an empty usable message", async () => {
+    const payload = cloneFixture();
+    payload.data.parts = null;
+    const adapter = createTestAdapter();
+    const dispatched: unknown[] = [];
+    const processMessage = vi.fn(async (...args: Parameters<ChatInstance["processMessage"]>) => {
+      const messageOrFactory = args[2];
+      dispatched.push(
+        typeof messageOrFactory === "function" ? await messageOrFactory() : messageOrFactory,
+      );
+    });
+    (adapter as unknown as { chat: Pick<ChatInstance, "processMessage"> }).chat = {
+      processMessage,
+    };
+
+    const response = await adapter.handleWebhook(createStandardRequest(payload));
+
+    expect(response.status).toBe(200);
+    expect(processMessage).toHaveBeenCalledTimes(1);
+    expect(dispatched).toEqual([
+      expect.objectContaining({ id: fixture.data.id, text: "", attachments: [] }),
+    ]);
+  });
+
   it.each([
     [false, "direct"],
     [true, "group"],
@@ -681,6 +779,46 @@ describe("LinqAdapter verified webhook ingress", () => {
         handled: "ignored",
       });
     }
+  });
+
+  it("keeps sticker reaction webhook metadata typed without inventing a standard emoji", async () => {
+    const reaction = cloneFixture() as Record<string, unknown>;
+    reaction.event_type = "reaction.added";
+    reaction.data = {
+      is_from_me: false,
+      reaction_type: "sticker",
+      chat_id: fixture.data.chat.id,
+      message_id: fixture.data.id,
+      part_index: 0,
+      from_handle: fixture.data.sender_handle,
+      sticker: {
+        file_name: "cat.heic",
+        mime_type: "image/heic",
+        url: "https://cdn.linqapp.com/sticker/cat",
+        width: 120,
+        height: 100,
+      },
+    };
+
+    const result = await createTestAdapter().verifyWebhook(createStandardRequest(reaction));
+
+    expect(result).toMatchObject({
+      ok: true,
+      webhook: {
+        kind: "reaction.added",
+        reaction: {
+          reactionType: "sticker",
+          partIndex: 0,
+          sticker: {
+            filename: "cat.heic",
+            mimeType: "image/heic",
+            url: "https://cdn.linqapp.com/sticker/cat",
+            width: 120,
+            height: 100,
+          },
+        },
+      },
+    });
   });
 });
 

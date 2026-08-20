@@ -1,6 +1,7 @@
 export { createLinqAdapter, LinqAdapter } from "./adapter.js";
 export type { LinqAdapterConfig, LinqConversation } from "./adapter.js";
 export { linqMessage } from "./message.js";
+export type { LinqRawMessage } from "./message-parser.js";
 export type {
   LinqBubbleEffectName,
   LinqMessageEffect,
@@ -31,11 +32,17 @@ export type {
   LinqMessageLifecycleEventType,
   LinqMessageEditedEventData,
   LinqMessageFailedEventData,
+  LinqMessageEffectObservation,
   LinqMessageObservation,
+  LinqMessagePartObservation,
+  LinqMessageReceivedWebhookData,
+  LinqPartReactionObservation,
   LinqReactionObservation,
   LinqReactionWebhookData,
   LinqReactionWebhookEvent,
   LinqReplyContextObservation,
+  LinqStickerObservation,
+  LinqTextDecorationObservation,
   LinqMessageReceivedWebhookEvent,
   LinqVerifiedMessageWebhook,
   LinqVerifiedMessageLifecycleWebhook,

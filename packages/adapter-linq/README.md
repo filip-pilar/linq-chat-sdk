@@ -246,6 +246,28 @@ arrive after earlier webhook or history reads. It remains available through `onL
 verified raw/normalized observations, but it does not enter ordinary Chat SDK new-message handlers.
 Applications decide whether and how to merge refreshed, edited, and reconciled observations.
 
+### Inbound and history fidelity
+
+Verified `message.received` events expose immutable typed observations for reply context, actual and
+preferred service, message effects, text decorations, per-part reactions, reconciled time, and
+inbound sticker metadata. Each part also retains its complete authenticated `raw` value, and the
+verified webhook retains the complete `rawEvent`. Standard Chat SDK messages map only faithful
+cross-platform facts such as canonical identity, author, text, links, and attachments; Linq effects,
+service choice, decorations, part targeting, and stickers remain provider observations rather than
+invented standard fields.
+
+Retrieved messages retain the official SDK response in `Message.raw`. Null, malformed, and unknown
+individual parts do not discard valid sibling content; `parts: null` produces a usable empty message
+row. History skips only rows without enough canonical identity to construct a message and preserves
+the order and cursor of every usable normal or tombstone row.
+
+`thread.messages` uses Chat SDK's default backward iterator: the adapter preserves endpoint row order
+within each page and Chat SDK reverses that page for iteration. Linq's chat-history endpoint has no
+safe forward-pagination contract in the installed SDK, so explicit forward fetches—and therefore
+`thread.allMessages`—throw `NotImplementedError` instead of simulating a cursor with unsupported
+ordering guarantees. These behaviors are `Contract-verified`; the adapter makes no provider ordering,
+delivery, or recipient-presentation guarantee.
+
 The adapter does not derive retry safety, ordering, conflict resolution, or a terminal delivery
 state from these events.
 Linq documents code-specific recovery guidance, and a `message.delivered` event can rarely follow
@@ -333,31 +355,31 @@ Endpoint-shaped account and administrative behavior remains on `adapter.client`.
 
 ## Supported features
 
-| Feature                                            | Status                                                                                                                     |
-| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Inbound text messages                              | ✅                                                                                                                         |
-| Outbound text messages                             | ✅ to existing chats                                                                                                       |
-| Group chats                                        | ✅ reply to existing groups received via webhook                                                                           |
-| Inbound media (images, audio, files)               | ✅ parsed as attachments with downloadable data                                                                            |
-| Outbound media / file sending                      | ✅ to existing chats; `attachments` and `files` become media parts                                                         |
-| Inbound reactions (tapbacks + custom emoji)        | ✅ dispatch to `onReaction()`                                                                                              |
-| Outbound reactions (add/remove)                    | ✅                                                                                                                         |
-| Rich link previews                                 | ✅ standalone `linqMessage("", { richLink })`; request contract only                                                       |
-| Standard replies                                   | ✅ `thread.reply(messageOrId, content)`                                                                                    |
-| Part-specific replies/reactions                    | ✅ `adapter.conversation(threadOrId)` with explicit zero-based indexes                                                     |
-| Mark as read                                       | ✅ `thread.markAsRead(messageOrId)`; Linq marks the whole chat                                                             |
-| Edit message                                       | ✅ text, first part only                                                                                                   |
-| Fetch message / history / thread                   | ⚠️ basic cursor history works; forward direction and rich normalization remain partial                                     |
-| Typing indicators                                  | ✅ DMs only (Linq rejects typing in groups)                                                                                |
-| Webhook signature verification + replay protection | ✅                                                                                                                         |
-| Two-phase verified webhook ingress                 | ✅ `2026-02-03` typed facts + optional Chat SDK dispatch                                                                   |
-| Generic Linq event registration                    | ✅ verified one/many/all delivery, atomic dedupe, callback isolation, and non-blocking `waitUntil` scheduling              |
-| Streaming                                          | ⚠️ buffered — recipients see one final message                                                                             |
-| Sticker reactions                                  | ❌ skipped (no Chat SDK equivalent)                                                                                        |
-| Delete message                                     | ❌ Linq cannot unsend on the recipient's device                                                                            |
-| `openDM()` / proactive adapter sending             | ❌ intentionally unsupported; use the reduced Batch `004` native-client recipe                                             |
-| Cards                                              | ⚠️ rendered natively as plain text + image media parts — buttons/selects show their labels but cannot trigger `onAction()` |
-| Modals, slash commands                             | ❌ no Linq equivalent                                                                                                      |
+| Feature                                            | Status                                                                                                        |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Inbound text messages                              | ✅                                                                                                            |
+| Outbound text messages                             | ✅ to existing chats                                                                                          |
+| Group chats                                        | ✅ reply to existing groups received via webhook                                                              |
+| Inbound media (images, audio, files)               | ✅ parsed as attachments with downloadable data                                                               |
+| Outbound media / file sending                      | ✅ to existing chats; `attachments` and `files` become media parts                                            |
+| Inbound reactions (tapbacks + custom emoji)        | ✅ dispatch to `onReaction()`                                                                                 |
+| Outbound reactions (add/remove)                    | ✅                                                                                                            |
+| Rich link previews                                 | ✅ standalone `linqMessage("", { richLink })`; request contract only                                          |
+| Standard replies                                   | ✅ `thread.reply(messageOrId, content)`                                                                       |
+| Part-specific replies/reactions                    | ✅ `adapter.conversation(threadOrId)` with explicit zero-based indexes                                        |
+| Mark as read                                       | ✅ `thread.markAsRead(messageOrId)`; Linq marks the whole chat                                                |
+| Edit message                                       | ✅ text, first part only                                                                                      |
+| Fetch message / history / thread                   | ⚠️ defensive backward cursor history; forward/`allMessages` is explicitly unsupported                         |
+| Typing indicators                                  | ✅ DMs only (Linq rejects typing in groups)                                                                   |
+| Webhook signature verification + replay protection | ✅                                                                                                            |
+| Two-phase verified webhook ingress                 | ✅ `2026-02-03` typed facts + optional Chat SDK dispatch                                                      |
+| Generic Linq event registration                    | ✅ verified one/many/all delivery, atomic dedupe, callback isolation, and non-blocking `waitUntil` scheduling |
+| Streaming                                          | ⚠️ buffered to one compiled final send; no native streaming claim                                             |
+| Sticker reactions                                  | ⚠️ typed inbound/raw observation; skipped by standard reaction dispatch                                       |
+| Delete message                                     | ❌ Linq cannot unsend on the recipient's device                                                               |
+| `openDM()` / proactive adapter sending             | ❌ intentionally unsupported; use the reduced Batch `004` native-client recipe                                |
+| Cards                                              | ⚠️ flattened to plain text + image media parts — buttons/selects show labels but cannot trigger `onAction()`  |
+| Modals, slash commands                             | ❌ no Linq equivalent                                                                                         |
 
 ## Proactive sending
 
@@ -487,7 +509,9 @@ remain implemented; Batch `012` must not regress them.
 
 ## Cards
 
-iMessage/SMS has no rich-card UI, so Chat SDK [cards](https://chat-sdk.dev/docs/cards) are flattened to their closest native equivalent instead of being dropped:
+iMessage/SMS has no Chat SDK card transport, so [cards](https://chat-sdk.dev/docs/cards) are
+deterministically flattened to plain text and image media instead of being dropped. This is not a
+native-card or interactive-card claim:
 
 - Title, subtitle, text, fields, links, dividers, and tables render as clean plain text (markdown is stripped — iMessage would show literal `**`).
 - `<Image>` elements and the card's `imageUrl` are sent as real image media parts (public HTTPS URLs only; other URLs stay visible in the text).
