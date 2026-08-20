@@ -145,9 +145,11 @@ The public extensions are deliberately cohesive:
   `LinqMessageOptions` snapshot through `linqMessage(content, options)` while retaining ordinary
   Chat SDK post/reply/edit, callback processing, identity, history, and serialization behavior.
   `010A` contract-verifies deterministic raw/Markdown/AST/static-card text, UTF-16 style ranges,
-  and validated manual styles/animations before side effects. Linq's current edit operation remains
-  text-only. Rich links, service, and effects remain later work. Ordinary replies already use
-  `Thread.reply()`; only part-index targeting remains a Linq-specific `007B` gap.
+  and validated manual styles/animations before side effects. `010B` maps omitted/explicit service
+  selection and message-level effects, rejecting contradictory explicit RCS/SMS intent before side
+  effects. Linq's current edit operation remains text-only. Rich links remain later work. Ordinary
+  replies already use `Thread.reply()`; only part-index targeting remains a Linq-specific `007B`
+  gap.
 - Batches `008`/`009`: `adapter.conversation(threadOrId)` with common operations directly on the
   facade, existing-group operations under `.group`, and location under `.location`.
 

@@ -38,7 +38,7 @@ import {
   type LinqRawMessage,
 } from "./message-parser.js";
 import { planLinqOutboundMessage, prepareLinqOutboundParts } from "./outbound-media.js";
-import { compileLinqMessageText } from "./message-compiler.js";
+import { compileLinqMessageText, compileLinqSendOptions } from "./message-compiler.js";
 import { fromLinqReaction, toLinqReaction } from "./reactions.js";
 import { authenticateLinqWebhookRequest } from "./verification.js";
 import {
@@ -246,6 +246,7 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   ): Promise<RawMessage<LinqRawMessage>> {
     const { chatId } = this.decodeThreadId(threadId);
     const compiledText = compileLinqMessageText(message);
+    const sendOptions = compileLinqSendOptions(message);
     const card = extractCardElement(message);
     const cardImageUrls = card ? collectCardImageUrls(card) : [];
     const plan = planLinqOutboundMessage(message, compiledText, cardImageUrls);
@@ -277,6 +278,10 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
         message: {
           idempotency_key: idempotencyKey,
           parts,
+          ...(sendOptions.preferredService
+            ? { preferred_service: sendOptions.preferredService }
+            : {}),
+          ...(sendOptions.effect ? { effect: { ...sendOptions.effect } } : {}),
           ...(replyTo ? { reply_to: replyTo } : {}),
         },
       });

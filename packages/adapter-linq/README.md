@@ -72,9 +72,20 @@ not an adapter completion gate.
 
 Posting and replies send the compiled text and decorations through the ordinary Chat SDK path.
 Edits use the same deterministic plain-text rendering, but Linq SDK `0.42.0` exposes a text-only
-message-part update contract and therefore cannot replace decorations. Provider translation for
-`preferredService`, effects, and rich links remains planned for `010B`/`007B`. Standard cards,
-files, attachments, returned identity, history, and serialization behavior remain unchanged.
+message-part update contract and therefore cannot replace decorations.
+
+`preferredService` maps to the message-level `preferred_service` request field. Omission leaves the
+field out so Linq uses its documented iMessage → RCS → SMS selection. Explicit `"iMessage"` is
+iMessage-only with no fallback. Explicit `"RCS"` and `"SMS"` are passed through exactly; Linq
+currently documents both as RCS-when-supported with SMS fallback and no iMessage attempt. Screen
+and bubble `effect` values map beside `parts` at message level. Omitted service keeps effects and
+decorations best-effort. Explicit RCS/SMS with an effect or any manual decoration rejects locally
+before media preparation, logging, or a provider call; standard derived formatting remains allowed
+and may degrade to plain text on a protocol that does not render decorations. These are request
+contracts, not recipient-presentation or delivery claims.
+
+Provider translation for rich links remains planned for `007B`. Standard cards, files,
+attachments, returned identity, history, and serialization behavior remain unchanged.
 
 Then route Linq webhooks to the adapter from any framework with fetch-style handlers:
 

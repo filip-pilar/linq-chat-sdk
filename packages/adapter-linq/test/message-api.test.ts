@@ -87,7 +87,7 @@ describe("linqMessage", () => {
 });
 
 describe("linqMessage Chat SDK transport", () => {
-  it("uses the ordinary Linq send path and translates only implemented decoration options", async () => {
+  it("uses the ordinary Linq send path for implemented message options", async () => {
     const adapter = createLinqAdapter({ apiKey: "test-key", signingSecret: "test-secret" });
     const send = vi.spyOn(adapter.client.chats.messages, "send").mockResolvedValue({
       chat_id: "chat-123",
@@ -125,6 +125,8 @@ describe("linqMessage Chat SDK transport", () => {
     expect(send).toHaveBeenCalledWith("chat-123", {
       message: {
         idempotency_key: expect.any(String),
+        preferred_service: "iMessage",
+        effect: { type: "screen", name: "confetti" },
         parts: [
           {
             type: "text",

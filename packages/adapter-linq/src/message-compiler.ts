@@ -10,7 +10,7 @@ import type {
 } from "chat";
 
 import { isRecord } from "./guards.js";
-import type { LinqTextDecoration } from "./message.js";
+import type { LinqMessageEffect, LinqPreferredService, LinqTextDecoration } from "./message.js";
 
 const DIVIDER_LINE = "———";
 const STYLES = new Set(["bold", "italic", "strikethrough", "underline"]);
@@ -24,6 +24,21 @@ const ANIMATIONS = new Set([
   "bloom",
   "jitter",
 ]);
+const PREFERRED_SERVICES = new Set(["iMessage", "RCS", "SMS"]);
+const SCREEN_EFFECTS = new Set([
+  "confetti",
+  "fireworks",
+  "lasers",
+  "sparkles",
+  "celebration",
+  "hearts",
+  "love",
+  "balloons",
+  "happy_birthday",
+  "echo",
+  "spotlight",
+]);
+const BUBBLE_EFFECTS = new Set(["slam", "loud", "gentle", "invisible"]);
 
 type LinqDecorationStyle = Extract<LinqTextDecoration, { style: string }>["style"];
 type LinqDecorationAnimation = Extract<LinqTextDecoration, { animation: string }>["animation"];
@@ -45,6 +60,11 @@ export interface CompiledLinqMessageText {
   text: string;
 }
 
+export interface CompiledLinqSendOptions {
+  effect?: LinqMessageEffect;
+  preferredService?: LinqPreferredService;
+}
+
 type TextFragment = CompiledLinqMessageText;
 
 /** Compile the primary Linq text part and all inline decorations before any I/O. */
@@ -57,6 +77,36 @@ export function compileLinqMessageText(message: AdapterPostableMessage): Compile
   assertNonOverlappingAnimations(decorations);
 
   return { text: trimmed.text, decorations };
+}
+
+/** Validate and compile Linq's message-level service/effect request fields before any I/O. */
+export function compileLinqSendOptions(message: AdapterPostableMessage): CompiledLinqSendOptions {
+  if (typeof message === "string" || !isRecord(message) || message.linq === undefined) return {};
+  if (!isRecord(message.linq)) {
+    throw validationError("Linq message options must be an object.");
+  }
+
+  const preferredService = validatePreferredService(message.linq.preferredService);
+  const effect = validateEffect(message.linq.effect);
+  const manualDecorations = message.linq.decorations;
+
+  if (manualDecorations !== undefined && !Array.isArray(manualDecorations)) {
+    throw validationError("Linq message decorations must be an array.");
+  }
+
+  if (
+    (preferredService === "RCS" || preferredService === "SMS") &&
+    (effect !== undefined || (manualDecorations?.length ?? 0) > 0)
+  ) {
+    throw validationError(
+      `Linq preferred service ${preferredService} cannot be combined with effects or manual decorations.`,
+    );
+  }
+
+  return {
+    ...(effect === undefined ? {} : { effect }),
+    ...(preferredService === undefined ? {} : { preferredService }),
+  };
 }
 
 /** Compile Linq's deterministic static-card fallback, including CardText markdown styles. */
@@ -221,6 +271,31 @@ function compileActions(actions: ActionsElement): TextFragment | null {
 
   if (buttonLabels.length > 0) lines.unshift(`Options: ${buttonLabels.join(", ")}`);
   return lines.length > 0 ? plain(lines.join("\n")) : null;
+}
+
+function validatePreferredService(value: unknown): LinqPreferredService | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !PREFERRED_SERVICES.has(value)) {
+    throw validationError("Linq preferredService must be iMessage, RCS, or SMS.");
+  }
+  return value as LinqPreferredService;
+}
+
+function validateEffect(value: unknown): LinqMessageEffect | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) {
+    throw validationError("Linq message effect must be an object.");
+  }
+
+  const { name, type } = value;
+  if (type === "screen" && typeof name === "string" && SCREEN_EFFECTS.has(name)) {
+    return { type, name: name as Extract<LinqMessageEffect, { type: "screen" }>["name"] };
+  }
+  if (type === "bubble" && typeof name === "string" && BUBBLE_EFFECTS.has(name)) {
+    return { type, name: name as Extract<LinqMessageEffect, { type: "bubble" }>["name"] };
+  }
+
+  throw validationError("Linq message effect type and name must be a supported matching pair.");
 }
 
 function extractManualDecorations(

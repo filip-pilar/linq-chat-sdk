@@ -171,6 +171,22 @@ function assertLinqMessageErgonomics(
       { range: [0, 5], animation: "spin" },
     ],
   });
+  linqMessage("hello", {
+    preferredService: "RCS",
+    effect: { type: "bubble", name: "invisible" },
+  });
+  linqMessage("hello", {
+    // @ts-expect-error -- preferred service values are closed and case-sensitive.
+    preferredService: "sms",
+  });
+  linqMessage("hello", {
+    // @ts-expect-error -- screen and bubble effect names cannot be mixed.
+    effect: { type: "screen", name: "slam" },
+  });
+  linqMessage("hello", {
+    // @ts-expect-error -- effect families are closed.
+    effect: { type: "fullscreen", name: "confetti" },
+  });
 }
 
 void assertLinqMessageErgonomics;
