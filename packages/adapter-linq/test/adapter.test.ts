@@ -828,7 +828,7 @@ describe("LinqAdapter.rehydrateAttachment", () => {
 });
 
 describe("LinqAdapter.startTyping", () => {
-  it("starts a Linq typing indicator for the thread chat", async () => {
+  it.each([false, true])("starts a Linq typing indicator for isGroup=%s", async (isGroup) => {
     const adapter = createTestAdapter();
     const start = vi.fn().mockResolvedValue(undefined);
     (
@@ -836,16 +836,21 @@ describe("LinqAdapter.startTyping", () => {
     ).apiClient = {
       chats: { typing: { start } },
     };
-    vi.spyOn(adapter, "decodeThreadId").mockReturnValue({
+    const threadId = adapter.encodeThreadId({
       chatId: "3caaf1a0-ef9f-46e0-8c22-31e82c8514dc",
+      isGroup,
     });
 
-    await adapter.startTyping("linq:chat-123");
+    await expect(adapter.startTyping(threadId)).resolves.toBeUndefined();
 
     expect(start).toHaveBeenCalledWith("3caaf1a0-ef9f-46e0-8c22-31e82c8514dc");
   });
 
-  it("skips typing indicators for known group chats", async () => {
+  it.each([
+    "linq:not-a-uuid",
+    "other:3caaf1a0-ef9f-46e0-8c22-31e82c8514dc",
+    "linq:3caaf1a0-ef9f-46e0-8c22-31e82c8514dc:unexpected",
+  ])("rejects invalid thread identity %s before provider I/O", async (threadId) => {
     const adapter = createTestAdapter();
     const start = vi.fn().mockResolvedValue(undefined);
     (
@@ -854,23 +859,9 @@ describe("LinqAdapter.startTyping", () => {
       chats: { typing: { start } },
     };
 
-    await adapter.startTyping("linq:3caaf1a0-ef9f-46e0-8c22-31e82c8514dc:group");
+    await expect(adapter.startTyping(threadId)).rejects.toBeInstanceOf(Error);
 
     expect(start).not.toHaveBeenCalled();
-  });
-
-  it("ignores Linq's group-chat typing rejection", async () => {
-    const adapter = createTestAdapter();
-    const start = vi.fn().mockRejectedValue({ status: 403 });
-    (
-      adapter as unknown as { apiClient: { chats: { typing: { start: typeof start } } } }
-    ).apiClient = {
-      chats: { typing: { start } },
-    };
-
-    await expect(
-      adapter.startTyping("linq:3caaf1a0-ef9f-46e0-8c22-31e82c8514dc"),
-    ).resolves.toBeUndefined();
   });
 });
 

@@ -437,7 +437,7 @@ Endpoint-shaped account and administrative behavior remains on `adapter.client`.
 | Mark as read                                       | ✅ `thread.markAsRead(messageOrId)`; Linq marks the whole chat                                                |
 | Edit message                                       | ✅ text, first part only                                                                                      |
 | Fetch message / history / thread                   | ⚠️ defensive backward cursor history; forward/`allMessages` is explicitly unsupported                         |
-| Typing indicators                                  | ✅ DMs only (Linq rejects typing in groups)                                                                   |
+| Typing indicators                                  | ✅ direct/group `thread.startTyping()`; acknowledgement only, with host-owned refresh cadence                 |
 | Webhook signature verification + replay protection | ✅                                                                                                            |
 | Two-phase verified webhook ingress                 | ✅ `2026-02-03` typed facts + optional Chat SDK dispatch                                                      |
 | Generic Linq event registration                    | ✅ verified one/many/all delivery, atomic dedupe, callback isolation, and non-blocking `waitUntil` scheduling |

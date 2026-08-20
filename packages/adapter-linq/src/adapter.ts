@@ -695,20 +695,19 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   }
 
   async startTyping(threadId: string, _status?: string): Promise<void> {
-    const { chatId, isGroup } = this.decodeThreadId(threadId);
-
-    if (isGroup === true) {
-      return;
+    const { chatId } = this.decodeThreadId(threadId);
+    if (!UUID_PATTERN.test(chatId)) {
+      throw validationError("Linq typing requires a valid chat UUID.");
     }
 
     try {
       await this.apiClient.chats.typing.start(chatId);
     } catch (error) {
-      if (isRecord(error) && error.status === 403) {
-        return;
-      }
-
-      throw error;
+      throw translateLinqError(error, {
+        action: "start chat typing",
+        resourceId: chatId,
+        resourceType: "chat",
+      });
     }
   }
 

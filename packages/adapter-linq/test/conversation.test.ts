@@ -141,6 +141,48 @@ describe("Linq conversation facade", () => {
     });
   });
 
+  it("starts typing in a known group through the standard Chat SDK Thread", async () => {
+    const { adapter, chat, startTyping } = await createHarness();
+    const groupThreadId = adapter.encodeThreadId({ chatId: GROUP_CHAT_ID, isGroup: true });
+
+    await expect(chat.thread(groupThreadId).startTyping()).resolves.toBeUndefined();
+
+    expect(startTyping).toHaveBeenCalledWith(GROUP_CHAT_ID);
+  });
+
+  it.each([
+    [400, ValidationError],
+    [401, AuthenticationError],
+    [403, PermissionError],
+    [404, ResourceNotFoundError],
+    [429, AdapterRateLimitError],
+    [500, AdapterError],
+    [undefined, NetworkError],
+  ] as const)(
+    "translates standard start-typing failures with status %s",
+    async (status, ErrorType) => {
+      const { chat, startTyping } = await createHarness();
+      startTyping.mockRejectedValueOnce(
+        Object.assign(new Error("provider failure"), status === undefined ? {} : { status }),
+      );
+
+      await expect(chat.thread(THREAD_ID).startTyping()).rejects.toBeInstanceOf(ErrorType);
+    },
+  );
+
+  it.each(["linq:not-a-uuid", `other:${CHAT_ID}`])(
+    "rejects invalid standard typing thread %s before provider I/O",
+    async (threadId) => {
+      const { chat, startTyping } = await createHarness();
+
+      await expect(
+        Promise.resolve().then(() => chat.thread(threadId).startTyping()),
+      ).rejects.toBeInstanceOf(Error);
+
+      expect(startTyping).not.toHaveBeenCalled();
+    },
+  );
+
   it("updates supported group metadata with exact immutable request fields", async () => {
     const { adapter, chat, updateChat } = await createHarness();
     const threadId = adapter.encodeThreadId({ chatId: GROUP_CHAT_ID, isGroup: true });

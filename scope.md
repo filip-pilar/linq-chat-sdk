@@ -35,15 +35,18 @@ The adapter can already handle the core receive/reply path:
 - Send native voice memos through that facade from exactly one public HTTPS URL or existing Linq
   attachment UUID, returning only the provider-established message, thread, and attachment IDs.
 - Update existing group metadata, add/remove one canonical participant handle, and leave through
-  the nested `.group` facade as acknowledgement-only operations. Location remains unimplemented;
-  mark-read stays on `Thread`.
-- Route inbound `reaction.added` / `reaction.removed` webhooks into Chat SDK `onReaction()` handlers (tapbacks map to normalized emoji, custom emoji pass through, stickers are skipped).
+  the nested `.group` facade as acknowledgement-only operations. Request and retrieve location
+  through `.location` with acknowledgement-only consent prompting and defensive immutable
+  snapshots; mark-read stays on `Thread`.
+- Route inbound `reaction.added` / `reaction.removed` webhooks into Chat SDK `onReaction()` handlers
+  (tapbacks map to normalized emoji and custom emoji pass through). Preserve per-part and sticker
+  facts in typed/raw observations; stickers are skipped only by standard emoji dispatch.
 - Encode stable Linq thread IDs (`linq:{chatId}`) so webhook and API paths map to the same thread.
 - Track direct-message vs group-chat identity in-memory from webhooks and chat fetches (legacy `linq:{chatId}:dm/group` IDs still decode).
 - Resolve unknown chat identity via `chats.retrieve()` before dispatching webhooks that omit `is_group`.
-- Show typing indicators through standard `Thread.startTyping()` for direct chats. Current Linq
-  docs also support groups, but the existing start path still skips known groups; aligning that
-  standard path remains separate from the `008B` stop operation.
+- Show typing indicators through standard `Thread.startTyping()` for direct and group chats, with
+  provider failures translated through the shared adapter errors. A successful call is provider
+  acceptance only; hosts own any refresh cadence.
 - Automatically subscribe and respond to inbound Linq group chats received through webhooks.
 - Render Chat SDK cards as a native equivalent: plain text (markdown stripped, links/fields/tables/action labels preserved) plus real image media parts.
 
@@ -51,7 +54,7 @@ The adapter can already handle the core receive/reply path:
 
 ### 1. Richer inbound message parsing
 
-Status: **basic but useful**
+Status: **defensive typed/raw fidelity implemented; normalization remains selective**
 
 Current parsing handles:
 
@@ -61,9 +64,11 @@ Current parsing handles:
 - media-only messages with useful attachment summary text
 - media parts as Chat SDK attachments with downloadable data
 - Linq reply metadata preserved on `message.raw.reply_to`
+- typed/raw service, effect, decoration, per-part reaction, reconciliation, and sticker facts
 - sender identity
 - basic sent timestamp
-- edited metadata when using retrieved/listed message payloads
+- edited metadata from retrieved/listed messages and typed edit observations
+- mixed tombstone, null, malformed, and unknown parts without aborting usable sibling rows
 
 Covered by adapter tests:
 
@@ -71,17 +76,15 @@ Covered by adapter tests:
 - URL extraction from text
 - link part parsing
 - media attachment parsing
-- reply metadata preservation
-- edited metadata on retrieved/listed messages
+- typed/raw reply, edit, service, effect, decoration, reaction, reconciliation, and sticker fidelity
+- malformed row/part isolation and preserved history cursor/order
 - direct-message/group thread ID detection
-- group-safe typing indicators
+- direct/group typing indicators
 
 Still missing:
 
 - first-class normalized reply/thread metadata beyond `message.raw.reply_to`
-- edited metadata from edit webhooks, if we subscribe to them later
 - delivered/read status in a normalized Chat SDK surface
-- reactions on inbound message parts
 - richer link preview metadata beyond the URL
 
 ### 2. Outbound attachments and media
