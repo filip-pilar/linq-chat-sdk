@@ -440,10 +440,19 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       throw new NotImplementedError("Linq message history does not support forward pagination");
     }
 
-    const page = await this.apiClient.chats.messages.list(chatId, {
-      cursor: options?.cursor,
-      limit: options?.limit,
-    });
+    let page: Awaited<ReturnType<LinqAPIV3["chats"]["messages"]["list"]>>;
+    try {
+      page = await this.apiClient.chats.messages.list(chatId, {
+        cursor: options?.cursor,
+        limit: options?.limit,
+      });
+    } catch (error) {
+      throw translateLinqError(error, {
+        action: "list chat messages",
+        resourceId: chatId,
+        resourceType: "chat",
+      });
+    }
     const messages: Message<LinqRawMessage>[] = [];
 
     for (const raw of Array.isArray(page.messages) ? page.messages : []) {
@@ -460,21 +469,25 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     };
   }
 
-  async fetchMessage(
-    _threadId: string,
-    messageId: string,
-  ): Promise<Message<LinqRawMessage> | null> {
-    try {
-      const message = await this.apiClient.messages.retrieve(messageId);
+  async fetchMessage(threadId: string, messageId: string): Promise<Message<LinqRawMessage> | null> {
+    this.decodeThreadId(threadId);
 
-      return this.parseMessage(message);
+    let message: Awaited<ReturnType<LinqAPIV3["messages"]["retrieve"]>>;
+    try {
+      message = await this.apiClient.messages.retrieve(messageId);
     } catch (error) {
       if (isRecord(error) && error.status === 404) {
         return null;
       }
 
-      throw error;
+      throw translateLinqError(error, {
+        action: "retrieve message",
+        resourceId: messageId,
+        resourceType: "message",
+      });
     }
+
+    return this.parseMessage(message);
   }
 
   async postMessage(
@@ -580,17 +593,26 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     messageId: string,
     message: AdapterPostableMessage,
   ): Promise<RawMessage<LinqRawMessage>> {
-    const { chatId } = this.decodeThreadId(threadId);
     const { text } = compileLinqMessageText(message);
 
     if (!text) {
-      throw new Error("Linq message text cannot be empty.");
+      throw validationError("Linq message text cannot be empty.");
     }
+    const { chatId } = this.decodeThreadId(threadId);
 
-    const response = await this.apiClient.messages.update(messageId, {
-      text,
-      part_index: 0,
-    });
+    let response: Awaited<ReturnType<LinqAPIV3["messages"]["update"]>>;
+    try {
+      response = await this.apiClient.messages.update(messageId, {
+        text,
+        part_index: 0,
+      });
+    } catch (error) {
+      throw translateLinqError(error, {
+        action: "edit message",
+        resourceId: messageId,
+        resourceType: "message",
+      });
+    }
 
     return {
       id: response.id,
@@ -605,25 +627,47 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
   // Reactions
   async addReaction(
-    _threadId: string,
+    threadId: string,
     messageId: string,
     emoji: EmojiValue | string,
   ): Promise<void> {
-    await this.apiClient.messages.addReaction(messageId, {
-      operation: "add",
-      ...toLinqReaction(emoji),
-    });
+    validateStandardReaction(emoji);
+    this.decodeThreadId(threadId);
+
+    try {
+      await this.apiClient.messages.addReaction(messageId, {
+        operation: "add",
+        ...toLinqReaction(emoji),
+      });
+    } catch (error) {
+      throw translateLinqError(error, {
+        action: "add message reaction",
+        resourceId: messageId,
+        resourceType: "message",
+      });
+    }
   }
 
   async removeReaction(
-    _threadId: string,
+    threadId: string,
     messageId: string,
     emoji: EmojiValue | string,
   ): Promise<void> {
-    await this.apiClient.messages.addReaction(messageId, {
-      operation: "remove",
-      ...toLinqReaction(emoji),
-    });
+    validateStandardReaction(emoji);
+    this.decodeThreadId(threadId);
+
+    try {
+      await this.apiClient.messages.addReaction(messageId, {
+        operation: "remove",
+        ...toLinqReaction(emoji),
+      });
+    } catch (error) {
+      throw translateLinqError(error, {
+        action: "remove message reaction",
+        resourceId: messageId,
+        resourceType: "message",
+      });
+    }
   }
 
   private resolveConversationThread(threadOrId: Thread | string): Thread {
@@ -681,7 +725,16 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   // Threads
   async fetchThread(threadId: string): Promise<ThreadInfo> {
     const { chatId } = this.decodeThreadId(threadId);
-    const chat = await this.apiClient.chats.retrieve(chatId);
+    let chat: Awaited<ReturnType<LinqAPIV3["chats"]["retrieve"]>>;
+    try {
+      chat = await this.apiClient.chats.retrieve(chatId);
+    } catch (error) {
+      throw translateLinqError(error, {
+        action: "retrieve chat",
+        resourceId: chatId,
+        resourceType: "chat",
+      });
+    }
 
     return {
       id: this.encodeThreadId({ chatId: chat.id, isGroup: chat.is_group }),
@@ -1071,6 +1124,10 @@ function validateReaction(reaction: string): void {
   if (typeof reaction !== "string" || reaction.trim().length === 0) {
     throw validationError("Linq reactions must be non-empty strings.");
   }
+}
+
+function validateStandardReaction(reaction: EmojiValue | string): void {
+  validateReaction(typeof reaction === "string" ? reaction : reaction.name);
 }
 
 function validatePostableContent(content: AdapterPostableMessage): void {

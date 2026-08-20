@@ -327,6 +327,12 @@ individual parts do not discard valid sibling content; `parts: null` produces a 
 row. History skips only rows without enough canonical identity to construct a message and preserves
 the order and cursor of every usable normal or tombstone row.
 
+Thread, history, and single-message retrieval, standard part-0 edits, and ordinary whole-message
+reactions translate Linq failures through the shared adapter error taxonomy while preserving
+supported provider code, trace, retry-after, and cause metadata. A single-message refresh keeps the
+Chat SDK convention that provider `404` means `null`; missing thread/history resources and missing
+edit/reaction targets remain typed not-found errors. The adapter adds no retries or fallback.
+
 `thread.messages` uses Chat SDK's default backward iterator: the adapter preserves endpoint row order
 within each page and Chat SDK reverses that page for iteration. Linq's chat-history endpoint has no
 safe forward-pagination contract in the installed SDK, so explicit forward fetches—and therefore
@@ -408,10 +414,11 @@ adapter wrapper.
 See [`FEATURE_PARITY.md`](./FEATURE_PARITY.md) for the authoritative capability status
 of every Linq endpoint, message feature, and webhook, including its architectural
 disposition, limitations, priority, definition of done, test coverage, recipes,
-and independently reviewable batch. Batches `011` and `012` are deferred; Batch `013` is later
-inventory reconciliation and cleanup. `Complete` means the adapter-owned implementation,
-contracts, tests, and documentation are complete. Provider, device, and host observations use the
-separate evidence labels defined in the parity matrix and are not universal completion gates.
+and independently reviewable batch. Batches `011` and `012` remain deferred; Batch `013A`–`013B`
+complete the currently approved deterministic compatibility cleanup. `Complete` means the
+adapter-owned implementation, contracts, tests, and documentation are complete. Provider, device,
+and host observations use the separate evidence labels defined in the parity matrix and are not
+universal completion gates.
 
 The extension surface is intentionally small: `onLinqEvent()` registration for verified generic
 events, the implemented `linqMessage(content, options)` send-time transport, and the cohesive

@@ -19,6 +19,9 @@ The adapter can already handle the core receive/reply path:
 - Send reliable text/media/card replies through `thread.post()` to an existing Linq chat, with central limits, one UUID idempotency key, SDK-owned message retries, shared errors, and preparation-only attachment cleanup.
 - Fetch thread metadata with `chats.retrieve()`.
 - Fetch recent chat history with `chats.messages.list()`.
+- Translate thread/history/message retrieval, standard edit, and whole-message reaction failures
+  through the shared adapter taxonomy while preserving provider metadata; single-message refresh
+  alone retains `404` as `null`.
 - Fetch a single message with `messages.retrieve()`.
 - Edit text messages with `messages.update()`.
 - Render formatted Chat SDK content deterministically as plain text; Batch `010A` maps supported
@@ -193,17 +196,21 @@ The public extensions are deliberately cohesive:
   typed/raw sharing-state observations. Consent, coordinate freshness polling, and request/event
   correlation remain host/provider concerns; account and administrative operations stay on
   `adapter.client`.
+- Batch `013A`–`013B`: complete for the approved compatibility slices. Standard direct/group typing
+  and thread/history/message retrieval, part-0 edits, and whole-message reactions now use
+  deterministic validation and shared provider errors. Message refresh alone preserves `404` as
+  `null`; no retry, fallback, polling, or workflow behavior is implied.
 
 Batch `000` is complete: Chat SDK `4.38.1` standard reply/read contracts, Linq SDK `0.42.0`, direct
 Standard Webhooks verification, explicit deprecated legacy mode, OpenAPI drift checking, CI, and
 full test-fixture typechecking are reconciled. Mark-read is standard `Thread.markAsRead()` with
 Linq's chat-wide semantics; it is not a future conversation-facade method.
 
-Explicitly deferred: Batch `011`, Batch `012`, and Batch `013`, plus lazy credentials, trusted
-webhook forwarding, Changesets, and npm/OIDC publishing. Forward history remains partial if
-the provider cannot support or safely emulate it. Outbound sticker reactions wait for unambiguous
-official SDK input. Exact asynchronous group-update correlation must not be promised without a
-provider correlation key.
+Explicitly deferred: Batch `011`, Batch `012`, and broader Batch `013` work beyond completed
+`013A`–`013B`, plus lazy credentials, trusted webhook forwarding, Changesets, and npm/OIDC
+publishing. Forward history remains partial if the provider cannot support or safely emulate it.
+Outbound sticker reactions wait for unambiguous official SDK input. Exact asynchronous group-update
+correlation must not be promised without a provider correlation key.
 
 Physical-device observations remain valuable for iMessage formatting/effects, typing, contact
 sharing, voice memos, groups, location consent, and relevant RCS/SMS fallbacks. Selective Linq
