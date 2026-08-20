@@ -129,6 +129,17 @@ describe("standard operation reliability", () => {
     );
   });
 
+  it("returns null when a global message ID belongs to a different chat", async () => {
+    const harness = createHarness();
+    harness.retrieveMessage.mockResolvedValueOnce({
+      ...historyFixture.messages[0],
+      chat_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    });
+
+    await expect(harness.adapter.fetchMessage(THREAD_ID, MESSAGE_ID)).resolves.toBeNull();
+    expect(harness.retrieveMessage).toHaveBeenCalledWith(MESSAGE_ID);
+  });
+
   it("rejects locally knowable invalid input before any provider operation", async () => {
     for (const operation of standardOperations) {
       const harness = createHarness();

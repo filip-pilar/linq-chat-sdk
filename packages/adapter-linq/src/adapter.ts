@@ -470,7 +470,7 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   }
 
   async fetchMessage(threadId: string, messageId: string): Promise<Message<LinqRawMessage> | null> {
-    this.decodeThreadId(threadId);
+    const { chatId } = this.decodeThreadId(threadId);
 
     let message: Awaited<ReturnType<LinqAPIV3["messages"]["retrieve"]>>;
     try {
@@ -485,6 +485,13 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
         resourceId: messageId,
         resourceType: "message",
       });
+    }
+
+    // Linq retrieves messages by globally unique provider ID. Preserve Chat
+    // SDK's thread-scoped fetch contract if a caller supplies an ID from a
+    // different chat.
+    if (message.chat_id !== chatId) {
+      return null;
     }
 
     return this.parseMessage(message);
