@@ -1,11 +1,14 @@
 # linq-chat-sdk
 
-[Linq](https://linqapp.com) adapter for [Chat SDK](https://www.npmjs.com/package/chat) — write your bot logic once, run it on iMessage/SMS via Linq alongside Slack, Telegram, WhatsApp, and friends.
+A [Linq](https://linqapp.com) adapter for [Chat SDK](https://www.npmjs.com/package/chat). It lets
+Chat SDK applications receive and send iMessage, RCS, and SMS messages through an existing Linq
+chat while retaining access to Linq-specific capabilities where the standard interface has no
+faithful equivalent.
 
-## What's in here
+## Repository
 
-- [`packages/adapter-linq`](packages/adapter-linq) — the Forma-maintained adapter package (`@forma/linq-chat-sdk-adapter`). Start with its [README](packages/adapter-linq/README.md).
-- [`apps/api`](apps/api) — example Nitro app running a single AI bot across Linq, Telegram, and WhatsApp, with webhook routes, setup endpoints, and a small admin UI.
+- [`packages/adapter-linq`](packages/adapter-linq) contains the Forma-maintained adapter.
+- [`apps/api`](apps/api) is an example Nitro application using Linq alongside other adapters.
 
 ## Development
 
@@ -14,25 +17,17 @@ pnpm install
 pnpm check
 ```
 
-`pnpm check` checks the canonical Linq OpenAPI inventory, lint, formatting, tests, source/test
-TypeScript contracts, and the workspace build. CI runs the same command on Node.js 20 and 24.
+`pnpm check` runs the canonical webhook event-name drift check, lint, formatting, tests,
+TypeScript contracts, and workspace builds. CI runs the same check on Node.js 20 and 24.
 
-The adapter uses `@linqapp/sdk@0.42.0` for outbound/native API operations, Chat SDK `4.38.1`, and
-the Standard Webhooks reference implementation for inbound authentication. The adapter owns its
-stable webhook envelope and normalization boundary because the current Linq SDK no longer exports
-`webhooks.unwrap()` or exhaustive event-envelope types.
+The adapter currently uses `@linqapp/sdk@0.42.0` for provider operations, Chat SDK `4.38.1`, and
+`standardwebhooks` for inbound authentication. Its verified webhook envelope remains adapter-owned
+because the installed Linq SDK does not provide the required verification/event contract.
 
-## Fork maintenance
+## Maintenance
 
-- `main` is the canonical Forma development branch.
-- `upstream/main` is a read-only source for Linq updates; merge reviewed updates into `main` without rewriting published history.
-- Release tags and assets are immutable. Never move or rebuild an existing release.
-- Use temporary branches only for isolated or concurrent work, then delete them after they are integrated and verified.
+`main` is Forma's development branch. `upstream/main` is a read-only source for reviewed Linq
+updates. Do not rewrite published history or rebuild existing release tags.
 
-## Credits
-
-Originally created by [Fardeem Munir](https://github.com/fardeem) and developed by the [Linq](https://linqapp.com) team. This fork is maintained by Forma — thank you, Fardeem and Linq.
-
-## License
-
-[Apache-2.0](LICENSE)
+Originally created by [Fardeem Munir](https://github.com/fardeem) and developed by the
+[Linq](https://linqapp.com) team. Licensed under [Apache-2.0](LICENSE).

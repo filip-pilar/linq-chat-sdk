@@ -20,20 +20,8 @@ Always preserve the raw request body until authentication succeeds.
 - Use the direct `standardwebhooks` reference implementation. The current SDK's `Webhooks` class is
   empty even though provider documentation still describes `webhooks.unwrap()`.
 
-### Legacy compatibility
-
-- Linq still sends deprecated `X-Webhook-Event`, `X-Webhook-Subscription-ID`,
-  `X-Webhook-Timestamp`, and `X-Webhook-Signature` headers.
-- The legacy signature is hex HMAC-SHA256 over `{timestamp}.{raw_body}`.
-- Legacy requires explicit `webhookVerificationMode: "legacy"` for a known existing subscription.
-- Standard is the default; legacy-only requests fail in Standard mode.
-- Any partial Standard header set fails in both modes.
-- Complete dual headers use the configured authoritative mode. Never fall back after verification
-  fails under that mode.
-
-Both behaviors are contract-tested in `packages/adapter-linq/test/verified-webhook.test.ts` and
-`packages/adapter-linq/test/adapter.test.ts`. Do not infer a provider requirement from the adapter's
-compatibility policy.
+The repository adapter accepts Standard Webhooks only. Deprecated `X-Webhook-*` signature handling
+is outside its contract. Any partial Standard header set fails.
 
 ## Delivery checklist
 
@@ -53,7 +41,7 @@ existing-chat sends, and two ingress forms:
 - `chat.webhooks.linq(request, options?)` / adapter `handleWebhook()` is the ordinary one-step path:
   verify, normalize, dispatch supported standard events, and acknowledge.
 - `adapter.verifyWebhook(request)` verifies and normalizes once without dispatch. Applications may
-  persist the authenticated observation before calling
+  inspect the authenticated observation before calling
   `adapter.dispatchVerifiedWebhook(webhook, options?)` for standard Chat SDK dispatch.
 
 The typed path targets `2026-02-03` and preserves immutable parsed JSON, decoded request text, and
@@ -64,8 +52,8 @@ generic callbacks and atomic provider/partner/event deduplication are implemente
 `adapter.onLinqEvent(...)`. They are at-most-once attempted after claim; callback failures are
 isolated and logged. Generic callbacks do not block acknowledgement. Pass the host's
 `WebhookOptions.waitUntil` implementation so their completion survives the response; without it,
-serverless completion is not guaranteed. Durable consumers must commit or enqueue the verified
-observation before dispatch. Batch `005` is complete on this contract-verified boundary.
+serverless completion is not guaranteed. Persistence and queue policy remain host/application
+responsibilities.
 
 Provider-produced compatibility evidence is event-triggered rather than a routine gate. Revisit it
 when the signing verifier, `standardwebhooks` dependency, supported webhook version, Linq signing
@@ -73,12 +61,11 @@ contract, or a host's raw-body handling materially changes. Limit the assertion 
 headers, the server-generated signature over the untouched body, the versioned envelope, and the
 adapter's `2xx` response. It does not prove deduplication, callback timing, `waitUntil`, database
 behavior, or provider delivery reliability. Historical real-delivery observations remain
-`Provider-observed`; legacy stays locally contract-tested unless a real legacy subscription is
-being migrated.
+`Provider-observed`.
 
-The checked-in inventory records 68 callable operations, 56 webhook examples, and 45 event names.
-Run `pnpm openapi:check` to detect canonical schema drift. `@linqapp/sdk@0.42.0` has no unwrap union;
-do not use generated SDK webhook wrappers as a closed-world boundary.
+The checked-in inventory records only the canonical event-name enum supporting the public typed
+event contract. Run `pnpm openapi:check` to detect that schema drift. `@linqapp/sdk@0.42.0` has no
+unwrap union; do not use generated SDK webhook wrappers as a closed-world boundary.
 
 ## Repository setup and storage
 

@@ -82,23 +82,9 @@ use the `whsec_` format, and signatures use `v1,{base64}` values. The current Li
 still describes SDK `webhooks.unwrap()`, but `@linqapp/sdk@0.42.0` removes that method and its wrapper
 event types at runtime and in declarations. Treat that as a provider documentation/SDK discrepancy.
 
-### Legacy compatibility
-
-Linq still sends deprecated `X-Webhook-*` headers for existing integrations:
-
-- `X-Webhook-Event`
-- `X-Webhook-Subscription-ID`
-- `X-Webhook-Timestamp`
-- `X-Webhook-Signature`
-
-Their legacy signature is hex HMAC-SHA256 over `{timestamp}.{raw_body}`. Treat this only as
-compatibility behavior. The adapter accepts it only with explicit
-`webhookVerificationMode: "legacy"` for a known existing subscription. Standard is the default;
-legacy-only requests fail there. A partial Standard header set always fails. Complete dual headers
-use the configured mode, and failure of that authoritative scheme never falls back to the other.
-
-Both paths preserve raw bytes and enforce a five-minute timestamp window. Follow the adapter tests
-when changing compatibility behavior; do not silently remove or broaden it.
+The repository adapter accepts Standard Webhooks only. Deprecated `X-Webhook-*` signature handling
+is not part of its public contract. Partial Standard header sets fail, and verified requests
+preserve exact raw bytes while enforcing a five-minute timestamp window.
 
 ## Delivery and acknowledgement
 
@@ -118,11 +104,11 @@ identifies the sender, `chat` contains canonical chat facts including `id`, `is_
 `owner_handle`, and message fields such as `id`, `parts`, `sent_at`, `delivered_at`, and `read_at`
 live directly on `data`.
 
-The canonical OpenAPI currently has 68 callable operations, 56 webhook example operation IDs, and
-45 event names. `@linqapp/sdk@0.42.0` exposes the 45-name subscription enum and useful lower-level
-resource types, but no exhaustive webhook envelope union or unwrap runtime. The adapter therefore
-owns a stable envelope, a checked-in OpenAPI-derived event-name inventory, curated normalized
-message/reaction observations, and a lossless raw form for unknown/future events.
+`@linqapp/sdk@0.42.0` exposes the subscription event-name enum and useful lower-level resource
+types, but no exhaustive webhook envelope union or unwrap runtime. The adapter therefore owns a
+stable envelope, a checked-in OpenAPI-derived event-name inventory, curated normalized
+message/reaction observations, and a lossless raw form for unknown/future events. The drift check
+intentionally does not inventory provider-wide operations.
 
 SDK `0.42.0` also adds the `app_clip` message part for a standalone Linq checkout URL. It is
 iMessage-only and does not downgrade to SMS or RCS. Keep outbound use on the typed native client;
