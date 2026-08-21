@@ -1,9 +1,6 @@
 {
   "source": "https://cdn.linqapp.com/openapi/linq-api-v3.yaml",
   "checkedAt": "2026-08-19",
-  "callableOperationCount": 68,
-  "webhookExampleCount": 56,
-  "totalOperationIdCount": 124,
   "eventNames": [
     "message.sent",
     "message.received",

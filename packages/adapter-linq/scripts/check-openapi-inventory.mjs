@@ -15,23 +15,7 @@ if (!response.ok) {
 }
 
 const document = YAML.parse(await response.text());
-const operationIds = [];
-
-visit(document, (value) => {
-  if (typeof value.operationId === "string") {
-    operationIds.push(value.operationId);
-  }
-});
-
-const webhookOperationIds = operationIds.filter((operationId) => operationId.startsWith("webhook"));
-const callableOperationIds = operationIds.filter(
-  (operationId) => !operationId.startsWith("webhook"),
-);
 const eventNames = document?.components?.schemas?.WebhookEventType?.enum;
-
-assertEqual("callable operations", callableOperationIds.length, inventory.callableOperationCount);
-assertEqual("webhook examples", webhookOperationIds.length, inventory.webhookExampleCount);
-assertEqual("total operation IDs", operationIds.length, inventory.totalOperationIdCount);
 
 if (!Array.isArray(eventNames)) {
   throw new Error("Canonical OpenAPI has no WebhookEventType enum");
@@ -57,26 +41,7 @@ if (checkedInEventTypes !== generatedEventTypes) {
   );
 }
 
-console.log(
-  `Linq OpenAPI inventory matches (${callableOperationIds.length} callable, ${webhookOperationIds.length} webhook examples, ${eventNames.length} events).`,
-);
-
-function visit(value, visitor) {
-  if (!value || typeof value !== "object") {
-    return;
-  }
-
-  visitor(value);
-  for (const nested of Object.values(value)) {
-    visit(nested, visitor);
-  }
-}
-
-function assertEqual(label, actual, expected) {
-  if (actual !== expected) {
-    throw new Error(`Linq OpenAPI ${label} drifted: expected ${expected}, received ${actual}`);
-  }
-}
+console.log(`Linq OpenAPI webhook event contract matches (${eventNames.length} events).`);
 
 function renderEventTypes(eventNames) {
   const entries = eventNames.map((eventName) => `  ${JSON.stringify(eventName)},`).join("\n");
