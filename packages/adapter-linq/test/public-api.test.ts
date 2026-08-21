@@ -71,8 +71,6 @@ function assertVerifiedWebhookCannotBeConstructed(adapter: LinqAdapter): void {
       scheme: "standard",
       webhookId: "webhook-123",
       timestamp: "1785672000",
-      subscriptionId: null,
-      eventType: null,
     },
     rawEvent: {},
   };
@@ -82,17 +80,6 @@ function assertVerifiedWebhookCannotBeConstructed(adapter: LinqAdapter): void {
 }
 
 void assertVerifiedWebhookCannotBeConstructed;
-
-function assertAutoVerificationModeDoesNotCompile(): void {
-  createLinqAdapter({
-    apiKey: API_KEY,
-    signingSecret: SIGNING_SECRET,
-    // @ts-expect-error -- ambiguous automatic scheme inference is intentionally unsupported.
-    webhookVerificationMode: "auto",
-  });
-}
-
-void assertAutoVerificationModeDoesNotCompile;
 
 function assertTypedEventRegistration(adapter: LinqAdapter): void {
   const unsubscribeMessage = adapter.onLinqEvent("message.received", (event) => {
@@ -381,8 +368,6 @@ const futureEventContract = {
     scheme: "standard",
     webhookId: "future-webhook-id",
     timestamp: "4070908800",
-    subscriptionId: null,
-    eventType: null,
   },
   rawEvent: {
     api_version: "v3",
@@ -405,16 +390,6 @@ describe("public adapter foundation", () => {
     expect(adapter).toBeInstanceOf(LinqAdapter);
     expectTypeOf(adapter).toEqualTypeOf<LinqAdapter>();
     expectTypeOf(createLinqAdapter).returns.toEqualTypeOf<LinqAdapter>();
-  });
-
-  it("rejects unsupported verification modes at runtime", () => {
-    expect(() =>
-      createLinqAdapter({
-        apiKey: API_KEY,
-        signingSecret: SIGNING_SECRET,
-        webhookVerificationMode: "auto" as never,
-      }),
-    ).toThrow('webhookVerificationMode must be "standard" or "legacy"');
   });
 
   it("exposes the configured LinqAPIV3 client", () => {

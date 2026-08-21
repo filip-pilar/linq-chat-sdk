@@ -55,7 +55,6 @@ import {
   type LinqReactionWebhookEvent,
   type LinqWebhookEvent,
   type LinqWebhookVerificationResult,
-  type LinqWebhookVerificationScheme,
 } from "./webhook.js";
 
 type LinqThreadId = {
@@ -69,8 +68,6 @@ export interface LinqAdapterConfig {
   apiKey: string;
   baseURL?: string;
   signingSecret: string;
-  /** Standard by default. Legacy is deprecated and requires explicit opt-in. */
-  webhookVerificationMode?: LinqWebhookVerificationScheme;
 }
 
 type LinqPartReactionOptions = {
@@ -153,7 +150,6 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   readonly userName: string = "linq";
   private readonly apiClient: LinqAPIV3;
   private readonly signingSecret: string;
-  private readonly webhookVerificationMode: LinqWebhookVerificationScheme;
   private readonly webhookVerificationAuthority = {};
   private readonly linqEvents = new LinqEventRegistry();
 
@@ -164,20 +160,11 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   private readonly chatKinds = new Map<string, boolean>();
 
   constructor(config: LinqAdapterConfig) {
-    if (
-      config.webhookVerificationMode !== undefined &&
-      config.webhookVerificationMode !== "standard" &&
-      config.webhookVerificationMode !== "legacy"
-    ) {
-      throw new TypeError('webhookVerificationMode must be "standard" or "legacy"');
-    }
-
     this.apiClient = new LinqAPIV3({
       apiKey: config.apiKey,
       baseURL: config.baseURL,
     });
     this.signingSecret = config.signingSecret;
-    this.webhookVerificationMode = config.webhookVerificationMode ?? "standard";
     this.logger = new ConsoleLogger();
   }
 
@@ -584,7 +571,7 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       });
 
       // Once send begins, Linq may have accepted attachment references even if
-      // the client ultimately throws. Batch 012 owns any send-time lifecycle.
+      // the client ultimately throws, so preparation cleanup must stop here.
       messageSendingBegan = true;
       const response = await this.apiClient.chats.messages.send(chatId, {
         message: {
@@ -928,11 +915,7 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   private async verifyWebhookRequest(request: Request): Promise<{
     result: LinqWebhookVerificationResult;
   }> {
-    const authentication = await authenticateLinqWebhookRequest(
-      request,
-      this.signingSecret,
-      this.webhookVerificationMode,
-    );
+    const authentication = await authenticateLinqWebhookRequest(request, this.signingSecret);
 
     if (!authentication.ok) {
       return { result: authentication };
@@ -960,18 +943,13 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       event.data.reconciled_at === undefined
     ) {
       const chatId = event.data.chat.id;
-      const isGroup = event.data.chat.is_group ?? undefined;
+      const isGroup = event.data.chat.is_group ?? this.chatKinds.get(chatId);
 
-      // isDM() only trusts known chats, so resolve group/DM identity before
-      // dispatching when the webhook does not carry it.
-      if (isGroup === undefined && !this.chatKinds.has(chatId)) {
-        try {
-          const chat = await this.apiClient.chats.retrieve(chatId);
-
-          this.chatKinds.set(chatId, chat.is_group);
-        } catch (error) {
-          this.logger.warn(`Failed to resolve Linq chat kind for ${chatId}`, { error });
-        }
+      // A malformed event without a canonical or previously observed chat kind
+      // remains available through the verified Linq event seam. Do not add
+      // provider I/O to the acknowledgement path or guess the standard handler.
+      if (isGroup === undefined) {
+        return { handled: "ignored" };
       }
 
       const threadId = this.encodeThreadId({ chatId, isGroup });
@@ -1064,8 +1042,8 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     );
   }
 
-  // Rebuild fetchData from the stable provider attachment ID after queue
-  // serialization. A fresh CDN URL is resolved only when bytes are requested.
+  // Rebuild fetchData from the stable provider attachment ID after serialization.
+  // A fresh CDN URL is resolved only when bytes are requested.
   rehydrateAttachment(attachment: Attachment): Attachment {
     const attachmentId = attachment.fetchMetadata?.attachmentId;
 
@@ -1100,7 +1078,7 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
   isDM(threadId: string): boolean {
     // Only report a DM when we have seen the chat and know it is not a group.
-    // Webhooks always carry `is_group`, so this is warm before handlers run.
+    // Canonical webhooks and fetched chats warm this before handlers run.
     return this.decodeThreadId(threadId).isGroup === false;
   }
 }

@@ -38,6 +38,35 @@ describe("verified generic Linq event dispatch", () => {
     });
   });
 
+  it("keeps an unclassified message in generic dispatch without provider lookup", async () => {
+    const context = await createContext();
+    const generic = vi.fn();
+    const tasks: Promise<unknown>[] = [];
+    const retrieve = vi.spyOn(context.adapter.client.chats, "retrieve");
+    const payload = structuredClone(fixture) as unknown as {
+      data: { chat: { is_group: boolean | null } };
+    };
+    payload.data.chat.is_group = null;
+    context.adapter.onLinqEvent("message.received", generic);
+
+    const response = await context.adapter.handleWebhook(createStandardRequest(payload), {
+      waitUntil: (task) => tasks.push(task),
+    });
+    await Promise.all(tasks);
+
+    expect(response.status).toBe(200);
+    expect(retrieve).not.toHaveBeenCalled();
+    expect(context.processMessage).not.toHaveBeenCalled();
+    expect(generic).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "message.received",
+        rawEvent: expect.objectContaining({
+          data: expect.objectContaining({ chat: payload.data.chat }),
+        }),
+      }),
+    );
+  });
+
   it("suppresses concurrent duplicate standard and generic attempts", async () => {
     const context = await createContext();
     const handler = vi.fn();

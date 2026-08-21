@@ -23,142 +23,35 @@ describe("LinqAdapter verified webhook ingress", () => {
     expect(request.bodyUsed).toBe(true);
   });
 
-  it("reads and verifies a legacy webhook exactly once", async () => {
-    const adapter = createLegacyTestAdapter();
-    const request = createLegacyRequest(fixture, {
-      "x-webhook-event": "message.received",
-      "x-webhook-subscription-id": "subscription-123",
-    });
-    const text = vi.spyOn(request, "text");
-    const arrayBuffer = vi.spyOn(request, "arrayBuffer");
-    const sign = vi.spyOn(globalThis.crypto.subtle, "sign");
-
-    const result = await adapter.verifyWebhook(request);
-
-    expect(result.ok).toBe(true);
-    expect(text).not.toHaveBeenCalled();
-    expect(arrayBuffer).toHaveBeenCalledTimes(1);
-    expect(sign).toHaveBeenCalledTimes(1);
-    if (result.ok) {
-      expect(result.webhook.transport).toEqual({
-        scheme: "legacy",
-        webhookId: null,
-        timestamp: expect.any(String),
-        subscriptionId: "subscription-123",
-        eventType: "message.received",
-      });
-    }
-  });
-
-  it("accepts complete dual headers through the valid legacy signature", async () => {
-    const adapter = createLegacyTestAdapter();
-    const dual = createLegacyRequest(fixture, {
-      "webhook-id": "dual-header-event",
-      "webhook-signature": "v1,invalid-for-legacy-subscription-secret",
-      "webhook-timestamp": Math.floor(Date.now() / 1000).toString(),
-      "x-webhook-event": "message.received",
-      "x-webhook-subscription-id": "subscription-123",
-    });
-
-    const result = await adapter.verifyWebhook(dual);
-
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.webhook.transport).toMatchObject({
-        scheme: "legacy",
-        webhookId: "dual-header-event",
-        subscriptionId: "subscription-123",
-      });
-    }
-  });
-
-  it("uses Standard as the authoritative scheme for complete dual headers by default", async () => {
-    const body = JSON.stringify(fixture);
-    const timestamp = Math.floor(Date.now() / 1000).toString();
-    const webhookId = "dual-standard-authority";
-    const standardSignature = `v1,${createHmac("sha256", SIGNING_KEY)
-      .update(`${webhookId}.${timestamp}.${body}`)
-      .digest("base64")}`;
-    const request = createLegacyRequest(fixture, {
-      "webhook-id": webhookId,
-      "webhook-signature": standardSignature,
-      "webhook-timestamp": timestamp,
-      "x-webhook-signature": "invalid-legacy-signature",
-    });
-
-    const result = await createTestAdapter().verifyWebhook(request);
-
-    expect(result).toMatchObject({
-      ok: true,
-      webhook: { transport: { scheme: "standard", webhookId } },
-    });
-  });
-
-  it("does not use valid Standard headers when explicit legacy authority fails", async () => {
-    const body = JSON.stringify(fixture);
-    const timestamp = Math.floor(Date.now() / 1000).toString();
-    const webhookId = "dual-legacy-no-fallback";
-    const standardSignature = `v1,${createHmac("sha256", SIGNING_KEY)
-      .update(`${webhookId}.${timestamp}.${body}`)
-      .digest("base64")}`;
-    const request = createLegacyRequest(fixture, {
-      "webhook-id": webhookId,
-      "webhook-signature": standardSignature,
-      "webhook-timestamp": timestamp,
-      "x-webhook-signature": "invalid-legacy-signature",
-    });
-
-    await expect(createLegacyTestAdapter().verifyWebhook(request)).resolves.toMatchObject({
-      ok: false,
-      error: { code: "invalid_signature", status: 401 },
-    });
-  });
-
-  it("never falls back to a valid legacy signature when authoritative Standard verification fails", async () => {
-    const request = createLegacyRequest(fixture, {
-      "webhook-id": "dual-no-fallback",
-      "webhook-signature": "v1,invalid",
-      "webhook-timestamp": Math.floor(Date.now() / 1000).toString(),
-    });
-
-    await expect(createTestAdapter().verifyWebhook(request)).resolves.toMatchObject({
-      ok: false,
-      error: { code: "invalid_signature", status: 401 },
-    });
-  });
-
-  it("rejects legacy-only deliveries unless legacy mode is explicit", async () => {
+  it("rejects deliveries without complete Standard Webhook headers", async () => {
     await expect(
-      createTestAdapter().verifyWebhook(createLegacyRequest(fixture)),
+      createTestAdapter().verifyWebhook(
+        new Request("https://example.com", {
+          method: "POST",
+          headers: { "x-webhook-signature": "deprecated" },
+          body: JSON.stringify(fixture),
+        }),
+      ),
     ).resolves.toMatchObject({
       ok: false,
       error: { code: "missing_signature_headers", status: 401 },
     });
-  });
 
-  it("rejects Standard-only deliveries in explicit legacy mode", async () => {
+    const partial = createStandardRequest(fixture);
+    const headers = new Headers(partial.headers);
+    headers.delete("webhook-signature");
     await expect(
-      createLegacyTestAdapter().verifyWebhook(createStandardRequest(fixture)),
-    ).resolves.toMatchObject({
+      createTestAdapter().verifyWebhook(
+        new Request(partial.url, { method: "POST", headers, body: await partial.text() }),
+      ),
+    ).resolves.toEqual({
       ok: false,
-      error: { code: "missing_signature_headers", status: 401 },
+      error: {
+        code: "missing_signature_headers",
+        status: 401,
+        message: "Incomplete Standard Webhook headers",
+      },
     });
-  });
-
-  it("resists downgrade from partial Standard headers to a valid legacy signature", async () => {
-    for (const adapter of [createTestAdapter(), createLegacyTestAdapter()]) {
-      const legacy = createLegacyRequest(fixture, { "webhook-id": "partial-standard" });
-      const result = await adapter.verifyWebhook(legacy);
-
-      expect(result).toEqual({
-        ok: false,
-        error: {
-          code: "missing_signature_headers",
-          status: 401,
-          message: "Incomplete Standard Webhook headers",
-        },
-      });
-    }
   });
 
   it("returns typed failures for authentication, JSON, payload, and version errors", async () => {
@@ -198,7 +91,7 @@ describe("LinqAdapter verified webhook ingress", () => {
     });
   });
 
-  it("enforces timestamp boundaries for Standard and explicit legacy verification", async () => {
+  it("enforces Standard Webhook timestamp boundaries", async () => {
     const now = Math.floor(Date.now() / 1000);
 
     await expect(
@@ -209,16 +102,6 @@ describe("LinqAdapter verified webhook ingress", () => {
     await expect(
       createTestAdapter().verifyWebhook(
         createStandardRequest(fixture, { "webhook-timestamp": String(now - 301) }),
-      ),
-    ).resolves.toMatchObject({ ok: false, error: { code: "stale_timestamp" } });
-    await expect(
-      createLegacyTestAdapter().verifyWebhook(
-        createLegacyRequest(fixture, { "x-webhook-timestamp": String(now + 300) }),
-      ),
-    ).resolves.toMatchObject({ ok: true });
-    await expect(
-      createLegacyTestAdapter().verifyWebhook(
-        createLegacyRequest(fixture, { "x-webhook-timestamp": String(now + 301) }),
       ),
     ).resolves.toMatchObject({ ok: false, error: { code: "stale_timestamp" } });
   });
@@ -246,30 +129,6 @@ describe("LinqAdapter verified webhook ingress", () => {
       [createTestAdapter(), tampered],
       [createTestAdapter(), substituted],
       [wrongSecret, createStandardRequest(fixture)],
-    ] as const) {
-      await expect(adapter.verifyWebhook(request)).resolves.toMatchObject({
-        ok: false,
-        error: { code: "invalid_signature", status: 401 },
-      });
-    }
-  });
-
-  it("rejects tampering and wrong secrets in explicit legacy mode", async () => {
-    const signed = createLegacyRequest(fixture);
-    const tampered = new Request(signed.url, {
-      method: "POST",
-      headers: signed.headers,
-      body: JSON.stringify({ ...fixture, event_id: "tampered-legacy" }),
-    });
-    const wrongSecret = createLinqAdapter({
-      apiKey: "test_linq_api_key",
-      signingSecret: "wrong-legacy-secret",
-      webhookVerificationMode: "legacy",
-    });
-
-    for (const [adapter, request] of [
-      [createLegacyTestAdapter(), tampered],
-      [wrongSecret, createLegacyRequest(fixture)],
     ] as const) {
       await expect(adapter.verifyWebhook(request)).resolves.toMatchObject({
         ok: false,
@@ -314,10 +173,7 @@ describe("LinqAdapter verified webhook ingress", () => {
 
   it("exposes current envelope, transport, endpoint, message, attachment, and reply facts", async () => {
     const adapter = createTestAdapter();
-    const request = createStandardRequest(fixture, {
-      "x-webhook-event": "message.received",
-      "x-webhook-subscription-id": "subscription-123",
-    });
+    const request = createStandardRequest(fixture);
 
     const result = await adapter.verifyWebhook(request);
 
@@ -341,8 +197,6 @@ describe("LinqAdapter verified webhook ingress", () => {
       scheme: "standard",
       webhookId: "webhook-test-id",
       timestamp: expect.any(String),
-      subscriptionId: "subscription-123",
-      eventType: "message.received",
     });
     expect(result.webhook.message).toMatchObject({
       providerMessageId: fixture.data.id,
@@ -826,14 +680,6 @@ function createTestAdapter() {
   return createLinqAdapter({ apiKey: "test_linq_api_key", signingSecret: SIGNING_SECRET });
 }
 
-function createLegacyTestAdapter() {
-  return createLinqAdapter({
-    apiKey: "test_linq_api_key",
-    signingSecret: SIGNING_SECRET,
-    webhookVerificationMode: "legacy",
-  });
-}
-
 type MutableFixture = Record<string, unknown> & {
   event_type: string;
   webhook_version: string;
@@ -882,23 +728,4 @@ function createSignedBody(
   }
 
   return new Request("https://example.com/webhooks/linq", { method: "POST", headers, body });
-}
-
-function createLegacyRequest(payload: unknown, extraHeaders: Record<string, string> = {}): Request {
-  const body = JSON.stringify(payload);
-  const timestamp = extraHeaders["x-webhook-timestamp"] ?? Math.floor(Date.now() / 1000).toString();
-  const signature =
-    extraHeaders["x-webhook-signature"] ??
-    createHmac("sha256", SIGNING_SECRET).update(`${timestamp}.${body}`).digest("hex");
-
-  return new Request("https://example.com/webhooks/linq", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-webhook-signature": signature,
-      "x-webhook-timestamp": timestamp,
-      ...extraHeaders,
-    },
-    body,
-  });
 }

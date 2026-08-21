@@ -5,16 +5,11 @@ import {
   failure,
   type LinqWebhookTransportObservation,
   type LinqWebhookVerificationFailure,
-  type LinqWebhookVerificationScheme,
 } from "./webhook.js";
 
 const STANDARD_ID_HEADER = "webhook-id";
 const STANDARD_SIGNATURE_HEADER = "webhook-signature";
 const STANDARD_TIMESTAMP_HEADER = "webhook-timestamp";
-const LEGACY_EVENT_HEADER = "x-webhook-event";
-const LEGACY_SIGNATURE_HEADER = "x-webhook-signature";
-const LEGACY_SUBSCRIPTION_HEADER = "x-webhook-subscription-id";
-const LEGACY_TIMESTAMP_HEADER = "x-webhook-timestamp";
 const MAX_WEBHOOK_AGE_SECONDS = 5 * 60;
 
 export type LinqWebhookAuthenticationResult =
@@ -30,7 +25,6 @@ export type LinqWebhookAuthenticationResult =
 export async function authenticateLinqWebhookRequest(
   request: Request,
   signingSecret: string,
-  scheme: LinqWebhookVerificationScheme,
 ): Promise<LinqWebhookAuthenticationResult> {
   const standardHeaders = [
     STANDARD_ID_HEADER,
@@ -43,13 +37,11 @@ export async function authenticateLinqWebhookRequest(
     return failure("missing_signature_headers", 401, "Incomplete Standard Webhook headers");
   }
 
-  if (scheme === "standard" && !hasCompleteStandardHeaders) {
+  if (!hasCompleteStandardHeaders) {
     return failure("missing_signature_headers", 401, "Missing Standard Webhook headers");
   }
 
-  return scheme === "standard"
-    ? verifyStandardWebhook(request, signingSecret)
-    : verifyLegacyWebhook(request, signingSecret);
+  return verifyStandardWebhook(request, signingSecret);
 }
 
 async function verifyStandardWebhook(
@@ -80,7 +72,7 @@ async function verifyStandardWebhook(
       event,
       rawBody,
       rawBodyBase64: Buffer.from(rawBytes).toString("base64"),
-      transport: transportObservation(request.headers, "standard"),
+      transport: transportObservation(request.headers),
     };
   } catch (error) {
     if (error instanceof SyntaxError) {
@@ -95,61 +87,11 @@ async function verifyStandardWebhook(
   }
 }
 
-async function verifyLegacyWebhook(
-  request: Request,
-  signingSecret: string,
-): Promise<LinqWebhookAuthenticationResult> {
-  const timestamp = request.headers.get(LEGACY_TIMESTAMP_HEADER)?.trim() || "";
-  const signature = request.headers.get(LEGACY_SIGNATURE_HEADER)?.trim() || "";
-
-  if (!timestamp || !signature) {
-    return failure("missing_signature_headers", 401, "Missing Linq webhook signature headers");
-  }
-
-  if (!isFreshTimestamp(timestamp)) {
-    return failure("stale_timestamp", 401, "Linq webhook timestamp is too old or invalid");
-  }
-
-  if (!signingSecret) {
-    return missingSigningSecret();
-  }
-
-  const rawBytes = new Uint8Array(await request.arrayBuffer());
-  const rawBody = new TextDecoder().decode(rawBytes);
-
-  if (!(await verifyLinqSignature(timestamp, signature, signingSecret, rawBytes))) {
-    return invalidSignature();
-  }
-
-  try {
-    const event: unknown = JSON.parse(rawBody);
-
-    return {
-      ok: true,
-      event,
-      rawBody,
-      rawBodyBase64: Buffer.from(rawBytes).toString("base64"),
-      transport: transportObservation(request.headers, "legacy"),
-    };
-  } catch {
-    return invalidJson();
-  }
-}
-
-function transportObservation(
-  headers: Headers,
-  scheme: LinqWebhookTransportObservation["scheme"],
-): LinqWebhookTransportObservation {
+function transportObservation(headers: Headers): LinqWebhookTransportObservation {
   return {
-    scheme,
+    scheme: "standard",
     webhookId: trimmedHeader(headers, STANDARD_ID_HEADER),
-    timestamp:
-      trimmedHeader(
-        headers,
-        scheme === "standard" ? STANDARD_TIMESTAMP_HEADER : LEGACY_TIMESTAMP_HEADER,
-      ) ?? "",
-    subscriptionId: trimmedHeader(headers, LEGACY_SUBSCRIPTION_HEADER),
-    eventType: trimmedHeader(headers, LEGACY_EVENT_HEADER),
+    timestamp: trimmedHeader(headers, STANDARD_TIMESTAMP_HEADER) ?? "",
   };
 }
 
@@ -182,71 +124,4 @@ function isFreshTimestamp(timestamp: string): boolean {
 
   const ageSeconds = Math.abs(Math.floor(Date.now() / 1000) - sentAt);
   return ageSeconds <= MAX_WEBHOOK_AGE_SECONDS;
-}
-
-function fromHex(hex: string): Uint8Array | null {
-  const normalized = hex.startsWith("sha256=") ? hex.slice("sha256=".length) : hex;
-
-  if (normalized.length % 2 !== 0 || /[^a-f0-9]/i.test(normalized)) {
-    return null;
-  }
-
-  const bytes = new Uint8Array(normalized.length / 2);
-
-  for (let index = 0; index < normalized.length; index += 2) {
-    bytes[index / 2] = Number.parseInt(normalized.slice(index, index + 2), 16);
-  }
-
-  return bytes;
-}
-
-function constantTimeEqual(left: Uint8Array, right: Uint8Array): boolean {
-  if (left.length !== right.length) {
-    return false;
-  }
-
-  let mismatch = 0;
-
-  for (let index = 0; index < left.length; index += 1) {
-    mismatch |= (left[index] ?? 0) ^ (right[index] ?? 0);
-  }
-
-  return mismatch === 0;
-}
-
-async function signWebhookPayload(
-  secret: string,
-  timestamp: string,
-  rawBody: Uint8Array,
-): Promise<Uint8Array> {
-  const encoder = new TextEncoder();
-  const key = await globalThis.crypto.subtle.importKey(
-    "raw",
-    encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const prefix = encoder.encode(`${timestamp}.`);
-  const signedPayload = new Uint8Array(prefix.length + rawBody.length);
-  signedPayload.set(prefix);
-  signedPayload.set(rawBody, prefix.length);
-
-  return new Uint8Array(await globalThis.crypto.subtle.sign("HMAC", key, signedPayload));
-}
-
-async function verifyLinqSignature(
-  timestamp: string,
-  signature: string,
-  secret: string,
-  rawBody: Uint8Array,
-): Promise<boolean> {
-  const providedSignature = fromHex(signature);
-
-  if (!providedSignature) {
-    return false;
-  }
-
-  const expectedSignature = await signWebhookPayload(secret, timestamp, rawBody);
-  return constantTimeEqual(providedSignature, expectedSignature);
 }

@@ -58,14 +58,10 @@ export type LinqReactionWebhookEvent = LinqWebhookEvent<LinqReactionWebhookData>
   readonly event_type: "reaction.added" | "reaction.removed";
 };
 
-export type LinqWebhookVerificationScheme = "standard" | "legacy";
-
 export interface LinqWebhookTransportObservation {
-  readonly scheme: LinqWebhookVerificationScheme;
+  readonly scheme: "standard";
   readonly webhookId: string | null;
   readonly timestamp: string;
-  readonly subscriptionId: string | null;
-  readonly eventType: string | null;
 }
 
 export interface LinqWebhookEnvelopeObservation {
@@ -255,9 +251,9 @@ interface LinqVerifiedWebhookBase {
   readonly envelope: LinqWebhookEnvelopeObservation;
   readonly transport: LinqWebhookTransportObservation;
   readonly rawEvent: LinqWebhookRawEvent;
-  /** Exact authenticated request text. Persist this before dispatch for durable ingress. */
+  /** Exact authenticated request text. */
   readonly rawBody: string;
-  /** Exact authenticated request bytes, encoded for immutable/persistence-safe transport. */
+  /** Exact authenticated request bytes encoded as base64. */
   readonly rawBodyBase64: string;
   readonly [VERIFIED_WEBHOOK]: LinqVerifiedWebhookInternal;
 }

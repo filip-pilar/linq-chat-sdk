@@ -76,5 +76,4 @@ export type {
   LinqWebhookVerificationErrorCode,
   LinqWebhookVerificationFailure,
   LinqWebhookVerificationResult,
-  LinqWebhookVerificationScheme,
 } from "./webhook.js";
