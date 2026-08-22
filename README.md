@@ -3,7 +3,7 @@
 A [Linq](https://linqapp.com) adapter for [Chat SDK](https://www.npmjs.com/package/chat). It lets
 Chat SDK applications receive and send iMessage, RCS, and SMS messages through an existing Linq
 chat while retaining access to Linq-specific capabilities where the standard interface has no
-faithful equivalent.
+faithful equivalent, including native mentions and conversation-scoped polls.
 
 ## Repository
 

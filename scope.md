@@ -17,14 +17,15 @@ capability status is maintained in
 - Canonical `linq:{chatId}` identity and decode-only compatibility for persisted
   `linq:{chatId}:dm/group` values.
 - Deterministic text/decoration compilation, service/effect policy, native rich links, outbound
-  media preparation, inbound media downloads, shared error translation, and defensive parsing.
+  native group mentions, media preparation/downloads, shared error translation, and defensive
+  parsing. Authenticated owner-targeted mentions enter standard Chat SDK `onNewMention()` routing.
 - Standard Webhook verification over the exact raw body, stable typed/lossless observations,
   current message/reaction dispatch, atomic event dedupe, callback isolation, and Chat SDK
   `waitUntil` integration.
 - Exact static signing-secret validation, full-precision provider timestamp ordering, and narrow
   SDK-response guards for facts used in public identities/results.
 - A narrow `adapter.conversation(threadOrId)` extension for part-targeted replies/reactions,
-  stop-typing, contact-card sharing, voice memos, existing-group operations, and location.
+  stop-typing, contact-card sharing, voice memos, existing-group operations, location, and polls.
 - A truthful official-client escape hatch: synchronous `adapter.client` for static credentials and
   `await adapter.getClient()` for static or lazy credentials.
 
@@ -47,6 +48,10 @@ capability status is maintained in
   truthful Linq event; only the incompatible standard `Message` projection is skipped.
 - Inbound voice memos are ordinary downloadable audio attachments. Linq's current schema does not
   reliably distinguish them from other audio media.
+- Inbound vCards are ordinary downloadable `text/vcard` file attachments. Parsing or applying a
+  contact is application-owned.
+- Poll snapshots and events are provider facts, not delivery, request/event correlation, polling,
+  or application workflow guarantees.
 - Current history traversal is backward-only and bounded. It skips a bounded number of all-filtered
   provider pages so usable later messages are not hidden. Rows without truthful canonical identity,
   authorship, and RFC3339 timestamps are omitted; usable messages are stably oldest-first by the
@@ -64,6 +69,9 @@ capability status is maintained in
   streaming requires demonstrated need; upload workflows and retention remain out of scope.
 - Curated group/presence event models remain deferred; lossless generic events remain
   available.
+- Chat backgrounds remain provider-native while current guidance and installed request enums
+  disagree (`glitter` versus `sky`/`water`/`aurora`). Named/raw events remain observable.
+- AI-agent tools, prompts, authorization, and autonomous poll/mention policy remain application-owned.
 
 These are not active roadmap commitments. Provider/device/live observations are optional evidence,
 not adapter completion or release gates.

@@ -56,6 +56,7 @@ For canonical Linq thread IDs (`linq:{chatId}`), the adapter supports:
 - editing text, fetching thread/history/message data, and backward pagination;
 - whole-message reactions, typing, and chat-wide mark-read acknowledgements;
 - inbound message and reaction dispatch through the ordinary Chat SDK handlers;
+- native group-mention translation and `onNewMention()` routing without visible-`@` heuristics;
 - canonical returned thread/message identities and lossless Linq raw message data.
 
 Outbound media accepts public HTTPS references or caller-supplied bytes. Adapter-performed uploads
@@ -109,10 +110,33 @@ await thread.post(
 ```
 
 The immutable options snapshot supports documented preferred services, bubble/screen effects,
-validated text decorations, and standalone native rich links. The compiler produces deterministic
-plain text and UTF-16 decoration ranges from raw text, supported Markdown/AST styles, and applicable
-static-card text. Invalid or contradictory inputs fail before UUID generation, attachment
-preparation, logging, or provider I/O.
+validated text decorations, one native group mention, and standalone native rich links. The
+compiler produces deterministic plain text and UTF-16 ranges from raw text, supported Markdown/AST
+styles, and applicable static-card text. Locally invalid or contradictory inputs fail before UUID
+generation, attachment preparation, logging, or provider I/O.
+
+Ordinary Chat SDK mention tokens work for existing group posts and replies:
+
+```ts
+await groupThread.post(`Please review this, <@${participantId}>`);
+```
+
+When the token contains a Linq participant ID, the adapter resolves that ID against the existing
+chat once and sends the participant handle required by Linq. A handle can be used directly without
+a lookup. For explicit display text and range control, use `mention` (UTF-16 `[start, end)` offsets):
+
+```ts
+await groupThread.post(
+  linqMessage("Hey Kevin, can you confirm?", {
+    mention: { handle: "+14155551234", range: [4, 9] },
+  }),
+);
+```
+
+Mentions require one text part in an existing group and cannot share that part with manual
+decorations or a rich link. Derived bold/italic/strikethrough may degrade to plain text so the
+native mention remains truthful. Explicit RCS/SMS requests are accepted: Linq documents native
+iMessage highlighting and plain-text RCS/SMS behavior, without an adapter presentation guarantee.
 
 Explicit RCS or SMS intent cannot be combined with Linq-only effects, animations, or manual
 decorations. Omitted service remains provider best-effort. This contract describes the request sent
@@ -142,16 +166,37 @@ await conversation.group.leave();
 
 await conversation.location.request();
 const snapshot = await conversation.location.retrieve();
+
+const poll = await conversation.polls.create({ options: ["Tacos", "Sushi"] });
+await conversation.polls.addOptions(poll.messageId, ["Pizza"]);
+await conversation.polls.vote(poll.messageId, {
+  optionId: poll.options[0]!.optionId,
+  operation: "add",
+});
+const currentPoll = await conversation.polls.retrieve(poll.messageId);
 ```
 
 Ordinary replies, reactions, start-typing, and mark-read remain standard Chat SDK operations.
 Group/location/voice-memo results expose only facts established by the provider response; they do
 not imply delivery, consent, correlation, playback, presentation, or workflow completion.
 
+Polls are existing-chat, iMessage-native operations. Create requires at least two options; options
+are add-only; one vote call toggles one option. The immutable snapshot exposes validated current
+provider facts plus the lossless raw response. Create preserves a supplied idempotency key or
+generates one key per logical request;
+add-option and vote calls disable SDK retries because their current request contracts have no
+idempotency key. Poll events remain observations, not a polling service or workflow state machine.
+
 Inbound user voice memos arrive through the standard media path as downloadable audio attachments.
 The current canonical schema does not reliably distinguish a native Messages voice memo from an
 ordinary audio attachment, so the adapter does not invent a discriminator. Transcription belongs
 to the consuming application.
+
+Inbound `.vcf` contact cards use the same standard media contract: a `text/vcard` file attachment
+with stable Linq attachment identity and secure `fetchData()`. Parsing the vCard, resolving contact
+identity, and changing an address book belong to the consuming application. The separate
+`shareContactCard()` operation remains Linq's configured iMessage Name and Photo Sharing action;
+account-level contact-card configuration remains on the native client.
 
 ## Verified Linq events
 
@@ -190,6 +235,11 @@ truthful Linq named/generic observation; only the incompatible standard `Message
 skipped.
 Atomic provider/partner/event dedupe uses the configured Chat SDK state adapter.
 
+All nine current poll event families (`poll.received`, lifecycle, update, failure, vote, and
+reaction events) use this same typed/lossless verified pipeline. Valid poll events reach their exact
+named and generic handlers; malformed curated poll payloads remain generic-only. There is no
+parallel `onPoll()` API and no automatic retrieval after an event.
+
 This seam does not make the adapter a queue or database. Hosts own request-size/rate limits,
 durability, replay policy, application persistence, and long-running work.
 
@@ -201,6 +251,12 @@ operations. All configurations expose `await adapter.getClient()`; lazy configur
 client from the current credential result and intentionally reject synchronous `.client` access
 rather than cache a stale key. Use the native client deliberately for account, subscription,
 administrative, or other provider-native operations that do not warrant adapter APIs.
+
+Chat backgrounds remain on this escape hatch. Current Linq guidance mentions `glitter`, while the
+installed SDK and canonical request schema expose `sky`, `water`, and `aurora` (response/event
+contracts may still contain `glitter`). The adapter does not freeze a wrapper until that request
+contract aligns and a reusable consumer need justifies one. Canonical background events are still
+available through exact named/raw `onLinqEvent()` handlers.
 
 ## Identity and compatibility
 
@@ -226,6 +282,8 @@ uncertain acceptance remains application/provider-owned.
 The adapter does not own provider delivery/reliability, retries beyond the official SDK, account
 configuration, capability probes, request-to-event correlation, ordering, queues, databases,
 polling, application workflows, transcription, retention, edge HTTP policy, or deployment.
+AI-agent tools, prompts, authorization, and autonomous poll/mention policy are consuming-application
+responsibilities; the adapter exposes primitives only.
 
 See [FEATURE_PARITY.md](FEATURE_PARITY.md) for the compact capability/evidence matrix.
 

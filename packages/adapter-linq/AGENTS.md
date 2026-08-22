@@ -26,6 +26,13 @@ OpenAPI/docs, and the repository's `chat-sdk` and `integrating-linq` skills.
   preserve uncertain-acceptance boundaries rather than fabricating facts or retrying mutations.
 - Compare provider history by the complete validated RFC3339 instant. Keep JavaScript `Date`
   metadata and immutable full-precision raw values as distinct representations.
+- Preserve provider-issued participant identity on inbound messages. Native mention targeting may
+  resolve an existing chat participant ID to its handle, but must not introduce identity storage or
+  replace `Message.author.userId` with a handle.
+- Keep polls on the cohesive conversation facade. Preserve write idempotency/retry boundaries and
+  treat returned snapshots and webhooks as provider observations rather than workflow state.
+- Keep vCard parsing, AI-agent tool policy, contact/address-book mutation, and background workflow
+  behavior outside the adapter.
 - Clean up only resources definitely created and orphaned before message submission; preserve the
   primary error.
 - Keep HTTP edge policy, durable queues, persistence, workflows, polling, retention, transcription,
