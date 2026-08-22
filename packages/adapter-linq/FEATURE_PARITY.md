@@ -52,41 +52,28 @@ Evidence labels:
 | Missing current chat kind                    | Complete | `Contract-verified`; reuse a known fact or retain raw observation without lookup/guess/standard dispatch         |
 | OpenAPI event-name drift                     | Complete | `Contract-verified`; only the canonical enum backing `onLinqEvent()` is inventoried                              |
 
-## Identity and media notes
+## Cross-cutting boundaries
 
-- Emit only `linq:{chatId}`. Persisted released `linq:{chatId}:dm/group` IDs remain decode-only
-  compatibility and are not an active identity feature.
-- Inbound voice memos are supported as ordinary downloadable audio attachments. The canonical
-  inbound media schema does not reliably distinguish them from other audio files.
-- Inbound `text/vcard` media is a standard downloadable file attachment. Parsing contacts and
-  address-book mutation remain application-owned.
-- The adapter validates focused security/correctness constraints for network operations it performs,
-  including locally sensitive literal upload targets. Host
-  request limits, rate limiting, durable queues, persistence, and availability policy terminate at
-  the adapter boundary. Linq upload-host integrity and hostname resolution remain provider/host
-  network concerns.
-- Static direct webhook secrets are validated exactly with `standardwebhooks`; lazy secrets are
-  validated per request, while explicit trusted forwarding remains an exclusive authority.
-- Provider responses are checked only for facts required by public adapter results. Malformed
-  post-acceptance responses do not trigger retries or uncertain-send cleanup.
-- Historical selective provider/device observations confirmed Standard Webhook compatibility,
-  exact-line routing, unsupported request fields, and representative message/media behavior. Those
-  observations are supplementary and no executable live harness is maintained here.
+- Emit only `linq:{chatId}`; persisted `:dm/group` IDs are decode-only compatibility.
+- Voice memos and `text/vcard` parts use standard secure downloadable media. The schema does not
+  distinguish native voice memos reliably; transcription and contact handling are application-owned.
+- Network defenses cover adapter-performed work; host HTTP/network policy and Linq upload-host
+  integrity remain outside the adapter. Post-acceptance mutation failures are not retried or cleaned
+  up as if rejection were certain.
+- `Provider-observed` / `Device-observed` labels record supplementary historical evidence; no
+  executable live harness is maintained.
 
 ## Deferred or excluded
 
-| Item                                                               | Disposition                                                                   |
-| ------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
-| iMessage app messages                                              | Deferred; no adapter-owned consumer need established                          |
-| Raw `FileUpload` voice-memo source                                 | Optional; existing URL/attachment-ID sources are complete                     |
-| Large-file streaming/upload recovery/retention workflows           | Deferred or application-owned; require demonstrated need                      |
-| Curated group/presence event models                                | Deferred; lossless generic event access is available                          |
-| Account/subscription/admin endpoint wrappers                       | Use `.client` / `getClient()`                                                 |
-| Chat-background wrapper                                            | Use native client for now; guide/request enum mismatch remains provider-owned |
-| AI-agent poll/mention tools                                        | Application-owned authorization, prompts, and tool policy                     |
-| Provider delivery, retries, ordering, device presentation          | Provider-owned                                                                |
-| Queues, databases, polling, transcription, identity/product policy | Host/application-owned                                                        |
-| Provider/device/live smoke                                         | Optional evidence only; not an adapter completion gate                        |
+| Item                                                                  | Disposition                                                           |
+| --------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| iMessage app messages; curated group/presence models                  | Deferred; no demonstrated adapter-owned need                          |
+| Raw voice-memo `FileUpload`; large-file streaming                     | Optional pending consumer/scale evidence                              |
+| Upload recovery, retention, databases, queues, polling, transcription | Application/host-owned                                                |
+| Account, subscription, administration, chat backgrounds               | Use native client; background enum discrepancy remains provider-owned |
+| AI-agent tools, prompts, authorization                                | Application-owned                                                     |
+| Delivery, retries, ordering, device presentation                      | Provider-owned                                                        |
+| Provider/device/live smoke                                            | Optional evidence only                                                |
 
 ## Maintenance rule
 

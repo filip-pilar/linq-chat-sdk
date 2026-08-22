@@ -1,9 +1,7 @@
 # @forma/linq-chat-sdk-adapter
 
-A Linq adapter for [Chat SDK](https://www.npmjs.com/package/chat). It implements ordinary Chat SDK
-behavior for existing Linq chats and exposes a deliberately small Linq-specific extension surface.
-This is the private workspace package for the Forma-maintained fork; Linq's published package is
-`@linqapp/chat-sdk-adapter`.
+A private Forma-maintained Linq adapter for [Chat SDK](https://www.npmjs.com/package/chat).
+Linq's published package remains `@linqapp/chat-sdk-adapter`.
 
 ## Setup
 
@@ -13,14 +11,19 @@ import { createLinqAdapter } from "@forma/linq-chat-sdk-adapter";
 
 const linq = createLinqAdapter({
   apiKey: process.env.LINQ_API_KEY!,
-  signingSecret: process.env.LINQ_SIGNING_SECRET!, // Standard Webhooks secret
+  signingSecret: process.env.LINQ_SIGNING_SECRET!,
 });
 
 const chat = new Chat({ adapters: { linq } });
 export const POST = chat.webhooks.linq;
 ```
 
-Credentials can instead rotate through an asynchronous provider:
+The host must pass the untouched request body to this route. Direct deliveries use Standard
+Webhooks (`webhook-id`, `webhook-signature`, and `webhook-timestamp`) with replay checks before
+parsing. An explicit `webhookVerifier(request, rawBody)` can authenticate trusted forwarding
+instead; it is an exclusive authority and never falls back to a signing secret.
+
+Credentials may rotate:
 
 ```ts
 const linq = createLinqAdapter({
@@ -28,75 +31,49 @@ const linq = createLinqAdapter({
 });
 ```
 
-Every adapter-owned provider operation resolves a fresh client from lazy credentials. Static
-`apiKey` configurations retain synchronous `adapter.client`; lazy configurations use
-`await adapter.getClient()` for the native SDK escape hatch.
-
-Configuration is validated when the adapter is constructed. The exported configuration interface
-remains structurally compatible with released static, lazy, and trusted-forwarder combinations;
-its optional fields alone do not prove that a usable credential and webhook authority were supplied.
-Static direct verification validates the exact configured secret with `standardwebhooks` at
-construction; malformed, empty, or whitespace-altered values fail without being trimmed. Lazy
-secrets are validated when resolved for a request. An explicit trusted forwarder is the sole
-authority and does not inspect an otherwise unused direct secret.
-
-The host must pass the untouched request body to the route. The adapter verifies the
-`webhook-id`, `webhook-signature`, and `webhook-timestamp` headers and enforces the Standard
-Webhooks replay window before parsing or dispatching.
-
-Managed forwarding can supply an explicit `webhookVerifier(request, rawBody)` instead. That verifier
-is the sole authentication authority for the request: forwarded deliveries never fall back to the
-direct signing secret, and direct deliveries never silently enter the forwarding path.
+Lazy credentials resolve once per logical adapter operation. Static API keys expose synchronous
+`adapter.client`; every configuration supports `await adapter.getClient()`. Construction enforces
+a usable credential and webhook authority even though the released, source-compatible config type
+has optional fields. Static direct secrets are validated exactly by `standardwebhooks`; lazy
+secrets are validated per request and values are never trimmed.
 
 ## Standard Chat SDK behavior
 
-For canonical Linq thread IDs (`linq:{chatId}`), the adapter supports:
+Canonical existing-chat IDs have the form `linq:{chatId}`. The adapter supports ordinary Chat SDK
+post, reply, text edit, thread/history/message retrieval, reactions, direct/group typing, chat-wide
+mark-read, static cards, files, attachments, buffered streams, and inbound message/reaction
+dispatch. Returned message/thread identities are canonical and raw Linq facts remain available.
 
-- posting and replying with text, Markdown/AST content, static cards, files, and attachments;
-- editing text, fetching thread/history/message data, and backward pagination;
-- whole-message reactions, typing, and chat-wide mark-read acknowledgements;
-- inbound message and reaction dispatch through the ordinary Chat SDK handlers;
-- native group-mention translation and `onNewMention()` routing without visible-`@` heuristics;
-- canonical returned thread/message identities and lossless Linq raw message data.
+History is backward-only. Truthful rows are stably oldest-first by the complete RFC3339 provider
+instant, including precision beyond JavaScript milliseconds; exact ties preserve provider order.
+Rows missing required identity, authorship, or time facts are omitted without losing usable
+siblings. Traversal skips at most ten consecutive all-filtered pages and stops on repeated cursors.
 
-Outbound media accepts public HTTPS references or caller-supplied bytes. Adapter-performed uploads
-have a 30-second timeout and reject redirects, embedded credentials, localhost names, and literal
-loopback, unspecified, private, link-local, carrier-grade NAT, benchmarking, multicast, and mapped
-equivalents. This is a focused SSRF boundary, not a registry of every special-purpose address. DNS
-resolution and the integrity of Linq-issued upload hosts remain provider/host-network concerns.
-Preparation-only attachment cleanup is best effort; uncertain send recovery, retention, and
-deletion policy are not adapter workflows. Inbound attachments retain a stable Linq attachment ID
-and resolve a fresh downloadable URL when `fetchData()` runs.
-
-History parsing isolates malformed/null/unknown parts and tombstones so usable siblings remain
-available. Rows that cannot provide truthful canonical IDs, authorship, and RFC3339 timestamps are
-omitted from the standard Chat SDK page. Usable rows are returned oldest-first by their complete
-provider instant, including fractional precision beyond JavaScript milliseconds and normalized
-offsets; exact ties preserve provider-relative order. `metadata.dateSent` remains a JavaScript
-`Date`, while the immutable raw message retains the original full-precision timestamp.
-Backward traversal skips at most ten consecutive all-filtered provider pages and stops on repeated
-cursors. Forward history is not claimed.
+Outbound media supports public HTTPS references and caller-supplied bytes. Adapter-performed
+uploads reject redirects, embedded credentials, localhost names, and literal loopback,
+unspecified, private, link-local, carrier-grade NAT, benchmarking, multicast, and mapped
+equivalents, and time out after 30 seconds. DNS resolution and Linq-issued upload-host integrity
+remain provider/host-network concerns. Cleanup is limited to resources definitely orphaned before
+send submission. Inbound attachments keep stable Linq identity and fetch a fresh download URL when
+`fetchData()` runs.
 
 ### Proactive direct messages
 
-The released `openDM(handle)` contract returns a deterministic `linq:pending:{handle}` bootstrap
-thread because Linq cannot create an empty chat. Its first post uses `messages.create()` and returns
-a `SentMessage` with the provider's canonical `linq:{chatId}` identity:
+Released `openDM(handle)` returns a deterministic pending bootstrap because Linq cannot create an
+empty chat. Continue from the canonical identity returned by the first accepted post:
 
 ```ts
 const pendingId = await linq.openDM("+15551234567");
 const sent = await chat.thread(pendingId).post("Hello");
-const canonical = chat.thread(sent.threadId);
+const canonicalThread = chat.thread(sent.threadId);
 ```
 
-Use the returned canonical thread for subscriptions and later operations. The pending `Thread`
-identity is immutable and is not migrated in hidden state. Distinct posts are distinct logical
-sends with distinct idempotency keys; the official SDK owns retries of one request, and Linq owns
-chat creation/reuse, concurrent acceptance, sender selection, and delivery.
+The pending `Thread` is immutable and is not migrated. Linq owns chat creation/reuse and delivery;
+the adapter does not add locks, persistence, or uncertain-send retries.
 
-## Linq message options
+## Linq message options and mentions
 
-Use `linqMessage(content, options)` when a provider-specific message semantic is required:
+Use `linqMessage()` for documented provider semantics that standard Chat SDK cannot express:
 
 ```ts
 import { linqMessage } from "@forma/linq-chat-sdk-adapter";
@@ -109,26 +86,22 @@ await thread.post(
 );
 ```
 
-The immutable options snapshot supports documented preferred services, bubble/screen effects,
-validated text decorations, one native group mention, and standalone native rich links. The
-compiler produces deterministic plain text and UTF-16 ranges from raw text, supported Markdown/AST
-styles, and applicable static-card text. Locally invalid or contradictory inputs fail before UUID
-generation, attachment preparation, logging, or provider I/O.
+Its immutable options cover supported services, effects, manual UTF-16 decorations, one native
+group mention, and a standalone HTTPS rich link. One compiler renders raw text, supported
+Markdown/AST styles, static-card fallback text, and send options. Contradictory input fails before
+UUID generation, attachment preparation, logging, or provider I/O.
 
-Ordinary Chat SDK mention tokens work for existing group posts and replies:
+Use the standard Chat SDK mention token for existing-group posts and replies:
 
 ```ts
 await groupThread.post(`Please review this, ${groupThread.mentionUser(participantId)}`);
 ```
 
-Mention-like syntax is parsed strictly: exactly one complete `<@target>` token is accepted, while
-empty, nested, unbalanced, ambiguously wrapped, or multiple tokens fail before credentials, UUIDs,
-media preparation, logging, or provider I/O. When the token contains a stable Linq participant ID,
-the adapter resolves it once against that existing group and sends only when the response
-establishes one current participant with a usable handle. A handle can be used directly without a
-lookup. Provider-issued participant identity remains `Message.author.userId`; the handle remains
-`Message.author.userName` and the native mention target. For explicit display text and range
-control, use `mention` (UTF-16 `[start, end)` offsets):
+Mention-like syntax accepts exactly one complete `<@target>` token. A stable Linq participant ID
+is resolved once against that group and must identify one current member with a valid handle; a
+phone/email handle requires no lookup. Provider identity remains `Message.author.userId`, while
+the handle remains `userName` and the native mention target. Explicit display-text control uses
+UTF-16 `[start, end)` offsets:
 
 ```ts
 await groupThread.post(
@@ -138,19 +111,14 @@ await groupThread.post(
 );
 ```
 
-Mentions require one text part in an existing group and cannot share that part with manual
-decorations or a rich link. Derived bold/italic/strikethrough may degrade to plain text so the
-native mention remains truthful. Explicit RCS/SMS requests are accepted: Linq documents native
-iMessage highlighting and plain-text RCS/SMS behavior, without an adapter presentation guarantee.
+Mentions cannot share their text part with manual decorations or a rich link. Derived formatting
+may degrade to plain text to preserve the mention. RCS/SMS intent is accepted, but recipient
+presentation remains provider/device-owned. RCS/SMS cannot combine with iMessage-only effects,
+animations, or manual decorations.
 
-Explicit RCS or SMS intent cannot be combined with Linq-only effects, animations, or manual
-decorations. Omitted service remains provider best-effort. This contract describes the request sent
-to Linq, not recipient-device presentation.
+## Conversation-scoped Linq extensions
 
-## Narrow Linq conversation extensions
-
-`adapter.conversation(threadOrId)` accepts a canonical Linq thread ID or Chat SDK `Thread` and
-provides semantics the standard surface cannot express faithfully:
+`adapter.conversation(threadOrId)` accepts a canonical ID or a Chat SDK `Thread`:
 
 ```ts
 const conversation = linq.conversation(thread);
@@ -158,11 +126,14 @@ const conversation = linq.conversation(thread);
 await conversation.replyToPart(messageId, 0, "part-specific reply");
 await conversation.addReaction(messageId, "love", { partIndex: 2 });
 await conversation.removeReaction(messageId, "love", { partIndex: 2 });
-
 await conversation.stopTyping();
 await conversation.shareContactCard();
-await conversation.sendVoiceMemo({ url: "https://cdn.example.com/memo.m4a" });
-await conversation.sendVoiceMemo({ attachmentId });
+
+const memo = await conversation.sendVoiceMemo({
+  url: "https://cdn.example.com/memo.m4a",
+});
+// An existing Linq attachment ID is also accepted:
+// await conversation.sendVoiceMemo({ attachmentId });
 
 await conversation.group.update({ displayName: "Team" });
 await conversation.group.addParticipant("+15551234567");
@@ -170,7 +141,7 @@ await conversation.group.removeParticipant("+15551234567");
 await conversation.group.leave();
 
 await conversation.location.request();
-const snapshot = await conversation.location.retrieve();
+const locations = await conversation.location.retrieve();
 
 const poll = await conversation.polls.create({ options: ["Tacos", "Sushi"] });
 await conversation.polls.addOptions(poll.messageId, ["Pizza"]);
@@ -181,121 +152,69 @@ await conversation.polls.vote(poll.messageId, {
 const currentPoll = await conversation.polls.retrieve(poll.messageId);
 ```
 
-Ordinary replies, reactions, start-typing, and mark-read remain standard Chat SDK operations.
-Group/location/voice-memo results expose only facts established by the provider response; they do
-not imply delivery, consent, correlation, playback, presentation, or workflow completion.
+Ordinary replies, whole-message reactions, start-typing, and mark-read stay on standard Chat SDK
+APIs. Facade acknowledgements and immutable snapshots expose only validated current provider facts,
+not delivery, consent, presentation, request/event correlation, or workflow completion. Poll
+create owns one idempotency key; non-idempotent add/vote calls disable SDK retries.
 
-Polls are existing-chat, iMessage-native operations. Create requires at least two options; options
-are add-only; one vote call toggles one option. The immutable snapshot exposes validated current
-provider facts plus the lossless raw response. Create preserves a supplied idempotency key or
-generates one key per logical request;
-add-option and vote calls disable SDK retries because their current request contracts have no
-idempotency key. Poll events remain observations, not a polling service or workflow state machine.
-
-Inbound user voice memos arrive through the standard media path as downloadable audio attachments.
-The current canonical schema does not reliably distinguish a native Messages voice memo from an
-ordinary audio attachment, so the adapter does not invent a discriminator. Transcription belongs
-to the consuming application.
-
-Inbound `.vcf` contact cards use the same standard media contract: a `text/vcard` file attachment
-with stable Linq attachment identity and secure `fetchData()`. Parsing the vCard, resolving contact
-identity, and changing an address book belong to the consuming application. The separate
-`shareContactCard()` operation remains Linq's configured iMessage Name and Photo Sharing action;
-account-level contact-card configuration remains on the native client.
+Inbound voice memos are ordinary audio attachments because the current schema does not distinguish
+them reliably from other audio. Inbound `text/vcard` parts are ordinary downloadable file
+attachments. Transcription, vCard parsing, contact identity, and address-book mutation belong to
+the application. `shareContactCard()` is Linq's separate configured Name and Photo Sharing action.
 
 ## Verified Linq events
 
-The ordinary `Chat.webhooks.linq` route is the primary integration. For consumers that need Linq
-facts beyond standard message/reaction handlers, the adapter also exposes:
+`Chat.webhooks.linq` is the primary integration. Advanced consumers can also use:
 
-- `onLinqEvent(name | names, handler)` for typed current events, or `onLinqEvent(handler)` for all
-  lossless verified events;
-- `verifyWebhook(request)` for a branded verified observation without dispatch;
-- `dispatchVerifiedWebhook(verified, options)` for dispatching only a result produced by the same
-  adapter instance.
+- `onLinqEvent(name | names, handler)` for current named events, or
+  `onLinqEvent(handler)` for every verified lossless observation;
+- `verifyWebhook(request)` and `dispatchVerifiedWebhook(verified, options)` for the branded
+  same-adapter verification/dispatch seam;
+- released `onDeliveryStatus(listener)` as a compatibility projection of authenticated lifecycle
+  facts.
 
 ```ts
-const unsubscribe = linq.onLinqEvent(["message.delivered", "message.failed"], async (event) => {
+const unsubscribe = linq.onLinqEvent(["message.delivered", "message.failed"], (event) => {
   console.log(event.type, event.data.providerMessageId, event.rawEvent);
 });
 ```
 
-The released `onDeliveryStatus(listener)` API remains as a smaller compatibility view of the same
-authenticated `message.sent`, `message.delivered`, `message.read`, and `message.failed` facts. It
-shares verification and dedupe with `onLinqEvent()` and does not imply ordering, terminal state, or
-request correlation. Each event snapshots its listener membership before invocation. Listener
-completion is not awaited; synchronous throws and rejected thenables are logged and isolated from
-sibling callbacks and acknowledgement.
+Verification preserves immutable envelope, raw event, exact text, and bytes. Valid curated events
+reach typed named and generic handlers. Canonical events without a curated model reach their exact
+named handler with raw data; malformed curated and unknown/future events remain generic/lossless
+only. No incompatible standard handler is guessed. Atomic event dedupe, callback isolation,
+listener snapshots, fast acknowledgement, and Chat SDK `waitUntil` integration share one verified
+pipeline. All nine current poll event families use this pipeline; there is no separate poll
+registry or polling workflow.
 
-Verification preserves immutable envelope, transport, normalized observations, `rawEvent`, exact
-raw text, and raw bytes. Current known payloads receive typed discriminants when their facts support
-a truthful projection. Canonical event names without a curated adapter model (for example group,
-participant, status, or typing events) reach their exact named handler with raw provider data as
-well as the all-event handler; this does not create a curated model. An authenticated curated event
-whose payload cannot support its promised projection is generic/lossless only. Unknown/future
-names are also generic-only, and none are forced through an incompatible standard handler. Generic
-callbacks are failure-isolated and participate in Chat SDK `waitUntil`.
-Schema-valid timestamp strings that JavaScript `Date` cannot represent remain available to the
-truthful Linq named/generic observation; only the incompatible standard `Message` projection is
-skipped.
-Atomic provider/partner/event dedupe uses the configured Chat SDK state adapter.
+This seam is not a durable queue. Hosts own HTTP limits and request lifecycle; applications own
+persistence and long-running work.
 
-All nine current poll event families (`poll.received`, lifecycle, update, failure, vote, and
-reaction events) use this same typed/lossless verified pipeline. Valid poll events reach their exact
-named and generic handlers; malformed curated poll payloads remain generic-only. There is no
-parallel `onPoll()` API and no automatic retrieval after an event.
+## Native client, compatibility, and boundaries
 
-This seam does not make the adapter a queue or database. Hosts own request-size/rate limits,
-durability, replay policy, application persistence, and long-running work.
+Use `adapter.client` (static credentials) or `await adapter.getClient()` (all configurations) for
+account, subscription, administrative, background, and other provider-native operations. Current
+background guidance mentions `glitter`, while the installed SDK/request schema exposes `sky`,
+`water`, and `aurora`; no adapter wrapper freezes that discrepancy.
 
-## Native client escape hatch
+The adapter emits only `linq:{chatId}` and decode-only supports persisted
+`linq:{chatId}:dm/group` values. Released `adapter.markRead(threadId, messageId)` remains an alias
+of the preferred `Thread.markAsRead()` chat-wide acknowledgement.
 
-Static credential configurations expose `adapter.client`, the same official `LinqAPIV3` client used
-internally. The property is read-only, but the client retains the official SDK's provider
-operations. All configurations expose `await adapter.getClient()`; lazy configurations create that
-client from the current credential result and intentionally reject synchronous `.client` access
-rather than cache a stale key. Use the native client deliberately for account, subscription,
-administrative, or other provider-native operations that do not warrant adapter APIs.
+Provider failures use Chat SDK's shared error taxonomy while preserving supported Linq code, trace
+ID, retry-after, and cause data. Provider success responses are checked only for facts needed to
+build public results. Once a mutation may have been accepted, the adapter neither retries nor
+performs preparation cleanup.
 
-Chat backgrounds remain on this escape hatch. Current Linq guidance mentions `glitter`, while the
-installed SDK and canonical request schema expose `sky`, `water`, and `aurora` (response/event
-contracts may still contain `glitter`). The adapter does not freeze a wrapper until that request
-contract aligns and a reusable consumer need justifies one. Canonical background events are still
-available through exact named/raw `onLinqEvent()` handlers.
-
-## Identity and compatibility
-
-The adapter emits only `linq:{chatId}`. It still decodes persisted historical
-`linq:{chatId}:dm/group` values for released compatibility, but applications should not create new
-IDs in those forms.
-
-Released callers may still invoke `adapter.markRead(threadId, messageId)` as a compatibility alias.
-It delegates to the same chat-wide acknowledgement as the preferred Chat SDK
-`Thread.markAsRead()` path.
-
-## Errors and responsibility boundary
-
-Provider authentication, permission, validation, rate-limit, not-found, network, and provider
-failures use the shared Chat SDK error taxonomy while retaining supported Linq code, trace ID,
-retry-after, and cause data. A message-refresh `404` remains `null`; other missing resources use the
-applicable shared not-found error. SDK JSON responses are checked for the minimum IDs, booleans,
-timestamps, and nested facts needed to construct public Chat SDK/facade results. A malformed success
-response fails as a provider-protocol error rather than fabricating an identity. Once a mutation may
-have been accepted, the adapter neither retries nor performs preparation cleanup; recovery from
-uncertain acceptance remains application/provider-owned.
-
-The adapter does not own provider delivery/reliability, retries beyond the official SDK, account
-configuration, capability probes, request-to-event correlation, ordering, queues, databases,
-polling, application workflows, transcription, retention, edge HTTP policy, or deployment.
-AI-agent tools, prompts, authorization, and autonomous poll/mention policy are consuming-application
-responsibilities; the adapter exposes primitives only.
-
-See [FEATURE_PARITY.md](FEATURE_PARITY.md) for the compact capability/evidence matrix.
+The adapter does not own provider delivery/ordering, account policy, capability probes, queues,
+databases, polling, transcription, retention, deployment, application identity/workflows, or
+AI-agent tools and authorization. See [FEATURE_PARITY.md](FEATURE_PARITY.md) for status/evidence and
+the repository [scope](../../scope.md) for the ownership boundary.
 
 ## Development
 
-The peer floor remains Chat SDK `4.38`: the combined public contract uses the adapter-level
-`reply()` and `markAsRead()` hooks that are absent from the released `4.28.1` declarations/runtime.
+The peer floor is Chat SDK `4.38`; the adapter-level `reply()` and `markAsRead()` hooks are absent
+from released `4.28.1` declarations/runtime.
 
 ```bash
 pnpm --filter @forma/linq-chat-sdk-adapter test
@@ -306,5 +225,4 @@ pnpm --filter @forma/linq-chat-sdk-adapter build
 pnpm --filter @forma/linq-chat-sdk-adapter openapi:check
 ```
 
-The OpenAPI check intentionally covers only the canonical webhook event-name enum that backs the
-public typed event contract. It does not certify Linq's provider-wide API inventory.
+The OpenAPI check covers only the canonical webhook event enum backing the public named-event type.

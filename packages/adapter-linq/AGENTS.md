@@ -1,46 +1,31 @@
 # Linq adapter contributor rules
 
-`FEATURE_PARITY.md` is authoritative for current capability status. Before changing behavior,
-reconcile the installed Chat SDK contracts, installed `@linqapp/sdk` types, canonical Linq
-OpenAPI/docs, and the repository's `chat-sdk` and `integrating-linq` skills.
+Use [FEATURE_PARITY.md](FEATURE_PARITY.md) for capability status, [README.md](README.md) for consumer
+contracts, and the repository [scope](../../scope.md) for ownership. Before changing behavior,
+reconcile installed Chat SDK contracts, installed `@linqapp/sdk`, canonical Linq OpenAPI/docs, and
+the `chat-sdk` and `integrating-linq` skills.
 
-## Boundaries
+## Invariants
 
-- Implement standard Chat SDK behavior first. Add Linq-specific surface only where a documented
-  provider semantic cannot be represented faithfully by Chat SDK or the official-client escape
-  hatch.
-- Use `@linqapp/sdk` for outbound and native operations. Use `standardwebhooks` and the exact raw
-  request body for inbound Standard Webhook authentication.
-- Emit canonical `linq:{chatId}` identities. Decode old `linq:{chatId}:dm/group` values only for
-  persisted compatibility; do not expose or document them as active identity forms.
-- Keep endpoint-shaped account and administrative operations on the official client escape hatch:
-  `.client` for static credentials and `await .getClient()` for lazy credentials.
-- Preserve released lazy credential rotation, explicit trusted forwarding, proactive `openDM()`,
-  `onDeliveryStatus()`, and the `markRead()` compatibility alias while sharing the fork's stronger
-  internal machinery. Prefer standard `Thread.markAsRead()` in new examples.
-- Validate constraints that prevent adapter-created side effects. Leave provider capabilities and
-  provider-enforced policy to Linq rather than adding probes or speculative rules.
-- Translate provider failures through shared Chat SDK adapter errors and retain supported Linq
-  metadata. Do not duplicate SDK retries or claim delivery from an acknowledgement.
-- Validate the minimum runtime SDK response facts needed for public identities and typed results;
-  preserve uncertain-acceptance boundaries rather than fabricating facts or retrying mutations.
-- Compare provider history by the complete validated RFC3339 instant. Keep JavaScript `Date`
-  metadata and immutable full-precision raw values as distinct representations.
-- Preserve provider-issued participant identity on inbound messages. Native mention targeting may
-  resolve one strictly parsed token's existing-chat participant ID to a truthful current member's
-  handle, but must not introduce identity storage or replace `Message.author.userId` with a handle.
-- Keep polls on the cohesive conversation facade. Preserve write idempotency/retry boundaries and
-  treat returned snapshots and webhooks as provider observations rather than workflow state.
-- Keep vCard parsing, AI-agent tool policy, contact/address-book mutation, and background workflow
-  behavior outside the adapter.
-- Clean up only resources definitely created and orphaned before message submission; preserve the
-  primary error.
-- Keep HTTP edge policy, durable queues, persistence, workflows, polling, retention, transcription,
-  and deployment lifecycle outside the adapter.
+- Prefer standard Chat SDK behavior. Add Linq-specific API only for a documented semantic gap with
+  durable cross-application value.
+- Use the official SDK for provider operations and exact raw bytes plus `standardwebhooks` for
+  direct webhook authentication. Trusted forwarding must remain explicit and exclusive.
+- Emit canonical `linq:{chatId}`; decode legacy `:dm/group` suffixes only for persisted
+  compatibility.
+- Resolve lazy credentials once per logical operation. Keep static `.client`, universal
+  `getClient()`, released `openDM()`, `onDeliveryStatus()`, and `markRead()` compatibility.
+- Validate adapter-owned side-effect and public-result facts before credentials, logging, UUIDs,
+  media work, or provider I/O where promised. Translate provider failures without inventing retry,
+  delivery, or correlation guarantees.
+- Preserve exact mention identity, full-precision history ordering, immutable raw facts, bounded
+  traversal, media security, definite-orphan cleanup, atomic dedupe, callback isolation, and fast
+  acknowledgement.
+- Keep account/admin endpoints on the native client and host/application workflow concerns outside
+  the adapter.
 
 ## Change quality
 
-Keep changes application-neutral and independently reviewable. Preserve hostile-input, webhook,
-identity, history, media-security, compiler, error, and Chat SDK integration coverage. Update only
-durable documentation and affected parity rows. Never make provider/device/live evidence an
-ordinary development or release gate.
+Keep changes application-neutral and reviewable. Preserve public-path hostile-input, identity,
+webhook, history, media, compiler, error, and Chat SDK integration coverage. Update only affected
+consumer docs and parity rows. Provider/device/live evidence is supplementary, not a routine gate.
