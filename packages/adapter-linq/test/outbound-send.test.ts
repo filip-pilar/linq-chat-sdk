@@ -23,6 +23,16 @@ afterEach(() => {
 });
 
 describe("reliable existing-chat send validation", () => {
+  it("rejects an empty message before provider work", async () => {
+    const { adapter, create, send } = createOutboundTestAdapter();
+
+    await expect(adapter.postMessage("linq:chat-123", "   ")).rejects.toThrow(
+      "Linq message must include text or media.",
+    );
+    expect(create).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("reuses one explicit idempotency key across the SDK's default retries", async () => {
     const requestBodies: unknown[] = [];
     let attempt = 0;

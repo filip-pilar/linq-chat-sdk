@@ -18,7 +18,7 @@ import { createLinqAdapter } from "../src/adapter";
 import { collectCardImageUrls, extractCardElement } from "../src/cards";
 import { compileLinqCardText } from "../src/message-compiler";
 
-describe("renderLinqCardText", () => {
+describe("compileLinqCardText", () => {
   it("renders a full card as clean plain text", () => {
     const card = Card({
       title: "Order #1234",

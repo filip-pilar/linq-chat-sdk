@@ -124,6 +124,12 @@ describe("verified generic Linq event dispatch", () => {
       EVENT_DEDUPE_TTL_MS,
     );
     expect(context.processMessage).toHaveBeenCalledTimes(1);
+    expect(context.processMessage).toHaveBeenCalledWith(
+      context.adapter,
+      `linq:${fixture.data.chat.id}`,
+      expect.any(Function),
+      undefined,
+    );
     expect(named).toHaveBeenCalledTimes(1);
     expect(all).toHaveBeenCalledTimes(1);
     expect(named.mock.calls[0]?.[0]).toMatchObject({

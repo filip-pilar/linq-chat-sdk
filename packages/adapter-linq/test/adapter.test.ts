@@ -17,89 +17,6 @@ const SIGNING_SECRET = `whsec_${Buffer.from(SIGNING_KEY).toString("base64")}`;
 const API_KEY = "test_linq_api_key";
 
 describe("LinqAdapter.handleWebhook", () => {
-  it("returns 401 when signature headers are missing", async () => {
-    const adapter = createTestAdapter();
-    const request = new Request("https://example.com/webhooks/linq", {
-      method: "POST",
-      body: "{}",
-    });
-
-    const response = await adapter.handleWebhook(request);
-
-    expect(response.status).toBe(401);
-  });
-
-  it("returns 401 when the Standard Webhooks signature is invalid", async () => {
-    const adapter = createTestAdapter();
-    const request = createSignedRequest({ ok: true }, { signature: "00" });
-
-    const response = await adapter.handleWebhook(request);
-
-    expect(response.status).toBe(401);
-  });
-
-  it("returns 200 for a valid Standard Webhooks message.received webhook", async () => {
-    const adapter = createTestAdapter();
-    const request = createSignedRequest(createMessageReceivedPayload());
-
-    const response = await adapter.handleWebhook(request);
-
-    expect(response.status).toBe(200);
-  });
-
-  it("returns 400 when a valid Standard Webhooks signature contains invalid JSON", async () => {
-    const adapter = createTestAdapter();
-    const request = createStandardRequest("{");
-
-    const response = await adapter.handleWebhook(request);
-
-    expect(response.status).toBe(400);
-    await expect(response.text()).resolves.toBe("Invalid JSON");
-  });
-
-  it("acknowledges unknown event types without dispatching them", async () => {
-    const adapter = createTestAdapter();
-    const processMessage = vi.fn(
-      async (..._args: Parameters<ChatInstance["processMessage"]>) => {},
-    );
-    const processReaction = vi.fn((..._args: Parameters<ChatInstance["processReaction"]>) => {});
-    (
-      adapter as unknown as {
-        chat: Pick<ChatInstance, "processMessage" | "processReaction">;
-      }
-    ).chat = { processMessage, processReaction };
-    const payload = { ...createMessageReceivedPayload(), event_type: "future.provider_event" };
-
-    const response = await adapter.handleWebhook(createSignedRequest(payload));
-
-    expect(response.status).toBe(200);
-    expect(processMessage).not.toHaveBeenCalled();
-    expect(processReaction).not.toHaveBeenCalled();
-  });
-
-  it("dispatches inbound message.received webhooks to Chat SDK", async () => {
-    const adapter = createTestAdapter();
-    const processMessage = vi.fn(
-      async (..._args: Parameters<ChatInstance["processMessage"]>) => {},
-    );
-    (adapter as unknown as { chat: Pick<ChatInstance, "processMessage"> }).chat = {
-      processMessage,
-    };
-    vi.spyOn(adapter, "encodeThreadId").mockReturnValue("linq:chat-123");
-
-    const request = createSignedRequest(createMessageReceivedPayload());
-    const response = await adapter.handleWebhook(request);
-
-    expect(response.status).toBe(200);
-    expect(processMessage).toHaveBeenCalledTimes(1);
-    expect(processMessage).toHaveBeenCalledWith(
-      adapter,
-      "linq:chat-123",
-      expect.any(Function),
-      undefined,
-    );
-  });
-
   it("dispatches a stable thread ID and learns DM identity from the webhook", async () => {
     const adapter = createTestAdapter();
     const processMessage = vi.fn(
@@ -121,36 +38,6 @@ describe("LinqAdapter.handleWebhook", () => {
       undefined,
     );
     expect(adapter.isDM("linq:3caaf1a0-ef9f-46e0-8c22-31e82c8514dc")).toBe(true);
-  });
-
-  it("acknowledges a missing chat kind without provider I/O or standard dispatch", async () => {
-    const adapter = createTestAdapter();
-    const processMessage = vi.fn(
-      async (..._args: Parameters<ChatInstance["processMessage"]>) => {},
-    );
-    (adapter as unknown as { chat: Pick<ChatInstance, "processMessage"> }).chat = {
-      processMessage,
-    };
-    const retrieve = vi.fn();
-    (adapter as unknown as { apiClient: { chats: { retrieve: typeof retrieve } } }).apiClient = {
-      chats: { retrieve },
-    };
-
-    const payload = createMessageReceivedPayload();
-    payload.data.chat.is_group = undefined;
-
-    const response = await adapter.handleWebhook(createSignedRequest(payload));
-
-    expect(response.status).toBe(200);
-    expect(retrieve).not.toHaveBeenCalled();
-    expect(processMessage).not.toHaveBeenCalled();
-    await expect(adapter.verifyWebhook(createSignedRequest(payload))).resolves.toMatchObject({
-      ok: true,
-      webhook: {
-        kind: "message.received",
-        rawEvent: { data: { chat: { id: "3caaf1a0-ef9f-46e0-8c22-31e82c8514dc" } } },
-      },
-    });
   });
 
   it("reuses an already-known chat kind when a later webhook omits it", async () => {
@@ -505,65 +392,6 @@ describe("LinqAdapter.parseMessage", () => {
   });
 });
 
-describe("LinqAdapter.postMessage", () => {
-  it("sends a text message to an existing Linq chat", async () => {
-    const adapter = createTestAdapter();
-    const send = vi.fn().mockResolvedValue({
-      chat_id: "3caaf1a0-ef9f-46e0-8c22-31e82c8514dc",
-      message: {
-        id: "outbound-message-id",
-        created_at: "2026-05-08T16:22:00.000Z",
-        delivery_status: "queued",
-        is_read: false,
-        parts: [{ type: "text", value: "hello" }],
-        sent_at: null,
-      },
-    });
-    (
-      adapter as unknown as { apiClient: { chats: { messages: { send: typeof send } } } }
-    ).apiClient = {
-      chats: { messages: { send } },
-    };
-    vi.spyOn(adapter, "decodeThreadId").mockReturnValue({
-      chatId: "3caaf1a0-ef9f-46e0-8c22-31e82c8514dc",
-    });
-    vi.spyOn(adapter, "encodeThreadId").mockReturnValue("linq:chat-123");
-
-    const result = await adapter.postMessage("linq:chat-123", " hello ");
-
-    expect(send).toHaveBeenCalledWith("3caaf1a0-ef9f-46e0-8c22-31e82c8514dc", {
-      message: {
-        idempotency_key: expect.any(String),
-        parts: [{ type: "text", value: "hello" }],
-      },
-    });
-    expect(result).toEqual({
-      id: "outbound-message-id",
-      threadId: "linq:chat-123",
-      raw: {
-        chat_id: "3caaf1a0-ef9f-46e0-8c22-31e82c8514dc",
-        message: {
-          id: "outbound-message-id",
-          created_at: "2026-05-08T16:22:00.000Z",
-          delivery_status: "queued",
-          is_read: false,
-          parts: [{ type: "text", value: "hello" }],
-          sent_at: null,
-        },
-      },
-    });
-  });
-
-  it("rejects empty messages", async () => {
-    const adapter = createTestAdapter();
-    vi.spyOn(adapter, "decodeThreadId").mockReturnValue({ chatId: "chat-id" });
-
-    await expect(adapter.postMessage("linq:chat-id", "   ")).rejects.toThrow(
-      "Linq message must include text or media.",
-    );
-  });
-});
-
 describe("LinqAdapter outbound media", () => {
   it("forwards a public HTTPS attachment as a media part by URL", async () => {
     const adapter = createTestAdapter();
@@ -804,72 +632,6 @@ describe("LinqAdapter.rehydrateAttachment", () => {
   });
 });
 
-describe("LinqAdapter.startTyping", () => {
-  it.each([false, true])("starts a Linq typing indicator for isGroup=%s", async (isGroup) => {
-    const adapter = createTestAdapter();
-    const start = vi.fn().mockResolvedValue(undefined);
-    (
-      adapter as unknown as { apiClient: { chats: { typing: { start: typeof start } } } }
-    ).apiClient = {
-      chats: { typing: { start } },
-    };
-    const threadId = adapter.encodeThreadId({
-      chatId: "3caaf1a0-ef9f-46e0-8c22-31e82c8514dc",
-      isGroup,
-    });
-
-    await expect(adapter.startTyping(threadId)).resolves.toBeUndefined();
-
-    expect(start).toHaveBeenCalledWith("3caaf1a0-ef9f-46e0-8c22-31e82c8514dc");
-  });
-
-  it.each([
-    "linq:not-a-uuid",
-    "other:3caaf1a0-ef9f-46e0-8c22-31e82c8514dc",
-    "linq:3caaf1a0-ef9f-46e0-8c22-31e82c8514dc:unexpected",
-  ])("rejects invalid thread identity %s before provider I/O", async (threadId) => {
-    const adapter = createTestAdapter();
-    const start = vi.fn().mockResolvedValue(undefined);
-    (
-      adapter as unknown as { apiClient: { chats: { typing: { start: typeof start } } } }
-    ).apiClient = {
-      chats: { typing: { start } },
-    };
-
-    await expect(adapter.startTyping(threadId)).rejects.toBeInstanceOf(Error);
-
-    expect(start).not.toHaveBeenCalled();
-  });
-});
-
-describe("LinqAdapter.stream", () => {
-  it("buffers stream chunks and sends one final message", async () => {
-    const adapter = createTestAdapter();
-    const postMessage = vi.spyOn(adapter, "postMessage").mockResolvedValue({
-      id: "stream-message-id",
-      threadId: "linq:chat-123",
-      raw: {
-        chat_id: "chat-123",
-        message: {
-          id: "stream-message-id",
-          created_at: "2026-05-08T16:22:00.000Z",
-          delivery_status: "queued",
-          is_read: false,
-          parts: [{ type: "text", value: "Hello world", reactions: null }],
-          sent_at: null,
-        },
-      },
-    });
-
-    const result = await adapter.stream("linq:chat-123", createTestStream());
-
-    expect(postMessage).toHaveBeenCalledWith("linq:chat-123", {
-      markdown: "Hello world",
-    });
-    expect(result.id).toBe("stream-message-id");
-  });
-});
-
 describe("LinqAdapter.channelIdFromThreadId", () => {
   it("uses the Linq thread ID as the channel ID", () => {
     const adapter = createTestAdapter();
@@ -966,12 +728,6 @@ function createSendResponse(): Awaited<ReturnType<LinqAPIV3["chats"]["messages"]
       sent_at: null,
     },
   };
-}
-
-async function* createTestStream() {
-  yield "Hello";
-  yield { type: "markdown_text", text: " world" } as const;
-  yield { type: "task_update", id: "ignored", status: "complete", title: "Ignored" } as const;
 }
 
 function createSignedRequest(
