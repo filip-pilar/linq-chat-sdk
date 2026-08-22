@@ -4,6 +4,7 @@ import type { StateAdapter } from "chat";
 import { describe, expect, it, vi } from "vitest";
 
 import { createLinqAdapter } from "../src/index.js";
+import deliveredFixture from "./fixtures/message-delivered-2026-02-03.json";
 import fixture from "./fixtures/message-received-2026-02-03.json";
 
 const SIGNING_KEY_A = "convergence-signing-key-a";
@@ -27,8 +28,17 @@ describe("credential convergence", () => {
       "requires signingSecret, credentials, or a trusted webhookVerifier",
     );
     expect(() => createLinqAdapter({ apiKey: "static-key", signingSecret: "   " })).toThrow(
-      "requires signingSecret, credentials, or a trusted webhookVerifier",
+      "requires a valid Standard Webhooks signing secret",
     );
+    expect(() =>
+      createLinqAdapter({ apiKey: "static-key", signingSecret: "whsec_not-base64!" }),
+    ).toThrow("requires a valid Standard Webhooks signing secret");
+    expect(() =>
+      createLinqAdapter({ apiKey: "static-key", signingSecret: ` ${SIGNING_SECRET_A}` }),
+    ).toThrow("requires a valid Standard Webhooks signing secret");
+    expect(() =>
+      createLinqAdapter({ apiKey: "static-key", signingSecret: "dGVzdC1zZWNyZXQ=" }),
+    ).not.toThrow();
     expect(() => createLinqAdapter({ credentials })).not.toThrow();
     expect(() =>
       createLinqAdapter({ apiKey: "static-key", webhookVerifier: () => true }),
@@ -36,6 +46,51 @@ describe("credential convergence", () => {
     expect(credentials).not.toHaveBeenCalled();
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
+  });
+
+  it("applies direct, lazy, and forwarded authentication authority precedence exactly", async () => {
+    const credentials = vi.fn().mockResolvedValue({
+      apiKey: "lazy-key",
+      signingSecret: SIGNING_SECRET_B,
+    });
+    expect(() =>
+      createLinqAdapter({
+        apiKey: "static-key",
+        credentials,
+        signingSecret: "malformed-static-secret",
+      }),
+    ).toThrow("valid Standard Webhooks signing secret");
+    expect(credentials).not.toHaveBeenCalled();
+
+    const forwarded = createLinqAdapter({
+      apiKey: "static-key",
+      signingSecret: "ignored-malformed-secret",
+      webhookVerifier: () => true,
+    });
+    await expect(forwarded.verifyWebhook(unsigned(fixture))).resolves.toMatchObject({ ok: true });
+
+    const lazy = createLinqAdapter({ apiKey: "static-key", credentials, signingSecret: "" });
+    await expect(lazy.verifyWebhook(signed(fixture, SIGNING_KEY_B))).resolves.toMatchObject({
+      ok: true,
+    });
+    expect(credentials).toHaveBeenCalledOnce();
+
+    const malformedLazy = createLinqAdapter({
+      credentials: vi.fn().mockResolvedValue({
+        apiKey: "lazy-key",
+        signingSecret: "not-a-standard-webhook-secret",
+      }),
+    });
+    await expect(malformedLazy.verifyWebhook(unsigned(fixture))).resolves.toMatchObject({
+      ok: false,
+      error: { code: "missing_signature_headers", status: 401 },
+    });
+    await expect(
+      malformedLazy.verifyWebhook(signed(fixture, SIGNING_KEY_A)),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "invalid_signing_secret", status: 503 },
+    });
   });
 
   it("keeps synchronous client access for static credentials", async () => {
@@ -298,6 +353,37 @@ describe("trusted forwarding convergence", () => {
     expect(duplicate.status).toBe(200);
     expect(handler).toHaveBeenCalledTimes(1);
     expect(setIfNotExists).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps trusted malformed curated timestamps generic-only and lossless", async () => {
+    const adapter = createLinqAdapter({ apiKey: "static-key", webhookVerifier: () => true });
+    const named = vi.fn();
+    const generic = vi.fn();
+    const delivery = vi.fn();
+    const tasks: Promise<unknown>[] = [];
+    const payload = {
+      ...deliveredFixture,
+      event_id: "trusted-invalid-delivered-timestamp",
+      data: { ...deliveredFixture.data, delivered_at: "2026-02-30T00:00:00Z" },
+    };
+    (adapter as unknown as { state: StateAdapter }).state = {
+      setIfNotExists: vi.fn().mockResolvedValue(true),
+    } as unknown as StateAdapter;
+    adapter.onLinqEvent("message.delivered", named);
+    adapter.onLinqEvent(generic);
+    adapter.onDeliveryStatus(delivery);
+
+    const response = await adapter.handleWebhook(unsigned(payload), {
+      waitUntil: (task) => tasks.push(task),
+    });
+    await Promise.all(tasks);
+
+    expect(response.status).toBe(200);
+    expect(named).not.toHaveBeenCalled();
+    expect(delivery).not.toHaveBeenCalled();
+    expect(generic).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "message.delivered", rawEvent: payload }),
+    );
   });
 });
 

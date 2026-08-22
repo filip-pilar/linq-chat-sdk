@@ -3,6 +3,7 @@ import { ValidationError } from "@chat-adapter/shared";
 import { LinqAPIV3 } from "@linqapp/sdk";
 import type { AdapterPostableMessage, Attachment, FileUpload } from "chat";
 
+import { invalidLinqProviderResponse } from "./errors.js";
 import { isRecord } from "./guards.js";
 import type { CompiledLinqMessageText, LinqCompiledDecoration } from "./message-compiler.js";
 
@@ -268,8 +269,29 @@ async function uploadBytes(
     },
     { maxRetries: 0 },
   );
-  onAttachmentCreated(created.attachment_id);
-  assertValidUploadUrl(created.upload_url);
+  if (!isRecord(created) || Array.isArray(created)) {
+    throw invalidLinqProviderResponse("create attachment", "response must be an object");
+  }
+  const attachmentId = requireUploadResponseString(created.attachment_id, "attachment_id");
+  onAttachmentCreated(attachmentId);
+  const uploadUrl = requireUploadResponseString(created.upload_url, "upload_url");
+  assertValidUploadUrl(uploadUrl);
+  if (created.http_method !== "PUT") {
+    throw invalidLinqProviderResponse("create attachment", "http_method must be PUT");
+  }
+  if (!isRecord(created.required_headers) || Array.isArray(created.required_headers)) {
+    throw invalidLinqProviderResponse("create attachment", "required_headers must be an object");
+  }
+  const requiredHeaders = Object.create(null) as Record<string, string>;
+  for (const [name, value] of Object.entries(created.required_headers)) {
+    if (typeof value !== "string") {
+      throw invalidLinqProviderResponse(
+        "create attachment",
+        "required_headers values must be strings",
+      );
+    }
+    requiredHeaders[name] = value;
+  }
   const controller = new AbortController();
   let timedOut = false;
   const timeout = setTimeout(() => {
@@ -279,9 +301,9 @@ async function uploadBytes(
   let upload: Response;
 
   try {
-    upload = await fetch(created.upload_url, {
-      method: created.http_method,
-      headers: created.required_headers,
+    upload = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: requiredHeaders,
       body: bytes,
       redirect: "error",
       signal: controller.signal,
@@ -305,7 +327,15 @@ async function uploadBytes(
     );
   }
 
-  return created.attachment_id;
+  return attachmentId;
+}
+
+function requireUploadResponseString(value: unknown, field: string): string {
+  if (typeof value !== "string" || value.length === 0 || value.trim() !== value) {
+    throw invalidLinqProviderResponse("create attachment", `${field} must be a non-empty string`);
+  }
+
+  return value;
 }
 
 async function resolveUploadBytes(source: PlannedUpload["source"]): Promise<UploadBytes> {

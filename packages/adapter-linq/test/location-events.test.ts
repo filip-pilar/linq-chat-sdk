@@ -82,6 +82,7 @@ describe("typed Linq location-sharing events", () => {
     [startedFixture, { shared_with: null }],
     [startedFixture, { began_at: "not-a-date" }],
     [startedFixture, { began_at: "2026-08-20" }],
+    [startedFixture, { began_at: "2026-02-30T00:00:00Z" }],
     [startedFixture, { ends_at: null }],
     [startedFixture, { ends_at: 42 }],
     [stoppedFixture, { shared_by: null }],

@@ -89,6 +89,51 @@ describe("Linq history fidelity", () => {
     expect(result.nextCursor).toBe("older");
   });
 
+  it("orders by the complete provider instant beyond JavaScript milliseconds", async () => {
+    const base = historyFixture.messages[0];
+    if (!base || !("chat_id" in base)) throw new Error("Expected a retrieved-message fixture");
+    const row = (id: string, timestamp: string) => ({
+      ...base,
+      id,
+      created_at: timestamp,
+      sent_at: timestamp,
+      parts: [{ type: "text", value: id }],
+    });
+    const page = {
+      messages: [
+        row("equal-first", "2026-08-01T12:00:00.1000Z"),
+        row("nano-later", "2026-08-01T12:00:00.123456789Z"),
+        row("equal-offset", "2026-08-01T13:00:00.100+01:00"),
+        row("nano-earlier", "2026-08-01T12:00:00.123456780Z"),
+        row("one-digit", "2026-08-01T12:00:00.09Z"),
+      ],
+      next_cursor: "older",
+    };
+    const { adapter } = createHistoryAdapter(page);
+
+    const result = await adapter.fetchMessages(THREAD_ID);
+
+    expect(result.messages.map((message) => message.id)).toEqual([
+      "one-digit",
+      "equal-first",
+      "equal-offset",
+      "nano-earlier",
+      "nano-later",
+    ]);
+    expect(result.messages.map((message) => message.metadata.dateSent.toISOString())).toEqual([
+      "2026-08-01T12:00:00.090Z",
+      "2026-08-01T12:00:00.100Z",
+      "2026-08-01T12:00:00.100Z",
+      "2026-08-01T12:00:00.123Z",
+      "2026-08-01T12:00:00.123Z",
+    ]);
+    expect(result.messages[4]?.raw).toMatchObject({
+      sent_at: "2026-08-01T12:00:00.123456789Z",
+    });
+    expect(Object.isFrozen(result.messages[4]?.raw)).toBe(true);
+    expect(result.nextCursor).toBe("older");
+  });
+
   it("rejects calendar-invalid timestamps and malformed canonical scalar facts", async () => {
     const base = historyFixture.messages[0];
     if (!base || !("chat_id" in base)) throw new Error("Expected a retrieved-message fixture");
@@ -106,9 +151,10 @@ describe("Linq history fidelity", () => {
         valid("february-30", "2026-02-30T00:00:00Z"),
         valid("non-leap-day", "2027-02-29T00:00:00Z"),
         valid("hour-24", "2026-08-01T24:00:00Z"),
-        valid("bad-offset", "2026-08-01T00:00:00+14:01"),
+        valid("rfc-wide-offset", "2026-08-01T00:00:00+14:01"),
         { ...valid("", "2026-08-01T00:00:00Z"), id: "" },
         { ...valid("bad-chat", "2026-08-01T00:00:00Z"), chat_id: 42 },
+        { ...valid("reserved-chat", "2026-08-01T00:00:00Z"), chat_id: "pending" },
         { ...valid("bad-boolean", "2026-08-01T00:00:00Z"), is_from_me: "false" },
       ],
       next_cursor: "older",
@@ -117,8 +163,13 @@ describe("Linq history fidelity", () => {
 
     const result = await adapter.fetchMessages(THREAD_ID);
 
-    expect(result.messages.map((message) => message.id)).toEqual(["offset-boundary", "leap-day"]);
+    expect(result.messages.map((message) => message.id)).toEqual([
+      "rfc-wide-offset",
+      "offset-boundary",
+      "leap-day",
+    ]);
     expect(result.messages.map((message) => message.metadata.dateSent.toISOString())).toEqual([
+      "2026-07-31T09:59:00.000Z",
       "2026-08-01T10:00:00.000Z",
       "2028-02-29T23:59:59.123Z",
     ]);
@@ -175,7 +226,10 @@ describe("Linq history fidelity", () => {
   });
 
   it("skips all-malformed provider pages so Chat SDK iteration reaches usable history", async () => {
-    const adapter = createLinqAdapter({ apiKey: "test-key", signingSecret: "test-secret" });
+    const adapter = createLinqAdapter({
+      apiKey: "test-key",
+      signingSecret: "whsec_dGVzdC1zZWNyZXQ=",
+    });
     const usable = historyFixture.messages[0];
     const list = vi
       .fn()
@@ -260,7 +314,10 @@ describe("Linq history fidelity", () => {
   });
 
   it("bounds consecutive filtered pages even when every cursor is unique", async () => {
-    const adapter = createLinqAdapter({ apiKey: "test-key", signingSecret: "test-secret" });
+    const adapter = createLinqAdapter({
+      apiKey: "test-key",
+      signingSecret: "whsec_dGVzdC1zZWNyZXQ=",
+    });
     const list = vi.fn().mockImplementation(async () => ({
       messages: [{ id: null }],
       next_cursor: `cursor-${list.mock.calls.length}`,
@@ -281,7 +338,10 @@ describe("Linq history fidelity", () => {
 });
 
 function createHistoryAdapter(page: unknown) {
-  const adapter = createLinqAdapter({ apiKey: "test-key", signingSecret: "test-secret" });
+  const adapter = createLinqAdapter({
+    apiKey: "test-key",
+    signingSecret: "whsec_dGVzdC1zZWNyZXQ=",
+  });
   const list = vi.fn().mockResolvedValue(page);
   const warn = vi.fn();
   Object.assign(adapter.client, { chats: { messages: { list } } });

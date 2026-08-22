@@ -12,6 +12,102 @@ const SIGNING_SECRET = `whsec_${Buffer.from(SIGNING_KEY).toString("base64")}`;
 const EVENT_DEDUPE_TTL_MS = 60 * 60 * 1000;
 
 describe("verified generic Linq event dispatch", () => {
+  it.each([
+    "chat.created",
+    "chat.group_name_updated",
+    "participant.added",
+    "chat.typing_indicator.started",
+    "phone_number.status_updated",
+    "call.answered",
+  ] as const)(
+    "delivers valid canonical raw-only %s events to named and generic handlers",
+    async (eventType) => {
+      const context = await createContext();
+      const named = vi.fn();
+      const all = vi.fn();
+      const tasks: Promise<unknown>[] = [];
+      const retrieve = vi.spyOn(context.adapter.client.chats, "retrieve");
+      const payload = rawKnownPayload(eventType);
+      context.adapter.onLinqEvent(eventType, named);
+      context.adapter.onLinqEvent(all);
+
+      const response = await context.adapter.handleWebhook(createStandardRequest(payload), {
+        waitUntil: (task) => tasks.push(task),
+      });
+      await Promise.all(tasks);
+
+      expect(response.status).toBe(200);
+      expect(named).toHaveBeenCalledOnce();
+      expect(all).toHaveBeenCalledOnce();
+      expect(named).toHaveBeenCalledWith(
+        expect.objectContaining({ type: eventType, data: payload.data, rawEvent: payload }),
+      );
+      expect(all).toHaveBeenCalledWith(
+        expect.objectContaining({ type: eventType, data: payload.data, rawEvent: payload }),
+      );
+      expect(context.processMessage).not.toHaveBeenCalled();
+      expect(context.processReaction).not.toHaveBeenCalled();
+      expect(retrieve).not.toHaveBeenCalled();
+    },
+  );
+
+  it("isolates and dedupes raw-only named callbacks while preserving listener removal", async () => {
+    const context = await createContext();
+    const failure = new Error("raw-only callback failed");
+    const failed = vi.fn(async () => {
+      throw failure;
+    });
+    const sibling = vi.fn();
+    const payload = rawKnownPayload("chat.created");
+    const tasks: Promise<unknown>[] = [];
+    context.adapter.onLinqEvent("chat.created", failed);
+    const unsubscribe = context.adapter.onLinqEvent("chat.created", sibling);
+
+    const first = await context.adapter.handleWebhook(createStandardRequest(payload), {
+      waitUntil: (task) => tasks.push(task),
+    });
+    await Promise.all(tasks);
+    unsubscribe();
+    const duplicate = await context.adapter.handleWebhook(
+      createStandardRequest(payload, { "webhook-id": "raw-only-duplicate" }),
+    );
+
+    expect(first.status).toBe(200);
+    expect(duplicate.status).toBe(200);
+    expect(failed).toHaveBeenCalledOnce();
+    expect(sibling).toHaveBeenCalledOnce();
+    expect(context.logger.error).toHaveBeenCalledWith("Linq event handler failed", {
+      error: failure,
+      eventType: "chat.created",
+    });
+  });
+
+  it("delivers trusted-forwarded raw-only known events through the same named seam", async () => {
+    const adapter = createLinqAdapter({ apiKey: "test_linq_api_key", webhookVerifier: () => true });
+    const context = await createContext(adapter);
+    const named = vi.fn();
+    const all = vi.fn();
+    const payload = rawKnownPayload("participant.added");
+    const rawBody = `${JSON.stringify(payload)}\n`;
+    const tasks: Promise<unknown>[] = [];
+    adapter.onLinqEvent("participant.added", named);
+    adapter.onLinqEvent(all);
+
+    const response = await adapter.handleWebhook(
+      new Request("https://forwarder.example.test/linq", { method: "POST", body: rawBody }),
+      { waitUntil: (task) => tasks.push(task) },
+    );
+    await Promise.all(tasks);
+
+    expect(response.status).toBe(200);
+    expect(named).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "participant.added", rawEvent: payload }),
+    );
+    expect(all).toHaveBeenCalledOnce();
+    expect(context.processMessage).not.toHaveBeenCalled();
+    expect(context.processReaction).not.toHaveBeenCalled();
+  });
+
   it("atomically claims before standard and generic message dispatch", async () => {
     const context = await createContext();
     const named = vi.fn();
@@ -129,6 +225,36 @@ describe("verified generic Linq event dispatch", () => {
     expect(named).not.toHaveBeenCalled();
     expect(all).toHaveBeenCalledWith(
       expect.objectContaining({ type: "message.received", rawEvent: payload }),
+    );
+    expect(context.processMessage).not.toHaveBeenCalled();
+  });
+
+  it("keeps a schema-valid leap-second message typed without inventing a Chat SDK Date", async () => {
+    const context = await createContext();
+    const named = vi.fn();
+    const all = vi.fn();
+    const payload = structuredClone(fixture);
+    payload.event_id = "received-leap-second";
+    payload.data.sent_at = "2016-12-31T23:59:60Z";
+    context.adapter.onLinqEvent("message.received", named);
+    context.adapter.onLinqEvent(all);
+
+    const response = await context.adapter.handleWebhook(createStandardRequest(payload));
+
+    expect(response.status).toBe(200);
+    expect(named).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "message.received",
+        data: expect.objectContaining({ sent_at: "2016-12-31T23:59:60Z" }),
+        rawEvent: payload,
+      }),
+    );
+    expect(all).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "message.received",
+        data: expect.objectContaining({ sent_at: "2016-12-31T23:59:60Z" }),
+        rawEvent: payload,
+      }),
     );
     expect(context.processMessage).not.toHaveBeenCalled();
   });
@@ -361,7 +487,12 @@ describe("verified generic Linq event dispatch", () => {
   });
 });
 
-async function createContext(): Promise<{
+async function createContext(
+  adapter = createLinqAdapter({
+    apiKey: "test_linq_api_key",
+    signingSecret: SIGNING_SECRET,
+  }),
+): Promise<{
   adapter: LinqAdapter;
   logger: Logger & { error: ReturnType<typeof vi.fn> };
   processMessage: ReturnType<typeof vi.fn>;
@@ -387,13 +518,17 @@ async function createContext(): Promise<{
     processMessage,
     processReaction,
   } as unknown as ChatInstance;
-  const adapter = createLinqAdapter({
-    apiKey: "test_linq_api_key",
-    signingSecret: SIGNING_SECRET,
-  });
-
   await adapter.initialize(chat);
   return { adapter, logger, processMessage, processReaction, setIfNotExists };
+}
+
+function rawKnownPayload(eventType: string): Record<string, unknown> {
+  return {
+    ...fixture,
+    event_id: `raw-${eventType}`,
+    event_type: eventType,
+    data: Object.freeze({ provider_fact: eventType, nested: [1, true, null] }),
+  };
 }
 
 function createLogger(): Logger & { error: ReturnType<typeof vi.fn> } {

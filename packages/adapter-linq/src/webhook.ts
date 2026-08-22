@@ -1,6 +1,6 @@
 import type { LinqAPIV3 } from "@linqapp/sdk";
 
-import { isRecord } from "./guards.js";
+import { immutableJsonSnapshot, isRecord, isUsableLinqChatId, isUsableLinqId } from "./guards.js";
 import { parseLinqTimestamp } from "./timestamps.js";
 
 export const LINQ_WEBHOOK_VERSION = "2026-02-03" as const;
@@ -313,6 +313,24 @@ export type LinqVerifiedWebhook =
   | LinqVerifiedUnhandledWebhook
   | LinqVerifiedUnsupportedVersionWebhook;
 
+const CURATED_LINQ_EVENT_TYPES = new Set<string>([
+  "message.received",
+  "message.sent",
+  "message.delivered",
+  "message.read",
+  "message.failed",
+  "message.edited",
+  "reaction.added",
+  "reaction.removed",
+  "location.sharing.started",
+  "location.sharing.stopped",
+]);
+
+/** Whether a current event name promises a curated adapter projection. */
+export function isCuratedLinqEventType(value: string): boolean {
+  return CURATED_LINQ_EVENT_TYPES.has(value);
+}
+
 export type LinqWebhookVerificationErrorCode =
   | "missing_signature_headers"
   | "invalid_signature"
@@ -363,7 +381,7 @@ export function normalizeAuthenticatedLinqWebhook(
     return invalidPayload();
   }
 
-  const rawEvent = immutableJsonSnapshot(event);
+  const rawEvent = immutableJsonSnapshot(event) as LinqWebhookRawEvent;
   const base = {
     envelope,
     transport: Object.freeze(transport),
@@ -526,7 +544,7 @@ function parseEnvelope(event: Record<string, unknown>): LinqWebhookEnvelopeObser
     !isNonEmptyString(event.webhook_version) ||
     !isNonEmptyString(event.event_type) ||
     !isNonEmptyString(event.event_id) ||
-    !isNonEmptyString(event.created_at) ||
+    !isValidTimestamp(event.created_at) ||
     !isNonEmptyString(event.trace_id) ||
     !isNonEmptyString(event.partner_id) ||
     !("data" in event)
@@ -559,8 +577,8 @@ function parseMessageObservation(value: unknown): LinqMessageObservation | null 
   const rawParts = value.parts;
 
   if (
-    !isNonEmptyString(value.id) ||
-    !isNonEmptyString(chat.id) ||
+    !isUsableLinqId(value.id) ||
+    !isUsableLinqChatId(chat.id) ||
     !isNullableBoolean(chat.is_group) ||
     (ownerHandle !== null && !isChatHandle(ownerHandle)) ||
     !isChatHandle(value.sender_handle) ||
@@ -758,8 +776,8 @@ function parseMessageEditedEventData(value: unknown): LinqMessageEditedEventData
   const part = value.part;
 
   if (
-    !isNonEmptyString(value.id) ||
-    !isNonEmptyString(chat.id) ||
+    !isUsableLinqId(value.id) ||
+    !isUsableLinqChatId(chat.id) ||
     typeof chat.is_group !== "boolean" ||
     !isChatHandle(chat.owner_handle) ||
     !isRecord(chat.health_status) ||
@@ -768,7 +786,7 @@ function parseMessageEditedEventData(value: unknown): LinqMessageEditedEventData
     !Number.isInteger(part.index) ||
     (part.index as number) < 0 ||
     typeof part.text !== "string" ||
-    !isNonEmptyString(value.edited_at)
+    !isValidTimestamp(value.edited_at)
   ) {
     return null;
   }
@@ -789,9 +807,9 @@ function parseMessageFailedEventData(value: unknown): LinqMessageFailedEventData
   if (
     !isRecord(value) ||
     !Number.isInteger(value.code) ||
-    !isNonEmptyString(value.failed_at) ||
-    !isOptionalNonEmptyString(value.chat_id) ||
-    !isOptionalNonEmptyString(value.message_id) ||
+    !isValidTimestamp(value.failed_at) ||
+    !isOptionalUsableChatId(value.chat_id) ||
+    !isOptionalUsableId(value.message_id) ||
     !isOptionalString(value.reason) ||
     !isNullableInteger(value.detail_code) ||
     !isNullableService(value.service) ||
@@ -801,8 +819,8 @@ function parseMessageFailedEventData(value: unknown): LinqMessageFailedEventData
   }
 
   return Object.freeze({
-    providerMessageId: isNonEmptyString(value.message_id) ? value.message_id : null,
-    chatId: isNonEmptyString(value.chat_id) ? value.chat_id : null,
+    providerMessageId: isUsableLinqId(value.message_id) ? value.message_id : null,
+    chatId: isUsableLinqChatId(value.chat_id) ? value.chat_id : null,
     code: value.code as number,
     detailCode: Number.isInteger(value.detail_code) ? (value.detail_code as number) : null,
     reason: typeof value.reason === "string" ? value.reason : null,
@@ -868,9 +886,9 @@ function isChatHandle(value: unknown): value is Record<string, unknown> & {
 } {
   return (
     isRecord(value) &&
-    isNonEmptyString(value.id) &&
+    isUsableLinqId(value.id) &&
     isNonEmptyString(value.handle) &&
-    isNonEmptyString(value.joined_at) &&
+    isValidTimestamp(value.joined_at) &&
     isService(value.service) &&
     isNullableBoolean(value.is_me) &&
     isNullableTimestamp(value.left_at) &&
@@ -927,7 +945,7 @@ function isConservativeEmail(value: string): boolean {
 function isReplyContext(value: unknown): value is Record<string, unknown> {
   return (
     isRecord(value) &&
-    (value.message_id === undefined || isNonEmptyString(value.message_id)) &&
+    (value.message_id === undefined || isUsableLinqId(value.message_id)) &&
     (value.part_index === undefined ||
       (Number.isInteger(value.part_index) && (value.part_index as number) >= 0))
   );
@@ -943,8 +961,8 @@ function parseReactionObservation(value: unknown): LinqReactionObservation | nul
   if (
     typeof value.is_from_me !== "boolean" ||
     !isNonEmptyString(value.reaction_type) ||
-    (value.chat_id !== undefined && !isNonEmptyString(value.chat_id)) ||
-    (value.message_id !== undefined && !isNonEmptyString(value.message_id)) ||
+    (value.chat_id !== undefined && !isUsableLinqChatId(value.chat_id)) ||
+    (value.message_id !== undefined && !isUsableLinqId(value.message_id)) ||
     (value.part_index !== undefined &&
       (!Number.isInteger(value.part_index) || (value.part_index as number) < 0)) ||
     (value.custom_emoji !== undefined &&
@@ -952,7 +970,7 @@ function parseReactionObservation(value: unknown): LinqReactionObservation | nul
       typeof value.custom_emoji !== "string") ||
     (value.reacted_at !== undefined &&
       value.reacted_at !== null &&
-      typeof value.reacted_at !== "string") ||
+      parseLinqTimestamp(value.reacted_at) === null) ||
     (value.service !== undefined && value.service !== null && !isService(value.service)) ||
     (senderHandle !== null && !isChatHandle(senderHandle))
   ) {
@@ -963,8 +981,8 @@ function parseReactionObservation(value: unknown): LinqReactionObservation | nul
   const deprecatedFrom = isNonEmptyString(value.from) ? classifyLinqEndpoint(value.from) : null;
 
   return Object.freeze({
-    chatId: isNonEmptyString(value.chat_id) ? value.chat_id : null,
-    providerMessageId: isNonEmptyString(value.message_id) ? value.message_id : null,
+    chatId: isUsableLinqChatId(value.chat_id) ? value.chat_id : null,
+    providerMessageId: isUsableLinqId(value.message_id) ? value.message_id : null,
     partIndex: Number.isInteger(value.part_index) ? (value.part_index as number) : null,
     reactionType: value.reaction_type,
     customEmoji: typeof value.custom_emoji === "string" ? value.custom_emoji : null,
@@ -1013,8 +1031,12 @@ function isOptionalString(value: unknown): boolean {
   return value === undefined || typeof value === "string";
 }
 
-function isOptionalNonEmptyString(value: unknown): boolean {
-  return value === undefined || isNonEmptyString(value);
+function isOptionalUsableId(value: unknown): boolean {
+  return value === undefined || isUsableLinqId(value);
+}
+
+function isOptionalUsableChatId(value: unknown): boolean {
+  return value === undefined || isUsableLinqChatId(value);
 }
 
 function isNullableInteger(value: unknown): boolean {
@@ -1027,6 +1049,10 @@ function isNullableBoolean(value: unknown): boolean {
 
 function isNullableTimestamp(value: unknown): boolean {
   return value === undefined || value === null || parseLinqTimestamp(value) !== null;
+}
+
+function isValidTimestamp(value: unknown): value is string {
+  return typeof value === "string" && parseLinqTimestamp(value) !== null;
 }
 
 function isOptionalTimestamp(value: unknown): boolean {
@@ -1063,20 +1089,4 @@ function classifyWebhookVersion(version: string): LinqWebhookEnvelopeObservation
   }
 
   return "unknown";
-}
-
-function immutableJsonSnapshot(event: Record<string, unknown>): LinqWebhookRawEvent {
-  return deepFreeze(structuredClone(event)) as LinqWebhookRawEvent;
-}
-
-function deepFreeze<T>(value: T): T {
-  if (!isRecord(value) && !Array.isArray(value)) {
-    return value;
-  }
-
-  for (const nested of Object.values(value)) {
-    deepFreeze(nested);
-  }
-
-  return Object.freeze(value);
 }

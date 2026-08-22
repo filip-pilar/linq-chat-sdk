@@ -32,7 +32,12 @@ describe("LinqAdapter.openDM", () => {
     const create = vi.fn().mockResolvedValue({
       chat_id: "3caaf1a0-ef9f-46e0-8c22-31e82c8514dc",
       created_new_chat: true,
-      message: { id: "outbound-message-id" },
+      is_group: false,
+      message: {
+        id: "outbound-message-id",
+        created_at: "2026-08-22T10:00:00.123456789Z",
+        sent_at: null,
+      },
     });
     injectClient(adapter, { messages: { create } });
 
@@ -48,13 +53,18 @@ describe("LinqAdapter.openDM", () => {
     });
     expect(result.threadId).toBe("linq:3caaf1a0-ef9f-46e0-8c22-31e82c8514dc");
     expect(result.id).toBe("outbound-message-id");
+    expect(adapter.isDM(result.threadId)).toBe(true);
   });
 
   it("still sends to an existing chat through the chat-scoped endpoint", async () => {
     const adapter = createTestAdapter();
     const send = vi.fn().mockResolvedValue({
       chat_id: "chat-123",
-      message: { id: "outbound-message-id" },
+      message: {
+        id: "outbound-message-id",
+        created_at: "2026-08-22T10:00:00.123456789Z",
+        sent_at: null,
+      },
     });
     const create = vi.fn();
     injectClient(adapter, { chats: { messages: { send } }, messages: { create } });
@@ -79,7 +89,12 @@ describe("LinqAdapter.openDM", () => {
     const create = vi.fn().mockResolvedValue({
       chat_id: "3caaf1a0-ef9f-46e0-8c22-31e82c8514dc",
       created_new_chat: true,
-      message: { id: "outbound-message-id" },
+      is_group: false,
+      message: {
+        id: "outbound-message-id",
+        created_at: "2026-08-22T10:00:00.123456789Z",
+        sent_at: null,
+      },
     });
     injectClient(adapter, { messages: { create } });
     const chat = createChat(adapter);
@@ -92,6 +107,7 @@ describe("LinqAdapter.openDM", () => {
     expect(pending.id).toBe(`linq:pending:${HANDLE}`);
     expect(sent.threadId).toBe("linq:3caaf1a0-ef9f-46e0-8c22-31e82c8514dc");
     expect(chat.thread(sent.threadId).id).toBe(sent.threadId);
+    expect(adapter.isDM(sent.threadId)).toBe(true);
   });
 
   it("treats repeated first posts as distinct sends while returning one canonical chat", async () => {
@@ -100,7 +116,12 @@ describe("LinqAdapter.openDM", () => {
     const create = vi.fn().mockImplementation(async () => ({
       chat_id: "3caaf1a0-ef9f-46e0-8c22-31e82c8514dc",
       created_new_chat: message === 0,
-      message: { id: `outbound-message-${++message}` },
+      is_group: false,
+      message: {
+        id: `outbound-message-${++message}`,
+        created_at: "2026-08-22T10:00:00.123456789Z",
+        sent_at: null,
+      },
     }));
     injectClient(adapter, { messages: { create } });
     const threadId = await adapter.openDM(HANDLE);

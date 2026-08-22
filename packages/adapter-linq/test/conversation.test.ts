@@ -346,6 +346,19 @@ describe("Linq conversation facade", () => {
     expect(retrieveChat).not.toHaveBeenCalled();
   });
 
+  it.each([undefined, null, {}, { success: false }, { success: "true" }])(
+    "rejects malformed location-request acknowledgement %j",
+    async (response) => {
+      const { adapter, requestLocation } = await createHarness();
+      requestLocation.mockResolvedValueOnce(response);
+
+      await expect(adapter.conversation(THREAD_ID).location.request()).rejects.toBeInstanceOf(
+        AdapterError,
+      );
+      expect(requestLocation).toHaveBeenCalledOnce();
+    },
+  );
+
   it("rejects a location request for a known group before provider work", async () => {
     const { adapter, providerIO } = await createHarness();
     const groupThreadId = adapter.encodeThreadId({ chatId: GROUP_CHAT_ID, isGroup: true });
@@ -439,7 +452,6 @@ describe("Linq conversation facade", () => {
     const snapshot = await adapter.conversation(THREAD_ID).location.retrieve();
 
     expect(snapshot.locations).toEqual([
-      { handle: "first@example.com", longitude: 151.2093, latitude: -33.8688 },
       {
         handle: "+442071234567",
         longitude: -0.1276,
@@ -455,15 +467,29 @@ describe("Linq conversation facade", () => {
     {},
     { data: null },
     { success: false, data: { type: "FeatureCollection", features: [] } },
-    { data: { type: "FeatureCollection", features: null } },
+    { success: true, data: { type: "FeatureCollection", features: null } },
+    { success: true, data: { type: "Other", features: [] } },
+  ])("rejects malformed location response envelope %j", async (response) => {
+    const { adapter, retrieveLocation } = await createHarness();
+    retrieveLocation.mockResolvedValueOnce(response);
+
+    await expect(adapter.conversation(THREAD_ID).location.retrieve()).rejects.toBeInstanceOf(
+      AdapterError,
+    );
+    expect(retrieveLocation).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { success: true, data: { type: "FeatureCollection", features: [] } },
     {
+      success: true,
       data: {
         type: "FeatureCollection",
         features: [{ type: "Feature", geometry: { type: "Point", coordinates: [10] } }],
       },
     },
   ])(
-    "returns an immutable empty snapshot when response %j has no usable rows",
+    "returns an immutable empty snapshot when valid response %j has no usable rows",
     async (response) => {
       const { adapter, retrieveLocation } = await createHarness();
       retrieveLocation.mockResolvedValueOnce(response);
@@ -612,7 +638,10 @@ describe("Linq conversation facade", () => {
   });
 
   it("requires Chat initialization when resolving a conversation by ID", () => {
-    const adapter = createLinqAdapter({ apiKey: "test-key", signingSecret: "test-secret" });
+    const adapter = createLinqAdapter({
+      apiKey: "test-key",
+      signingSecret: "whsec_dGVzdC1zZWNyZXQ=",
+    });
 
     expect(() => adapter.conversation(THREAD_ID)).toThrow(ValidationError);
     expect(() => adapter.conversation(null as never)).toThrow(ValidationError);
@@ -790,9 +819,12 @@ async function createHarness(): Promise<{
   requestLocation: ReturnType<typeof vi.fn>;
   retrieveLocation: ReturnType<typeof vi.fn>;
 }> {
-  const adapter = createLinqAdapter({ apiKey: "test-key", signingSecret: "test-secret" });
-  const send = vi.fn().mockResolvedValue({
-    chat_id: CHAT_ID,
+  const adapter = createLinqAdapter({
+    apiKey: "test-key",
+    signingSecret: "whsec_dGVzdC1zZWNyZXQ=",
+  });
+  const send = vi.fn().mockImplementation(async (requestedChatId: string) => ({
+    chat_id: requestedChatId,
     message: {
       created_at: "2026-08-20T00:00:00.000Z",
       delivery_status: "queued",
@@ -801,13 +833,14 @@ async function createHarness(): Promise<{
       parts: [],
       sent_at: null,
     },
-  });
+  }));
   const addReaction = vi.fn().mockResolvedValue({ message: "Reaction processed", status: "ok" });
   const update = vi.fn().mockResolvedValue({
     chat_id: CHAT_ID,
     created_at: "2026-08-20T00:00:00.000Z",
     delivery_status: "sent",
     id: MESSAGE_ID,
+    is_from_me: true,
     is_read: false,
     parts: [{ type: "text", value: "updated", reactions: [] }],
     sent_at: "2026-08-20T00:00:00.000Z",

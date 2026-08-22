@@ -285,7 +285,10 @@ describe("LinqAdapter.postMessage with cards", () => {
 });
 
 function createCardTestAdapter() {
-  const adapter = createLinqAdapter({ apiKey: "test-key", signingSecret: "test-secret" });
+  const adapter = createLinqAdapter({
+    apiKey: "test-key",
+    signingSecret: "whsec_dGVzdC1zZWNyZXQ=",
+  });
   const send = vi.fn(async (chatId: string, _body: unknown) => ({
     chat_id: chatId,
     message: {

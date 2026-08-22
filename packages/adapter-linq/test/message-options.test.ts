@@ -222,7 +222,10 @@ describe("Linq preferred-service and effect transport", () => {
 });
 
 function createAdapterHarness() {
-  const adapter = createLinqAdapter({ apiKey: "test-key", signingSecret: "test-secret" });
+  const adapter = createLinqAdapter({
+    apiKey: "test-key",
+    signingSecret: "whsec_dGVzdC1zZWNyZXQ=",
+  });
   const send = vi.fn().mockResolvedValue({
     chat_id: "chat-123",
     message: {

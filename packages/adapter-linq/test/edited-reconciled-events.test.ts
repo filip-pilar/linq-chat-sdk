@@ -74,6 +74,11 @@ describe("typed edited and reconciled Linq messages", () => {
     ["part index", { ...editedFixture.data, part: { ...editedFixture.data.part, index: -1 } }],
     ["part text", { ...editedFixture.data, part: { ...editedFixture.data.part, text: 42 } }],
     ["edit timestamp", { ...editedFixture.data, edited_at: "" }],
+    [
+      "calendar-invalid edit timestamp",
+      { ...editedFixture.data, edited_at: "2026-02-30T00:00:00Z" },
+    ],
+    ["non-string edit timestamp", { ...editedFixture.data, edited_at: 42 }],
   ])("preserves malformed edited payload %s losslessly", async (_label, data) => {
     const payload = { ...editedFixture, data };
 

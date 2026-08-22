@@ -12,6 +12,15 @@ const STANDARD_SIGNATURE_HEADER = "webhook-signature";
 const STANDARD_TIMESTAMP_HEADER = "webhook-timestamp";
 const MAX_WEBHOOK_AGE_SECONDS = 5 * 60;
 
+/** Validate a static secret with the same implementation used for request verification. */
+export function assertValidStandardWebhookSigningSecret(signingSecret: string): void {
+  try {
+    new Webhook(signingSecret);
+  } catch {
+    throw new TypeError("Linq requires a valid Standard Webhooks signing secret.");
+  }
+}
+
 export type LinqWebhookAuthenticationResult =
   | {
       readonly ok: true;

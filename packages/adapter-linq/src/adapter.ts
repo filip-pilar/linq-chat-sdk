@@ -22,7 +22,7 @@ import type {
 } from "chat";
 
 import { cardHasInteractiveActions, collectCardImageUrls, extractCardElement } from "./cards.js";
-import { translateLinqError } from "./errors.js";
+import { invalidLinqProviderResponse, translateLinqError } from "./errors.js";
 import {
   createLinqEvent,
   isLinqKnownEventType,
@@ -32,7 +32,7 @@ import {
   type LinqEventMap,
   type LinqKnownEventType,
 } from "./events.js";
-import { isRecord } from "./guards.js";
+import { immutableJsonSnapshot, isRecord, isUsableLinqChatId, isUsableLinqId } from "./guards.js";
 import { createLinqAttachmentFetcher } from "./inbound-media.js";
 import {
   isMessageReceivedWebhookEvent,
@@ -44,8 +44,14 @@ import { planLinqOutboundMessage, prepareLinqOutboundParts } from "./outbound-me
 import { compileLinqMessageText, compileLinqSendOptions } from "./message-compiler.js";
 import { getLinqReplyPartIndex, withLinqReplyPartIndex } from "./message.js";
 import { fromLinqReaction, toLinqReaction } from "./reactions.js";
-import { parseLinqTimestamp, selectLinqMessageTimestamp } from "./timestamps.js";
 import {
+  compareLinqTimestamps,
+  parseLinqTimestamp,
+  selectLinqMessageTimestamp,
+  type LinqTimestamp,
+} from "./timestamps.js";
+import {
+  assertValidStandardWebhookSigningSecret,
   authenticateLinqWebhookRequest,
   authenticateTrustedLinqWebhookRequest,
   type LinqWebhookAuthenticationResult,
@@ -53,6 +59,7 @@ import {
 import {
   failure,
   getVerifiedLinqWebhookEvent,
+  isCuratedLinqEventType,
   normalizeAuthenticatedLinqWebhook,
   responseForLinqWebhookFailure,
   type LinqVerifiedWebhook,
@@ -213,8 +220,16 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     if (!config.apiKey && !config.credentials) {
       throw new Error("Linq requires apiKey or a credentials provider.");
     }
-    if (!config.webhookVerifier && !config.signingSecret?.trim() && !config.credentials) {
-      throw new Error("Linq requires signingSecret, credentials, or a trusted webhookVerifier.");
+    if (!config.webhookVerifier) {
+      if (!config.signingSecret) {
+        if (!config.credentials) {
+          throw new Error(
+            "Linq requires signingSecret, credentials, or a trusted webhookVerifier.",
+          );
+        }
+      } else {
+        assertValidStandardWebhookSigningSecret(config.signingSecret);
+      }
     }
 
     this.apiClient = config.apiKey
@@ -348,7 +363,15 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
         const client = await this.getApiClient();
 
         try {
-          await client.chats.location.request(chatId);
+          const response = await client.chats.location.request(chatId);
+          const responseRecord = requireProviderRecord(
+            response,
+            "request chat location",
+            "response",
+          );
+          if (responseRecord.success !== true) {
+            throw invalidLinqProviderResponse("request chat location", "success must be true");
+          }
         } catch (error) {
           throw translateLinqError(error, {
             action: "request chat location",
@@ -431,15 +454,56 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
         try {
           const response = await client.chats.sendVoicememo(chatId, request);
-          const voiceMemo = response.voice_memo;
+          const responseRecord = requireProviderRecord(
+            response,
+            "send chat voice memo",
+            "response",
+          );
+          const voiceMemo = requireProviderRecord(
+            responseRecord.voice_memo,
+            "send chat voice memo",
+            "voice_memo",
+          );
+          const responseChat = requireProviderRecord(
+            voiceMemo.chat,
+            "send chat voice memo",
+            "voice_memo.chat",
+          );
+          const responseAttachment = requireProviderRecord(
+            voiceMemo.voice_memo,
+            "send chat voice memo",
+            "voice_memo.voice_memo",
+          );
+          const responseChatId = requireMatchingProviderId(
+            responseChat.id,
+            chatId,
+            "send chat voice memo",
+            "voice_memo.chat.id",
+          );
+          const messageId = requireProviderId(
+            voiceMemo.id,
+            "send chat voice memo",
+            "voice_memo.id",
+          );
+          const attachmentId = requireProviderId(
+            responseAttachment.id,
+            "send chat voice memo",
+            "voice_memo.voice_memo.id",
+          );
+          if (typeof responseChat.is_group !== "boolean") {
+            throw invalidLinqProviderResponse(
+              "send chat voice memo",
+              "voice_memo.chat.is_group must be a boolean",
+            );
+          }
 
           return Object.freeze({
-            messageId: voiceMemo.id,
+            messageId,
             threadId: this.encodeThreadId({
-              chatId: voiceMemo.chat.id,
-              isGroup: voiceMemo.chat.is_group,
+              chatId: responseChatId,
+              isGroup: responseChat.is_group,
             }),
-            attachmentId: voiceMemo.voice_memo.id,
+            attachmentId,
           });
         } catch (error) {
           throw translateLinqError(error, {
@@ -599,16 +663,27 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
           resourceType: "chat",
         });
       }
+      const pageRecord = requireProviderRecord(page, "list chat messages", "response");
+      if (!Array.isArray(pageRecord.messages)) {
+        throw invalidLinqProviderResponse("list chat messages", "messages must be an array");
+      }
+      if (
+        pageRecord.next_cursor !== undefined &&
+        pageRecord.next_cursor !== null &&
+        typeof pageRecord.next_cursor !== "string"
+      ) {
+        throw invalidLinqProviderResponse(
+          "list chat messages",
+          "next_cursor must be a string or null",
+        );
+      }
       const parsedRows: Array<{
         readonly message: Message<LinqRawMessage>;
         readonly providerIndex: number;
-        readonly timestamp: number;
+        readonly timestamp: LinqTimestamp;
       }> = [];
 
-      for (const [providerIndex, raw] of (Array.isArray(page.messages)
-        ? page.messages
-        : []
-      ).entries()) {
+      for (const [providerIndex, raw] of pageRecord.messages.entries()) {
         try {
           const timestamp = validProviderMessageTimestamp(raw);
           if (timestamp === undefined) {
@@ -618,7 +693,7 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
           }
 
           parsedRows.push({
-            message: this.parseMessage(raw),
+            message: this.parseMessage(immutableJsonSnapshot(raw) as LinqRawMessage),
             providerIndex,
             timestamp,
           });
@@ -629,7 +704,10 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
       const messages = chronologicalHistoryMessages(parsedRows);
 
-      const nextCursor = page.next_cursor || undefined;
+      const nextCursor =
+        typeof pageRecord.next_cursor === "string" && pageRecord.next_cursor.length > 0
+          ? pageRecord.next_cursor
+          : undefined;
 
       if (messages.length > 0 || nextCursor === undefined) {
         return { messages, nextCursor };
@@ -677,14 +755,29 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       });
     }
 
+    const messageRecord = requireProviderRecord(message, "retrieve message", "response");
+    requireMatchingProviderId(messageRecord.id, messageId, "retrieve message", "id");
+    const responseChatId = requireProviderChatId(
+      messageRecord.chat_id,
+      "retrieve message",
+      "chat_id",
+    );
+
     // Linq retrieves messages by globally unique provider ID. Preserve Chat
     // SDK's thread-scoped fetch contract if a caller supplies an ID from a
     // different chat.
-    if (message.chat_id !== chatId) {
+    if (responseChatId !== chatId) {
       return null;
     }
 
-    return this.parseMessage(message);
+    try {
+      return this.parseMessage(immutableJsonSnapshot(message));
+    } catch {
+      throw invalidLinqProviderResponse(
+        "retrieve message",
+        "response cannot produce a truthful Chat SDK Message",
+      );
+    }
   }
 
   async postMessage(
@@ -763,11 +856,37 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       const response = pendingHandle
         ? await client.messages.create({ to: [pendingHandle], message: messageContent })
         : await client.chats.messages.send(chatId, { message: messageContent });
+      const responseRecord = requireProviderRecord(response, "send messages", "response");
+      const responseMessage = requireProviderRecord(
+        responseRecord.message,
+        "send messages",
+        "message",
+      );
+      const messageId = requireProviderId(responseMessage.id, "send messages", "message.id");
+      let responseChatId: string;
+      let responseIsGroup: boolean | undefined;
+      if (pendingHandle) {
+        responseChatId = requireProviderChatId(responseRecord.chat_id, "send messages", "chat_id");
+        if (typeof responseRecord.is_group !== "boolean") {
+          throw invalidLinqProviderResponse(
+            "send messages",
+            "is_group must be a boolean for a pending-thread send",
+          );
+        }
+        responseIsGroup = responseRecord.is_group;
+      } else {
+        responseChatId = requireMatchingProviderId(
+          responseRecord.chat_id,
+          chatId,
+          "send messages",
+          "chat_id",
+        );
+      }
 
       return {
-        id: response.message.id,
-        threadId: this.encodeThreadId({ chatId: response.chat_id || chatId }),
-        raw: response,
+        id: messageId,
+        threadId: this.encodeThreadId({ chatId: responseChatId, isGroup: responseIsGroup }),
+        raw: immutableJsonSnapshot(response),
       };
     } catch (error) {
       if (!messageSendingBegan) {
@@ -812,6 +931,9 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
         text,
         part_index: 0,
       });
+      const responseRecord = requireProviderRecord(response, "edit message", "response");
+      requireMatchingProviderId(responseRecord.id, messageId, "edit message", "id");
+      requireMatchingProviderId(responseRecord.chat_id, chatId, "edit message", "chat_id");
     } catch (error) {
       throw translateLinqError(error, {
         action: "edit message",
@@ -821,9 +943,9 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     }
 
     return {
-      id: response.id,
-      threadId: this.encodeThreadId({ chatId: response.chat_id || chatId }),
-      raw: response,
+      id: messageId,
+      threadId: this.encodeThreadId({ chatId }),
+      raw: immutableJsonSnapshot(response),
     };
   }
 
@@ -938,6 +1060,18 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     let chat: Awaited<ReturnType<LinqAPIV3["chats"]["retrieve"]>>;
     try {
       chat = await client.chats.retrieve(chatId);
+      const chatRecord = requireProviderRecord(chat, "retrieve chat", "response");
+      requireMatchingProviderId(chatRecord.id, chatId, "retrieve chat", "id");
+      if (typeof chatRecord.is_group !== "boolean") {
+        throw invalidLinqProviderResponse("retrieve chat", "is_group must be a boolean");
+      }
+      if (
+        chatRecord.display_name !== undefined &&
+        chatRecord.display_name !== null &&
+        typeof chatRecord.display_name !== "string"
+      ) {
+        throw invalidLinqProviderResponse("retrieve chat", "display_name must be a string or null");
+      }
     } catch (error) {
       throw translateLinqError(error, {
         action: "retrieve chat",
@@ -952,7 +1086,7 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       channelName: chat.display_name ?? undefined,
       isDM: !chat.is_group,
       metadata: {
-        chat,
+        chat: immutableJsonSnapshot(chat),
       },
     };
   }
@@ -1035,7 +1169,8 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   ): Promise<LinqVerifiedWebhookDispatchResult> {
     const event = getVerifiedLinqWebhookEvent(webhook, this.webhookVerificationAuthority);
     const includeNamed =
-      webhook.envelope.versionStatus === "current" && webhook.kind !== "unhandled";
+      webhook.envelope.versionStatus === "current" &&
+      (webhook.kind !== "unhandled" || !isCuratedLinqEventType(webhook.envelope.eventType));
     const genericHandlers = this.linqEvents.handlersFor(webhook.envelope.eventType, includeNamed);
 
     if (this.state) {
@@ -1225,6 +1360,13 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       event.data.direction === "inbound" &&
       event.data.reconciled_at === undefined
     ) {
+      // Linq's typed observation retains schema-valid timestamp strings that a
+      // JavaScript Date cannot represent (for example a leap second). Keep the
+      // named/raw event while declining only the standard Message projection.
+      if (!parseLinqTimestamp(event.data.sent_at)?.date) {
+        return { handled: "ignored" };
+      }
+
       const chatId = event.data.chat.id;
       const isGroup = event.data.chat.is_group ?? this.chatKinds.get(chatId);
 
@@ -1366,24 +1508,27 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   }
 }
 
-function validProviderMessageTimestamp(raw: unknown): number | undefined {
+function validProviderMessageTimestamp(raw: unknown): LinqTimestamp | undefined {
   if (!isRecord(raw)) {
     return undefined;
   }
 
-  return selectLinqMessageTimestamp(raw.sent_at, raw.created_at)?.getTime();
+  const timestamp = selectLinqMessageTimestamp(raw.sent_at, raw.created_at);
+  return timestamp?.date ? timestamp : undefined;
 }
 
 function chronologicalHistoryMessages(
   rows: readonly {
     readonly message: Message<LinqRawMessage>;
     readonly providerIndex: number;
-    readonly timestamp: number;
+    readonly timestamp: LinqTimestamp;
   }[],
 ): Message<LinqRawMessage>[] {
   return [...rows]
     .sort(
-      (left, right) => left.timestamp - right.timestamp || left.providerIndex - right.providerIndex,
+      (left, right) =>
+        compareLinqTimestamps(left.timestamp, right.timestamp) ||
+        left.providerIndex - right.providerIndex,
     )
     .map((row) => row.message);
 }
@@ -1563,14 +1708,20 @@ function validateKnownGroup(isGroup: boolean | undefined): void {
 }
 
 function normalizeLocationSnapshot(threadId: string, response: unknown): LinqLocationSnapshot {
-  const features =
-    isRecord(response) &&
-    response.success === true &&
-    isRecord(response.data) &&
-    response.data.type === "FeatureCollection" &&
-    Array.isArray(response.data.features)
-      ? response.data.features
-      : [];
+  const responseRecord = requireProviderRecord(response, "retrieve chat location", "response");
+  const data = requireProviderRecord(responseRecord.data, "retrieve chat location", "data");
+  if (
+    responseRecord.success !== true ||
+    data.type !== "FeatureCollection" ||
+    !Array.isArray(data.features)
+  ) {
+    throw invalidLinqProviderResponse(
+      "retrieve chat location",
+      "response must contain a successful GeoJSON FeatureCollection",
+    );
+  }
+
+  const features = data.features;
   const locations = features.flatMap((feature): LinqSharedLocation[] => {
     if (
       !isRecord(feature) ||
@@ -1596,7 +1747,8 @@ function normalizeLocationSnapshot(threadId: string, response: unknown): LinqLoc
       latitude < -90 ||
       latitude > 90 ||
       typeof properties.handle !== "string" ||
-      properties.handle.length === 0
+      properties.handle.length === 0 ||
+      (properties.updated_at !== undefined && parseLinqTimestamp(properties.updated_at) === null)
     ) {
       return [];
     }
@@ -1620,7 +1772,7 @@ function normalizeLocationSnapshot(threadId: string, response: unknown): LinqLoc
     if (typeof properties.locality === "string") {
       location.locality = properties.locality;
     }
-    if (typeof properties.updated_at === "string" && parseLinqTimestamp(properties.updated_at)) {
+    if (typeof properties.updated_at === "string") {
       location.updatedAt = properties.updated_at;
     }
 
@@ -1654,4 +1806,46 @@ function normalizePublicHTTPSURL(value: unknown, message: string): string {
 
 function validationError(message: string): ValidationError {
   return new ValidationError("linq", message);
+}
+
+function requireProviderRecord(
+  value: unknown,
+  action: string,
+  field: string,
+): Record<string, unknown> {
+  if (!isRecord(value) || Array.isArray(value)) {
+    throw invalidLinqProviderResponse(action, `${field} must be an object`);
+  }
+
+  return value;
+}
+
+function requireProviderId(value: unknown, action: string, field: string): string {
+  if (!isUsableLinqId(value)) {
+    throw invalidLinqProviderResponse(action, `${field} must be a non-empty string`);
+  }
+
+  return value;
+}
+
+function requireProviderChatId(value: unknown, action: string, field: string): string {
+  if (!isUsableLinqChatId(value)) {
+    throw invalidLinqProviderResponse(action, `${field} cannot form a canonical Linq thread ID`);
+  }
+
+  return value;
+}
+
+function requireMatchingProviderId(
+  value: unknown,
+  expected: string,
+  action: string,
+  field: string,
+): string {
+  const actual = requireProviderId(value, action, field);
+  if (actual !== expected) {
+    throw invalidLinqProviderResponse(action, `${field} does not match the requested resource`);
+  }
+
+  return actual;
 }

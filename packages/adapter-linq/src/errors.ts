@@ -68,6 +68,22 @@ export function translateLinqError(error: unknown, context: ErrorContext): Error
   return translated;
 }
 
+/** A successful HTTP response whose JSON cannot satisfy the adapter's public contract. */
+export function invalidLinqProviderResponse(action: string, detail: string): AdapterError {
+  const cause = new TypeError(`Invalid Linq ${action} response: ${detail}`);
+  const error = new AdapterError(
+    `Linq returned an invalid response while attempting to ${action}`,
+    ADAPTER_NAME,
+  );
+
+  Object.defineProperty(error, "cause", {
+    configurable: true,
+    value: cause,
+  });
+
+  return error;
+}
+
 function preserveLinqError(
   translated: AdapterError,
   originalError: unknown,

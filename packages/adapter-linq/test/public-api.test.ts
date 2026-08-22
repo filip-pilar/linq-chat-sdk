@@ -40,7 +40,7 @@ import type {
 
 const API_KEY = "test_linq_api_key";
 const BASE_URL = "https://sandbox.example.com/api/partner";
-const SIGNING_SECRET = "test_linq_webhook_secret";
+const SIGNING_SECRET = "whsec_dGVzdC1zZWNyZXQ=";
 
 const config = {
   apiKey: API_KEY,
@@ -157,6 +157,11 @@ function assertTypedEventRegistration(adapter: LinqAdapter): void {
     expectTypeOf(event.data.providerMessageId).toBeString();
     expectTypeOf(event.data.partIndex).toBeNumber();
     expectTypeOf(event.data.editedAt).toBeString();
+  });
+  adapter.onLinqEvent("chat.created", (event) => {
+    expectTypeOf(event).toEqualTypeOf<LinqEventMap["chat.created"]>();
+    expectTypeOf(event.type).toEqualTypeOf<"chat.created">();
+    expectTypeOf(event.data).not.toBeAny();
   });
   const unsubscribeAll = adapter.onLinqEvent((event) => {
     expectTypeOf(event).toEqualTypeOf<LinqAnyEvent>();

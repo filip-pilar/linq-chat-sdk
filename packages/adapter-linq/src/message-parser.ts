@@ -2,7 +2,7 @@ import { LinqAPIV3 } from "@linqapp/sdk";
 import { Message, NotImplementedError, paragraph, root, text as textNode } from "chat";
 import type { Attachment, FormattedContent, LinkPreview } from "chat";
 
-import { isRecord } from "./guards.js";
+import { isRecord, isUsableLinqChatId, isUsableLinqId } from "./guards.js";
 import { createLinqAttachmentFetcher } from "./inbound-media.js";
 import { parseLinqTimestamp, selectLinqMessageTimestamp } from "./timestamps.js";
 import type {
@@ -125,8 +125,8 @@ function normalizeMessage(value: LinqRawMessage): {
   }
 
   if (isMessageSendResponse(value)) {
-    const sentAt = selectLinqMessageTimestamp(value.message.sent_at, value.message.created_at);
-    if (!sentAt) {
+    const timestamp = selectLinqMessageTimestamp(value.message.sent_at, value.message.created_at);
+    if (!timestamp?.date) {
       throw new NotImplementedError("Linq message response is missing a valid provider timestamp");
     }
 
@@ -137,14 +137,14 @@ function normalizeMessage(value: LinqRawMessage): {
       parts: validParts(value.message.parts),
       isMe: true,
       sender: value.message.from_handle,
-      sentAt,
+      sentAt: timestamp.date,
       edited: false,
     };
   }
 
   if (isRetrievedMessage(value)) {
-    const sentAt = selectLinqMessageTimestamp(value.sent_at, value.created_at);
-    if (!sentAt) {
+    const timestamp = selectLinqMessageTimestamp(value.sent_at, value.created_at);
+    if (!timestamp?.date) {
       throw new NotImplementedError("Linq retrieved message is missing a valid provider timestamp");
     }
 
@@ -155,7 +155,7 @@ function normalizeMessage(value: LinqRawMessage): {
       parts: validParts(value.parts),
       isMe: value.is_from_me,
       sender: value.from_handle,
-      sentAt,
+      sentAt: timestamp.date,
       // `updated_at` also changes for delivery state. Only message.edited webhooks
       // confirm an edit, and the retrieved Message schema exposes no edit timestamp.
       edited: false,
@@ -165,8 +165,15 @@ function normalizeMessage(value: LinqRawMessage): {
   throw new NotImplementedError("parseMessage only supports Linq message payloads");
 }
 
-function isMessageEvent(value: LinqRawMessage): value is LinqMessageEvent {
-  return isRecord(value) && "chat" in value && "direction" in value && "sender_handle" in value;
+function isMessageEvent(value: unknown): value is LinqMessageEvent {
+  return (
+    isRecord(value) &&
+    isUsableLinqId(value.id) &&
+    isRecord(value.chat) &&
+    isUsableLinqChatId(value.chat.id) &&
+    "direction" in value &&
+    "sender_handle" in value
+  );
 }
 
 function validParts(value: unknown): LinqMessagePart[] {
@@ -177,17 +184,20 @@ function validParts(value: unknown): LinqMessagePart[] {
   );
 }
 
-function isMessageSendResponse(value: LinqRawMessage): value is LinqMessageSendResponse {
-  return isRecord(value) && "chat_id" in value && "message" in value && isRecord(value.message);
+function isMessageSendResponse(value: unknown): value is LinqMessageSendResponse {
+  return (
+    isRecord(value) &&
+    isUsableLinqChatId(value.chat_id) &&
+    isRecord(value.message) &&
+    isUsableLinqId(value.message.id)
+  );
 }
 
 function isRetrievedMessage(value: unknown): value is LinqRetrievedMessage {
   return (
     isRecord(value) &&
-    typeof value.id === "string" &&
-    value.id.length > 0 &&
-    typeof value.chat_id === "string" &&
-    value.chat_id.length > 0 &&
+    isUsableLinqId(value.id) &&
+    isUsableLinqChatId(value.chat_id) &&
     typeof value.is_from_me === "boolean" &&
     "created_at" in value
   );
@@ -195,11 +205,11 @@ function isRetrievedMessage(value: unknown): value is LinqRetrievedMessage {
 
 function requiredTimestamp(value: unknown): Date {
   const timestamp = parseLinqTimestamp(value);
-  if (!timestamp) {
+  if (!timestamp?.date) {
     throw new NotImplementedError("Linq message is missing a valid provider timestamp");
   }
 
-  return timestamp;
+  return timestamp.date;
 }
 
 function messageText(parts: LinqMessagePart[], attachments: Attachment[]): string {

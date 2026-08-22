@@ -79,6 +79,25 @@ describe("typed Linq message lifecycle events", () => {
     expect(context.processReaction).not.toHaveBeenCalled();
   });
 
+  it("preserves a schema-valid leap second in string-based lifecycle facts", async () => {
+    const payload = {
+      ...sentFixture,
+      event_id: "sent-leap-second",
+      data: { ...sentFixture.data, sent_at: "2016-12-31T23:59:60.5Z" },
+    };
+
+    await expect(
+      createTestAdapter().verifyWebhook(createStandardRequest(payload)),
+    ).resolves.toMatchObject({
+      ok: true,
+      webhook: {
+        kind: "message.sent",
+        lifecycle: { sentAt: "2016-12-31T23:59:60.5Z" },
+        rawEvent: payload,
+      },
+    });
+  });
+
   it("accepts unknown numeric failure codes and preserves unknown fields losslessly", async () => {
     const adapter = createTestAdapter();
     const handler = vi.fn();
@@ -116,6 +135,8 @@ describe("typed Linq message lifecycle events", () => {
     [readFixture, { read_at: null }],
     [failedFixture, { code: "4006" }],
     [failedFixture, { failed_at: null }],
+    [failedFixture, { failed_at: "2026-02-30T00:00:00Z" }],
+    [failedFixture, { failed_at: "2026-08-01T24:00:00Z" }],
     [failedFixture, { service: "WhatsApp" }],
     [failedFixture, { detail_code: 1.5 }],
   ] as const)(
