@@ -1,11 +1,8 @@
-import { ValidationError } from "@chat-adapter/shared";
 import type { LinqAPIV3 } from "@linqapp/sdk";
 
-import { invalidLinqProviderResponse } from "./errors.js";
-import { immutableJsonSnapshot, isRecord } from "./guards.js";
+import { invalidLinqProviderResponse, linqValidationError as validationError } from "./errors.js";
+import { immutableJsonSnapshot, isLinqUuid, isRecord } from "./guards.js";
 import { parseLinqTimestamp } from "./timestamps.js";
-
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 
 export interface LinqPollCreateOptions {
   readonly options: readonly string[];
@@ -256,7 +253,7 @@ function normalizeOptionalIdempotencyKey(value: unknown): string | undefined {
 }
 
 export function isLinqPollUuid(value: unknown): value is string {
-  return typeof value === "string" && UUID_PATTERN.test(value);
+  return isLinqUuid(value);
 }
 
 function isNonEmptyString(value: unknown): value is string {
@@ -287,8 +284,4 @@ function isNullableStatus(value: unknown): boolean {
 
 function isService(value: unknown): value is LinqAPIV3.ServiceType {
   return value === "iMessage" || value === "SMS" || value === "RCS";
-}
-
-function validationError(message: string): ValidationError {
-  return new ValidationError("linq", message);
 }

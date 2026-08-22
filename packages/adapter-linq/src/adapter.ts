@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { ValidationError } from "@chat-adapter/shared";
 import { LinqAPIV3 } from "@linqapp/sdk";
 import { ConsoleLogger, Message, NotImplementedError, stringifyMarkdown } from "chat";
 import type {
@@ -22,7 +21,13 @@ import type {
 } from "chat";
 
 import { cardHasInteractiveActions, collectCardImageUrls, extractCardElement } from "./cards.js";
-import { invalidLinqProviderResponse, translateLinqError } from "./errors.js";
+import { createLinqConversation } from "./conversation.js";
+import {
+  invalidLinqProviderResponse,
+  linqValidationError as validationError,
+  runLinqOperation,
+  translateLinqError,
+} from "./errors.js";
 import {
   createLinqEvent,
   isLinqKnownEventType,
@@ -32,7 +37,7 @@ import {
   type LinqEventMap,
   type LinqKnownEventType,
 } from "./events.js";
-import { immutableJsonSnapshot, isRecord, isUsableLinqChatId, isUsableLinqId } from "./guards.js";
+import { immutableJsonSnapshot, isLinqUuid, isRecord } from "./guards.js";
 import { createLinqAttachmentFetcher } from "./inbound-media.js";
 import {
   isLinqOwnerMention,
@@ -42,26 +47,20 @@ import {
   type LinqRawMessage,
 } from "./message-parser.js";
 import { planLinqOutboundMessage, prepareLinqOutboundParts } from "./outbound-media.js";
+import { type LinqPollConversation } from "./polls.js";
 import {
-  normalizePollAddOptions,
-  normalizePollCreateInput,
-  normalizePollMessageId,
-  normalizePollSnapshot,
-  normalizePollVoteInput,
-  type LinqPollConversation,
-  type LinqPollCreateOptions,
-  type LinqPollSnapshot,
-  type LinqPollVoteInput,
-} from "./polls.js";
-import {
-  compileLinqMessageText,
-  compileLinqSendOptions,
+  compileLinqMessage,
   resolveCompiledLinqMention,
-  validateCompiledLinqMention,
   validateMentionHandle,
   type CompiledLinqMessageText,
 } from "./message-compiler.js";
-import { getLinqReplyPartIndex, withLinqReplyPartIndex } from "./message.js";
+import { getLinqReplyPartIndex } from "./message.js";
+import {
+  requireMatchingProviderId,
+  requireProviderChatId,
+  requireProviderId,
+  requireProviderRecord,
+} from "./provider-boundary.js";
 import { fromLinqReaction, toLinqReaction } from "./reactions.js";
 import {
   compareLinqTimestamps,
@@ -88,6 +87,7 @@ import {
   type LinqWebhookEvent,
   type LinqWebhookVerificationResult,
 } from "./webhook.js";
+import { validateLinqMessageId, validateLinqPartIndex } from "./validation.js";
 
 type LinqThreadId = {
   chatId: string;
@@ -216,7 +216,6 @@ export interface LinqConversation {
 type ChatWithThreads = ChatInstance & { thread(threadId: string): Thread };
 
 const MAX_CONSECUTIVE_FILTERED_HISTORY_PAGES = 10;
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   readonly name: string = "linq";
@@ -314,310 +313,19 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     const thread = this.resolveConversationThread(threadOrId);
     const threadId = thread.id;
     const { chatId, isGroup } = this.decodeThreadId(threadId);
-    const group: LinqGroupConversation = Object.freeze({
-      update: async (options: LinqGroupUpdateOptions): Promise<void> => {
-        const request = normalizeGroupUpdate(options);
-        validateKnownGroup(isGroup);
-        const client = await this.getApiClient();
 
-        try {
-          await client.chats.update(chatId, request);
-        } catch (error) {
-          throw translateLinqError(error, {
-            action: "update group chat",
-            resourceId: chatId,
-            resourceType: "chat",
-          });
-        }
-      },
-      addParticipant: async (handle: string): Promise<void> => {
-        validateParticipantHandle(handle);
-        validateKnownGroup(isGroup);
-        const client = await this.getApiClient();
-
-        try {
-          await client.chats.participants.add(chatId, { handle });
-        } catch (error) {
-          throw translateLinqError(error, {
-            action: "add group chat participant",
-            resourceId: chatId,
-            resourceType: "chat",
-          });
-        }
-      },
-      removeParticipant: async (handle: string): Promise<void> => {
-        validateParticipantHandle(handle);
-        validateKnownGroup(isGroup);
-        const client = await this.getApiClient();
-
-        try {
-          await client.chats.participants.remove(chatId, { handle });
-        } catch (error) {
-          throw translateLinqError(error, {
-            action: "remove group chat participant",
-            resourceId: chatId,
-            resourceType: "chat",
-          });
-        }
-      },
-      leave: async (): Promise<void> => {
-        validateKnownGroup(isGroup);
-        const client = await this.getApiClient();
-
-        try {
-          await client.chats.leaveChat(chatId);
-        } catch (error) {
-          throw translateLinqError(error, {
-            action: "leave group chat",
-            resourceId: chatId,
-            resourceType: "chat",
-          });
-        }
-      },
-    });
-    const location: LinqLocationConversation = Object.freeze({
-      request: async (): Promise<void> => {
-        if (isGroup === true) {
-          throw validationError("Linq location requests require a direct chat.");
-        }
-        const client = await this.getApiClient();
-
-        try {
-          const response = await client.chats.location.request(chatId);
-          const responseRecord = requireProviderRecord(
-            response,
-            "request chat location",
-            "response",
-          );
-          if (responseRecord.success !== true) {
-            throw invalidLinqProviderResponse("request chat location", "success must be true");
-          }
-        } catch (error) {
-          throw translateLinqError(error, {
-            action: "request chat location",
-            resourceId: chatId,
-            resourceType: "chat",
-          });
-        }
-      },
-      retrieve: async (): Promise<LinqLocationSnapshot> => {
-        const client = await this.getApiClient();
-        try {
-          const response = await client.chats.location.retrieve(chatId);
-          return normalizeLocationSnapshot(threadId, response);
-        } catch (error) {
-          throw translateLinqError(error, {
-            action: "retrieve chat location",
-            resourceId: chatId,
-            resourceType: "chat",
-          });
-        }
-      },
-    });
-    const polls: LinqPollConversation = Object.freeze({
-      create: async (input: LinqPollCreateOptions): Promise<LinqPollSnapshot> => {
-        const normalized = normalizePollCreateInput(input);
-        const idempotencyKey = normalized.idempotencyKey ?? randomUUID();
-        const client = await this.getApiClient();
-
-        try {
-          const response = await client.chats.polls.create(chatId, {
-            poll: {
-              options: normalized.options.map((option) => ({ text: option.text })),
-              idempotency_key: idempotencyKey,
-            },
-          });
-          return normalizePollSnapshot(threadId, chatId, response);
-        } catch (error) {
-          throw translateLinqError(error, {
-            action: "create chat poll",
-            resourceId: chatId,
-            resourceType: "chat",
-          });
-        }
-      },
-      addOptions: async (
-        messageId: string,
-        options: readonly string[],
-      ): Promise<LinqPollSnapshot> => {
-        const normalizedMessageId = normalizePollMessageId(messageId);
-        const normalized = normalizePollAddOptions(options);
-        const client = await this.getApiClient();
-
-        try {
-          const response = await client.messages.poll.addOptions(
-            normalizedMessageId,
-            { options: normalized.map((option) => ({ text: option.text })) },
-            { maxRetries: 0 },
-          );
-          return normalizePollSnapshot(threadId, chatId, response, normalizedMessageId);
-        } catch (error) {
-          throw translateLinqError(error, {
-            action: "add chat poll options",
-            resourceId: normalizedMessageId,
-            resourceType: "message",
-          });
-        }
-      },
-      vote: async (messageId: string, input: LinqPollVoteInput): Promise<LinqPollSnapshot> => {
-        const normalizedMessageId = normalizePollMessageId(messageId);
-        const normalized = normalizePollVoteInput(input);
-        const client = await this.getApiClient();
-
-        try {
-          const response = await client.messages.poll.vote(
-            normalizedMessageId,
-            { option_id: normalized.optionId, operation: normalized.operation },
-            { maxRetries: 0 },
-          );
-          return normalizePollSnapshot(threadId, chatId, response, normalizedMessageId);
-        } catch (error) {
-          throw translateLinqError(error, {
-            action: "vote on chat poll",
-            resourceId: normalizedMessageId,
-            resourceType: "message",
-          });
-        }
-      },
-      retrieve: async (messageId: string): Promise<LinqPollSnapshot> => {
-        const normalizedMessageId = normalizePollMessageId(messageId);
-        const client = await this.getApiClient();
-
-        try {
-          const response = await client.messages.poll.retrieve(normalizedMessageId);
-          return normalizePollSnapshot(threadId, chatId, response, normalizedMessageId);
-        } catch (error) {
-          throw translateLinqError(error, {
-            action: "retrieve chat poll",
-            resourceId: normalizedMessageId,
-            resourceType: "message",
-          });
-        }
-      },
-    });
-
-    return Object.freeze({
+    return createLinqConversation({
+      chatId,
+      isGroup,
+      thread,
       threadId,
-      group,
-      location,
-      polls,
-      replyToPart: async (
-        messageId: string,
-        partIndex: number,
-        content: AdapterPostableMessage,
-      ): Promise<SentMessage> => {
-        validateMessageId(messageId);
-        validatePartIndex(partIndex);
-        validatePostableContent(content);
-
-        return thread.reply(messageId, withLinqReplyPartIndex(content, partIndex));
-      },
-      addReaction: async (
-        messageId: string,
-        reaction: string,
-        options?: LinqPartReactionOptions,
-      ): Promise<void> => {
-        await this.reactToMessagePart(threadId, messageId, reaction, "add", options);
-      },
-      removeReaction: async (
-        messageId: string,
-        reaction: string,
-        options?: LinqPartReactionOptions,
-      ): Promise<void> => {
-        await this.reactToMessagePart(threadId, messageId, reaction, "remove", options);
-      },
-      stopTyping: async (): Promise<void> => {
-        const client = await this.getApiClient();
-        try {
-          await client.chats.typing.stop(chatId);
-        } catch (error) {
-          throw translateLinqError(error, {
-            action: "stop chat typing",
-            resourceId: chatId,
-            resourceType: "chat",
-          });
-        }
-      },
-      shareContactCard: async (): Promise<void> => {
-        const client = await this.getApiClient();
-        try {
-          await client.chats.shareContactCard(chatId);
-        } catch (error) {
-          throw translateLinqError(error, {
-            action: "share chat contact card",
-            resourceId: chatId,
-            resourceType: "chat",
-          });
-        }
-      },
-      sendVoiceMemo: async (source: LinqVoiceMemoSource): Promise<LinqVoiceMemoResult> => {
-        const request = normalizeVoiceMemoSource(source);
-        const client = await this.getApiClient();
-
-        try {
-          const response = await client.chats.sendVoicememo(chatId, request);
-          const responseRecord = requireProviderRecord(
-            response,
-            "send chat voice memo",
-            "response",
-          );
-          const voiceMemo = requireProviderRecord(
-            responseRecord.voice_memo,
-            "send chat voice memo",
-            "voice_memo",
-          );
-          const responseChat = requireProviderRecord(
-            voiceMemo.chat,
-            "send chat voice memo",
-            "voice_memo.chat",
-          );
-          const responseAttachment = requireProviderRecord(
-            voiceMemo.voice_memo,
-            "send chat voice memo",
-            "voice_memo.voice_memo",
-          );
-          const responseChatId = requireMatchingProviderId(
-            responseChat.id,
-            chatId,
-            "send chat voice memo",
-            "voice_memo.chat.id",
-          );
-          const messageId = requireProviderId(
-            voiceMemo.id,
-            "send chat voice memo",
-            "voice_memo.id",
-          );
-          const attachmentId = requireProviderId(
-            responseAttachment.id,
-            "send chat voice memo",
-            "voice_memo.voice_memo.id",
-          );
-          if (typeof responseChat.is_group !== "boolean") {
-            throw invalidLinqProviderResponse(
-              "send chat voice memo",
-              "voice_memo.chat.is_group must be a boolean",
-            );
-          }
-
-          return Object.freeze({
-            messageId,
-            threadId: this.encodeThreadId({
-              chatId: responseChatId,
-              isGroup: responseChat.is_group,
-            }),
-            attachmentId,
-          });
-        } catch (error) {
-          throw translateLinqError(error, {
-            action: "send chat voice memo",
-            resourceId: chatId,
-            resourceType: "chat",
-          });
-        }
-      },
+      encodeThreadId: (resolvedChatId, resolvedIsGroup) =>
+        this.encodeThreadId({ chatId: resolvedChatId, isGroup: resolvedIsGroup }),
+      getClient: () => this.getApiClient(),
+      reactToPart: (resolvedThreadId, messageId, reaction, operation, options) =>
+        this.reactToMessagePart(resolvedThreadId, messageId, reaction, operation, options),
     });
   }
-
   onLinqEvent<TType extends LinqKnownEventType>(
     type: TType,
     handler: LinqEventHandler<LinqEventMap[TType]>,
@@ -908,9 +616,9 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     replyTo?: { message_id: string; part_index?: number },
   ): Promise<RawMessage<LinqRawMessage>> {
     const { chatId, isGroup, pendingHandle } = this.decodeThreadId(threadId);
-    let compiledText = compileLinqMessageText(message);
-    const sendOptions = compileLinqSendOptions(message);
-    validateCompiledLinqMention(compiledText, sendOptions);
+    const compiled = compileLinqMessage(message);
+    let compiledText = compiled.content;
+    const sendOptions = compiled.options;
     const card = extractCardElement(message);
     const cardImageUrls = card ? collectCardImageUrls(card) : [];
     let plan = planLinqOutboundMessage(message, compiledText, cardImageUrls, sendOptions.richLink);
@@ -1041,7 +749,7 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
           "resolve message mention",
           `handles[${index}]`,
         );
-        if (typeof participant.id !== "string" || !UUID_PATTERN.test(participant.id)) {
+        if (!isLinqUuid(participant.id)) {
           throw invalidLinqProviderResponse(
             "resolve message mention",
             `handles[${index}].id must be a UUID`,
@@ -1133,9 +841,7 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     messageId: string,
     message: AdapterPostableMessage,
   ): Promise<RawMessage<LinqRawMessage>> {
-    const compiled = compileLinqMessageText(message);
-    const sendOptions = compileLinqSendOptions(message);
-    validateCompiledLinqMention(compiled, sendOptions);
+    const { content: compiled } = compileLinqMessage(message);
     if (compiled.mention) {
       throw validationError("Linq native mentions are not supported when editing messages.");
     }
@@ -1147,22 +853,16 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     const chatId = this.requireChatId(threadId);
     const client = await this.getApiClient();
 
-    let response: Awaited<ReturnType<LinqAPIV3["messages"]["update"]>>;
-    try {
-      response = await client.messages.update(messageId, {
-        text,
-        part_index: 0,
-      });
-      const responseRecord = requireProviderRecord(response, "edit message", "response");
-      requireMatchingProviderId(responseRecord.id, messageId, "edit message", "id");
-      requireMatchingProviderId(responseRecord.chat_id, chatId, "edit message", "chat_id");
-    } catch (error) {
-      throw translateLinqError(error, {
-        action: "edit message",
-        resourceId: messageId,
-        resourceType: "message",
-      });
-    }
+    const response = await runLinqOperation(
+      { action: "edit message", resourceId: messageId, resourceType: "message" },
+      async () => {
+        const result = await client.messages.update(messageId, { text, part_index: 0 });
+        const responseRecord = requireProviderRecord(result, "edit message", "response");
+        requireMatchingProviderId(responseRecord.id, messageId, "edit message", "id");
+        requireMatchingProviderId(responseRecord.chat_id, chatId, "edit message", "chat_id");
+        return result;
+      },
+    );
 
     return {
       id: messageId,
@@ -1185,18 +885,15 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     this.requireChatId(threadId);
     const client = await this.getApiClient();
 
-    try {
-      await client.messages.addReaction(messageId, {
-        operation: "add",
-        ...toLinqReaction(emoji),
-      });
-    } catch (error) {
-      throw translateLinqError(error, {
-        action: "add message reaction",
-        resourceId: messageId,
-        resourceType: "message",
-      });
-    }
+    return runLinqOperation(
+      { action: "add message reaction", resourceId: messageId, resourceType: "message" },
+      async () => {
+        await client.messages.addReaction(messageId, {
+          operation: "add",
+          ...toLinqReaction(emoji),
+        });
+      },
+    );
   }
 
   async removeReaction(
@@ -1208,18 +905,15 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     this.requireChatId(threadId);
     const client = await this.getApiClient();
 
-    try {
-      await client.messages.addReaction(messageId, {
-        operation: "remove",
-        ...toLinqReaction(emoji),
-      });
-    } catch (error) {
-      throw translateLinqError(error, {
-        action: "remove message reaction",
-        resourceId: messageId,
-        resourceType: "message",
-      });
-    }
+    return runLinqOperation(
+      { action: "remove message reaction", resourceId: messageId, resourceType: "message" },
+      async () => {
+        await client.messages.addReaction(messageId, {
+          operation: "remove",
+          ...toLinqReaction(emoji),
+        });
+      },
+    );
   }
 
   private resolveConversationThread(threadOrId: Thread | string): Thread {
@@ -1253,54 +947,55 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     options?: LinqPartReactionOptions,
   ): Promise<void> {
     validateCanonicalThreadId(threadId);
-    validateMessageId(messageId);
+    validateLinqMessageId(messageId);
     validateReaction(reaction);
     if (options?.partIndex !== undefined) {
-      validatePartIndex(options.partIndex);
+      validateLinqPartIndex(options.partIndex);
     }
     const client = await this.getApiClient();
 
-    try {
-      await client.messages.addReaction(messageId, {
-        operation,
-        ...toLinqReaction(reaction),
-        ...(options?.partIndex === undefined ? {} : { part_index: options.partIndex }),
-      });
-    } catch (error) {
-      throw translateLinqError(error, {
+    return runLinqOperation(
+      {
         action: `${operation} message reaction`,
         resourceId: messageId,
         resourceType: "message",
-      });
-    }
+      },
+      async () => {
+        await client.messages.addReaction(messageId, {
+          operation,
+          ...toLinqReaction(reaction),
+          ...(options?.partIndex === undefined ? {} : { part_index: options.partIndex }),
+        });
+      },
+    );
   }
 
   // Threads
   async fetchThread(threadId: string): Promise<ThreadInfo> {
     const chatId = this.requireChatId(threadId);
     const client = await this.getApiClient();
-    let chat: Awaited<ReturnType<LinqAPIV3["chats"]["retrieve"]>>;
-    try {
-      chat = await client.chats.retrieve(chatId);
-      const chatRecord = requireProviderRecord(chat, "retrieve chat", "response");
-      requireMatchingProviderId(chatRecord.id, chatId, "retrieve chat", "id");
-      if (typeof chatRecord.is_group !== "boolean") {
-        throw invalidLinqProviderResponse("retrieve chat", "is_group must be a boolean");
-      }
-      if (
-        chatRecord.display_name !== undefined &&
-        chatRecord.display_name !== null &&
-        typeof chatRecord.display_name !== "string"
-      ) {
-        throw invalidLinqProviderResponse("retrieve chat", "display_name must be a string or null");
-      }
-    } catch (error) {
-      throw translateLinqError(error, {
-        action: "retrieve chat",
-        resourceId: chatId,
-        resourceType: "chat",
-      });
-    }
+    const chat = await runLinqOperation(
+      { action: "retrieve chat", resourceId: chatId, resourceType: "chat" },
+      async () => {
+        const result = await client.chats.retrieve(chatId);
+        const chatRecord = requireProviderRecord(result, "retrieve chat", "response");
+        requireMatchingProviderId(chatRecord.id, chatId, "retrieve chat", "id");
+        if (typeof chatRecord.is_group !== "boolean") {
+          throw invalidLinqProviderResponse("retrieve chat", "is_group must be a boolean");
+        }
+        if (
+          chatRecord.display_name !== undefined &&
+          chatRecord.display_name !== null &&
+          typeof chatRecord.display_name !== "string"
+        ) {
+          throw invalidLinqProviderResponse(
+            "retrieve chat",
+            "display_name must be a string or null",
+          );
+        }
+        return result;
+      },
+    );
 
     return {
       id: this.encodeThreadId({ chatId: chat.id, isGroup: chat.is_group }),
@@ -1315,20 +1010,17 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
   async startTyping(threadId: string, _status?: string): Promise<void> {
     const chatId = this.requireChatId(threadId);
-    if (!UUID_PATTERN.test(chatId)) {
+    if (!isLinqUuid(chatId)) {
       throw validationError("Linq typing requires a valid chat UUID.");
     }
     const client = await this.getApiClient();
 
-    try {
-      await client.chats.typing.start(chatId);
-    } catch (error) {
-      throw translateLinqError(error, {
-        action: "start chat typing",
-        resourceId: chatId,
-        resourceType: "chat",
-      });
-    }
+    return runLinqOperation(
+      { action: "start chat typing", resourceId: chatId, resourceType: "chat" },
+      async () => {
+        await client.chats.typing.start(chatId);
+      },
+    );
   }
 
   /** Linq acknowledges the whole chat; the Chat SDK message arguments are intentionally advisory. */
@@ -1340,15 +1032,12 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     const chatId = this.requireChatId(threadId);
     const client = await this.getApiClient();
 
-    try {
-      await client.chats.markAsRead(chatId);
-    } catch (error) {
-      throw translateLinqError(error, {
-        action: "mark chat as read",
-        resourceId: chatId,
-        resourceType: "chat",
-      });
-    }
+    return runLinqOperation(
+      { action: "mark chat as read", resourceId: chatId, resourceType: "chat" },
+      async () => {
+        await client.chats.markAsRead(chatId);
+      },
+    );
   }
 
   /** Released compatibility alias; prefer Chat SDK `Thread.markAsRead()`. */
@@ -1792,20 +1481,8 @@ function isCompatibilityReactionEvent(event: unknown): event is LinqReactionWebh
 
 function validateCanonicalThreadId(threadId: string): void {
   const match = /^linq:([^:]+)$/.exec(threadId);
-  if (!match?.[1] || !UUID_PATTERN.test(match[1])) {
+  if (!match?.[1] || !isLinqUuid(match[1])) {
     throw validationError("Linq conversations require a canonical linq:{chat UUID} thread ID.");
-  }
-}
-
-function validateMessageId(messageId: string): void {
-  if (!UUID_PATTERN.test(messageId)) {
-    throw validationError("Linq message IDs must be UUIDs.");
-  }
-}
-
-function validatePartIndex(partIndex: number): void {
-  if (!Number.isInteger(partIndex) || partIndex < 0) {
-    throw validationError("Linq message part indexes must be non-negative integers.");
   }
 }
 
@@ -1817,260 +1494,4 @@ function validateReaction(reaction: string): void {
 
 function validateStandardReaction(reaction: EmojiValue | string): void {
   validateReaction(typeof reaction === "string" ? reaction : reaction.name);
-}
-
-function validatePostableContent(content: AdapterPostableMessage): void {
-  if (typeof content !== "string" && !isRecord(content)) {
-    throw validationError("Linq replies require valid Chat SDK message content.");
-  }
-}
-
-type LinqVoiceMemoRequest = { voice_memo_url: string } | { attachment_id: string };
-
-function normalizeVoiceMemoSource(source: unknown): LinqVoiceMemoRequest {
-  if (!isRecord(source)) {
-    throw validationError("Linq voice memos require exactly one URL or attachment ID source.");
-  }
-
-  const hasUrl = Object.prototype.hasOwnProperty.call(source, "url");
-  const hasAttachmentId = Object.prototype.hasOwnProperty.call(source, "attachmentId");
-  if (hasUrl === hasAttachmentId) {
-    throw validationError("Linq voice memos require exactly one URL or attachment ID source.");
-  }
-
-  if (hasUrl) {
-    const value = source.url;
-    if (typeof value !== "string" && !(value instanceof URL)) {
-      throw validationError("Linq voice memo URLs must be valid public HTTPS URLs.");
-    }
-
-    const url = typeof value === "string" ? value : value.href;
-    if (url.length === 0 || (typeof value === "string" && value.trim() !== value)) {
-      throw validationError("Linq voice memo URLs must be valid public HTTPS URLs.");
-    }
-
-    try {
-      const parsed = new URL(url);
-      if (parsed.protocol === "https:" && parsed.hostname.length > 0) {
-        return { voice_memo_url: url };
-      }
-    } catch {
-      // Fall through to the stable adapter validation error.
-    }
-
-    throw validationError("Linq voice memo URLs must be valid public HTTPS URLs.");
-  }
-
-  const attachmentId = source.attachmentId;
-  if (
-    typeof attachmentId !== "string" ||
-    attachmentId.trim() !== attachmentId ||
-    !UUID_PATTERN.test(attachmentId)
-  ) {
-    throw validationError("Linq voice memo attachment IDs must be UUIDs.");
-  }
-
-  return { attachment_id: attachmentId };
-}
-
-type LinqGroupUpdateRequest = {
-  display_name?: string;
-  group_chat_icon?: string;
-};
-
-function normalizeGroupUpdate(options: unknown): LinqGroupUpdateRequest {
-  if (!isRecord(options)) {
-    throw validationError("Linq group updates require an options object.");
-  }
-
-  const supportedKeys = new Set(["displayName", "iconUrl"]);
-  if (Object.keys(options).some((key) => !supportedKeys.has(key))) {
-    throw validationError("Linq group updates support only displayName and iconUrl.");
-  }
-
-  const request: LinqGroupUpdateRequest = {};
-  if (options.displayName !== undefined) {
-    if (typeof options.displayName !== "string") {
-      throw validationError("Linq group display names must be strings.");
-    }
-    request.display_name = options.displayName;
-  }
-
-  if (options.iconUrl !== undefined) {
-    request.group_chat_icon = normalizePublicHTTPSURL(
-      options.iconUrl,
-      "Linq group icons must be valid public HTTPS URLs.",
-    );
-  }
-
-  if (request.display_name === undefined && request.group_chat_icon === undefined) {
-    throw validationError("Linq group updates require a displayName or iconUrl.");
-  }
-
-  return request;
-}
-
-function validateParticipantHandle(handle: unknown): asserts handle is string {
-  if (typeof handle !== "string" || handle.trim() !== handle) {
-    throw validationError(
-      "Linq participant handles must be E.164 phone numbers or email addresses.",
-    );
-  }
-
-  const isE164 = /^\+[1-9]\d{1,14}$/.test(handle);
-  const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(handle);
-  if (!isE164 && !isEmail) {
-    throw validationError(
-      "Linq participant handles must be E.164 phone numbers or email addresses.",
-    );
-  }
-}
-
-function validateKnownGroup(isGroup: boolean | undefined): void {
-  if (isGroup === false) {
-    throw validationError("Linq group operations require a group chat.");
-  }
-}
-
-function normalizeLocationSnapshot(threadId: string, response: unknown): LinqLocationSnapshot {
-  const responseRecord = requireProviderRecord(response, "retrieve chat location", "response");
-  const data = requireProviderRecord(responseRecord.data, "retrieve chat location", "data");
-  if (
-    responseRecord.success !== true ||
-    data.type !== "FeatureCollection" ||
-    !Array.isArray(data.features)
-  ) {
-    throw invalidLinqProviderResponse(
-      "retrieve chat location",
-      "response must contain a successful GeoJSON FeatureCollection",
-    );
-  }
-
-  const features = data.features;
-  const locations = features.flatMap((feature): LinqSharedLocation[] => {
-    if (
-      !isRecord(feature) ||
-      feature.type !== "Feature" ||
-      !isRecord(feature.geometry) ||
-      feature.geometry.type !== "Point" ||
-      !Array.isArray(feature.geometry.coordinates) ||
-      (feature.geometry.coordinates.length !== 2 && feature.geometry.coordinates.length !== 3) ||
-      !isRecord(feature.properties)
-    ) {
-      return [];
-    }
-
-    const [longitude, latitude, rawAltitude] = feature.geometry.coordinates;
-    const properties = feature.properties;
-    if (
-      typeof longitude !== "number" ||
-      !Number.isFinite(longitude) ||
-      longitude < -180 ||
-      longitude > 180 ||
-      typeof latitude !== "number" ||
-      !Number.isFinite(latitude) ||
-      latitude < -90 ||
-      latitude > 90 ||
-      typeof properties.handle !== "string" ||
-      properties.handle.length === 0 ||
-      (properties.updated_at !== undefined && parseLinqTimestamp(properties.updated_at) === null)
-    ) {
-      return [];
-    }
-
-    const location: {
-      handle: string;
-      longitude: number;
-      latitude: number;
-      altitude?: number;
-      address?: string;
-      locality?: string;
-      updatedAt?: string;
-    } = { handle: properties.handle, longitude, latitude };
-
-    if (typeof rawAltitude === "number" && Number.isFinite(rawAltitude)) {
-      location.altitude = rawAltitude;
-    }
-    if (typeof properties.address === "string") {
-      location.address = properties.address;
-    }
-    if (typeof properties.locality === "string") {
-      location.locality = properties.locality;
-    }
-    if (typeof properties.updated_at === "string") {
-      location.updatedAt = properties.updated_at;
-    }
-
-    return [Object.freeze(location)];
-  });
-
-  return Object.freeze({ threadId, locations: Object.freeze(locations) });
-}
-
-function normalizePublicHTTPSURL(value: unknown, message: string): string {
-  if (typeof value !== "string" && !(value instanceof URL)) {
-    throw validationError(message);
-  }
-
-  const url = typeof value === "string" ? value : value.href;
-  if (url.length === 0 || (typeof value === "string" && value.trim() !== value)) {
-    throw validationError(message);
-  }
-
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol === "https:" && parsed.hostname.length > 0) {
-      return url;
-    }
-  } catch {
-    // Fall through to the stable adapter validation error.
-  }
-
-  throw validationError(message);
-}
-
-function validationError(message: string): ValidationError {
-  return new ValidationError("linq", message);
-}
-
-function requireProviderRecord(
-  value: unknown,
-  action: string,
-  field: string,
-): Record<string, unknown> {
-  if (!isRecord(value) || Array.isArray(value)) {
-    throw invalidLinqProviderResponse(action, `${field} must be an object`);
-  }
-
-  return value;
-}
-
-function requireProviderId(value: unknown, action: string, field: string): string {
-  if (!isUsableLinqId(value)) {
-    throw invalidLinqProviderResponse(action, `${field} must be a non-empty string`);
-  }
-
-  return value;
-}
-
-function requireProviderChatId(value: unknown, action: string, field: string): string {
-  if (!isUsableLinqChatId(value)) {
-    throw invalidLinqProviderResponse(action, `${field} cannot form a canonical Linq thread ID`);
-  }
-
-  return value;
-}
-
-function requireMatchingProviderId(
-  value: unknown,
-  expected: string,
-  action: string,
-  field: string,
-): string {
-  const actual = requireProviderId(value, action, field);
-  if (actual !== expected) {
-    throw invalidLinqProviderResponse(action, `${field} does not match the requested resource`);
-  }
-
-  return actual;
 }

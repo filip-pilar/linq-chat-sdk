@@ -1,13 +1,11 @@
 import { isIP } from "node:net";
-import { ValidationError } from "@chat-adapter/shared";
 import { LinqAPIV3 } from "@linqapp/sdk";
 import type { AdapterPostableMessage, Attachment, FileUpload } from "chat";
 
-import { invalidLinqProviderResponse } from "./errors.js";
+import { invalidLinqProviderResponse, linqValidationError as validationError } from "./errors.js";
 import { isRecord } from "./guards.js";
 import type { CompiledLinqMessageText, LinqCompiledDecoration } from "./message-compiler.js";
 
-const ADAPTER_NAME = "linq";
 const MAX_FILENAME_CHARACTERS = 255;
 const MAX_MESSAGE_PARTS = 100;
 const MAX_PUBLIC_URL_PARTS = 40;
@@ -617,8 +615,4 @@ function extensionForMimeType(mimeType: string): string | undefined {
 
 function characterCount(value: string): number {
   return Array.from(value).length;
-}
-
-function validationError(message: string): ValidationError {
-  return new ValidationError(ADAPTER_NAME, message);
 }

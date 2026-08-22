@@ -1,4 +1,3 @@
-import { ValidationError } from "@chat-adapter/shared";
 import { isCardElement, parseMarkdown, tableElementToAscii } from "chat";
 import type {
   ActionsElement,
@@ -9,13 +8,15 @@ import type {
   FormattedContent,
 } from "chat";
 
-import { isRecord } from "./guards.js";
+import { linqValidationError as validationError } from "./errors.js";
+import { isLinqUuid, isRecord } from "./guards.js";
 import type {
   LinqMessageEffect,
   LinqMentionOptions,
   LinqPreferredService,
   LinqTextDecoration,
 } from "./message.js";
+import { normalizeLinqHandle } from "./validation.js";
 
 const DIVIDER_LINE = "———";
 const STYLES = new Set(["bold", "italic", "strikethrough", "underline"]);
@@ -44,8 +45,6 @@ const SCREEN_EFFECTS = new Set([
   "spotlight",
 ]);
 const BUBBLE_EFFECTS = new Set(["slam", "loud", "gentle", "invisible"]);
-const PARTICIPANT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
-
 type LinqDecorationStyle = Extract<LinqTextDecoration, { style: string }>["style"];
 type LinqDecorationAnimation = Extract<LinqTextDecoration, { animation: string }>["animation"];
 
@@ -77,14 +76,40 @@ export interface CompiledLinqSendOptions {
   richLink?: string;
 }
 
+export interface CompiledLinqMessage {
+  content: CompiledLinqMessageText;
+  options: CompiledLinqSendOptions;
+}
+
+type LinqOptionsRecord = Record<string, unknown> | undefined;
+
 type TextFragment = CompiledLinqMessageText;
 
 /** Compile the primary Linq text part and all inline decorations before any I/O. */
 export function compileLinqMessageText(message: AdapterPostableMessage): CompiledLinqMessageText {
-  const rendered = compilePostable(message);
-  const trimmed = trimFragment(rendered);
-  const mention = compileMention(message, trimmed.text);
-  const manual = extractManualDecorations(message, trimmed.text.length);
+  return compileLinqMessageTextWithOptions(
+    trimFragment(compilePostable(message)),
+    readLinqOptions(message, false),
+  );
+}
+
+/** Compile all adapter-owned text and request metadata through one validated options snapshot. */
+export function compileLinqMessage(message: AdapterPostableMessage): CompiledLinqMessage {
+  const rendered = trimFragment(compilePostable(message));
+  const linq = readLinqOptions(message, true);
+  const content = compileLinqMessageTextWithOptions(rendered, linq);
+  const options = compileLinqSendOptionsFromOptions(linq);
+  validateCompiledLinqMention(content, options);
+
+  return { content, options };
+}
+
+function compileLinqMessageTextWithOptions(
+  rendered: TextFragment,
+  linq: LinqOptionsRecord,
+): CompiledLinqMessageText {
+  const mention = compileMention(linq, rendered.text);
+  const manual = extractManualDecorations(linq, rendered.text.length);
 
   if (mention && manual.length > 0) {
     throw validationError("Linq mentions cannot be combined with manual text decorations.");
@@ -98,11 +123,11 @@ export function compileLinqMessageText(message: AdapterPostableMessage): Compile
     };
   }
 
-  const decorations = normalizeDecorations([...trimmed.decorations, ...manual]);
+  const decorations = normalizeDecorations([...rendered.decorations, ...manual]);
 
   assertNonOverlappingAnimations(decorations);
 
-  return { text: trimmed.text, decorations };
+  return { text: rendered.text, decorations };
 }
 
 /** Replace a standard mention's participant ID with the resolved chat handle. */
@@ -131,15 +156,16 @@ export function resolveCompiledLinqMention(
 
 /** Validate and compile Linq's message-level service/effect request fields before any I/O. */
 export function compileLinqSendOptions(message: AdapterPostableMessage): CompiledLinqSendOptions {
-  if (typeof message === "string" || !isRecord(message) || message.linq === undefined) return {};
-  if (!isRecord(message.linq)) {
-    throw validationError("Linq message options must be an object.");
-  }
+  return compileLinqSendOptionsFromOptions(readLinqOptions(message, true));
+}
 
-  const preferredService = validatePreferredService(message.linq.preferredService);
-  const effect = validateEffect(message.linq.effect);
-  const richLink = validateRichLink(message.linq.richLink);
-  const manualDecorations = message.linq.decorations;
+function compileLinqSendOptionsFromOptions(linq: LinqOptionsRecord): CompiledLinqSendOptions {
+  if (!linq) return {};
+
+  const preferredService = validatePreferredService(linq.preferredService);
+  const effect = validateEffect(linq.effect);
+  const richLink = validateRichLink(linq.richLink);
+  const manualDecorations = linq.decorations;
 
   if (manualDecorations !== undefined && !Array.isArray(manualDecorations)) {
     throw validationError("Linq message decorations must be an array.");
@@ -208,10 +234,10 @@ function compilePostable(message: AdapterPostableMessage): TextFragment {
 }
 
 function compileMention(
-  message: AdapterPostableMessage,
+  linq: LinqOptionsRecord,
   text: string,
 ): { text: string; mention: NonNullable<CompiledLinqMessageText["mention"]> } | undefined {
-  const explicit = extractExplicitMention(message);
+  const explicit = extractExplicitMention(linq);
   const token = parseMentionToken(text);
 
   if (explicit && token) {
@@ -238,7 +264,7 @@ function compileMention(
   if (!token) return undefined;
   const { end, start, target } = token;
 
-  const targetKind = PARTICIPANT_ID_PATTERN.test(target) ? "participant_id" : "handle";
+  const targetKind = isLinqUuid(target) ? "participant_id" : "handle";
   if (targetKind === "handle") validateMentionHandle(target);
   const replaced = `${text.slice(0, start)}${target}${text.slice(end)}`;
 
@@ -294,12 +320,10 @@ function parseMentionToken(text: string): MentionToken | undefined {
   return { end: closing + 1, start, target };
 }
 
-function extractExplicitMention(message: AdapterPostableMessage): LinqMentionOptions | undefined {
-  if (typeof message === "string" || !isRecord(message) || !isRecord(message.linq)) {
-    return undefined;
-  }
+function extractExplicitMention(linq: LinqOptionsRecord): LinqMentionOptions | undefined {
+  if (!linq) return undefined;
 
-  const value = message.linq.mention;
+  const value = linq.mention;
   if (value === undefined) return undefined;
   if (!isRecord(value)) {
     throw validationError("Linq mention options must be an object.");
@@ -334,17 +358,10 @@ function validateMentionRange(
 }
 
 export function validateMentionHandle(value: unknown): string {
-  if (typeof value !== "string" || value.trim() !== value) {
-    throw validationError("Linq mention handles must be E.164 phone numbers or email addresses.");
-  }
-
-  const isE164 = /^\+[1-9]\d{1,14}$/u.test(value);
-  const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(value);
-  if (!isE164 && !isEmail) {
-    throw validationError("Linq mention handles must be E.164 phone numbers or email addresses.");
-  }
-
-  return value;
+  return normalizeLinqHandle(
+    value,
+    "Linq mention handles must be E.164 phone numbers or email addresses.",
+  );
 }
 
 function compileAst(ast: FormattedContent): TextFragment {
@@ -525,12 +542,12 @@ function validateRichLink(value: unknown): string | undefined {
 }
 
 function extractManualDecorations(
-  message: AdapterPostableMessage,
+  linq: LinqOptionsRecord,
   textLength: number,
 ): LinqCompiledDecoration[] {
-  if (typeof message === "string" || !isRecord(message) || !isRecord(message.linq)) return [];
+  if (!linq) return [];
 
-  const decorations = message.linq.decorations;
+  const decorations = linq.decorations;
   if (decorations === undefined) return [];
   if (!Array.isArray(decorations)) {
     throw validationError("Linq message decorations must be an array.");
@@ -674,6 +691,11 @@ function renderLabeledUrl(label: string | undefined, url: string): string {
   return label && label !== url ? `${label}: ${url}` : url;
 }
 
-function validationError(message: string): ValidationError {
-  return new ValidationError("linq", message);
+function readLinqOptions(message: AdapterPostableMessage, strict: boolean): LinqOptionsRecord {
+  if (typeof message === "string" || !isRecord(message) || message.linq === undefined) {
+    return undefined;
+  }
+  if (isRecord(message.linq)) return message.linq;
+  if (strict) throw validationError("Linq message options must be an object.");
+  return undefined;
 }

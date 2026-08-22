@@ -1,5 +1,11 @@
+const LINQ_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+export function isLinqUuid(value: unknown): value is string {
+  return typeof value === "string" && LINQ_UUID_PATTERN.test(value);
 }
 
 export function isUsableLinqId(value: unknown): value is string {

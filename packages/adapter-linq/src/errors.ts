@@ -18,6 +18,17 @@ type ErrorContext = {
   resourceType: string;
 };
 
+export async function runLinqOperation<T>(
+  context: ErrorContext,
+  callback: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await callback();
+  } catch (error) {
+    throw translateLinqError(error, context);
+  }
+}
+
 type LinqErrorMetadata = {
   providerCode?: string | number;
   retryAfter?: number;
@@ -82,6 +93,10 @@ export function invalidLinqProviderResponse(action: string, detail: string): Ada
   });
 
   return error;
+}
+
+export function linqValidationError(message: string): ValidationError {
+  return new ValidationError(ADAPTER_NAME, message);
 }
 
 function preserveLinqError(
