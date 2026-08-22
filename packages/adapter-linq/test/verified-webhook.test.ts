@@ -54,7 +54,7 @@ describe("LinqAdapter verified webhook ingress", () => {
     });
   });
 
-  it("returns typed failures for authentication, JSON, payload, and version errors", async () => {
+  it("returns typed failures for authentication, JSON, and envelope errors", async () => {
     const adapter = createTestAdapter();
     const cases: Array<[Request, string, number]> = [
       [
@@ -65,12 +65,18 @@ describe("LinqAdapter verified webhook ingress", () => {
       [createStandardRequest(fixture, { "webhook-timestamp": "0" }), "stale_timestamp", 401],
       [createStandardRequest(fixture, { signature: "v1,invalid" }), "invalid_signature", 401],
       [createSignedBody("{"), "invalid_json", 400],
+      [createStandardRequest({ ...fixture, api_version: "v2" }), "invalid_payload", 400],
       [
-        createStandardRequest({ ...fixture, data: { ...fixture.data, parts: "bad" } }),
+        createStandardRequest({ ...fixture, created_at: "2026-02-30T00:00:00Z" }),
         "invalid_payload",
         400,
       ],
-      [createStandardRequest({ ...fixture, api_version: "v2" }), "invalid_payload", 400],
+      [
+        createStandardRequest({ ...fixture, created_at: " 2026-02-03T00:00:00Z" }),
+        "invalid_payload",
+        400,
+      ],
+      [createStandardRequest({ ...fixture, created_at: 42 }), "invalid_payload", 400],
     ];
 
     for (const [request, code, status] of cases) {
@@ -81,14 +87,22 @@ describe("LinqAdapter verified webhook ingress", () => {
         expect(result.error.status).toBe(status);
       }
     }
+  });
 
-    const missingSecret = createLinqAdapter({ apiKey: "test_linq_api_key", signingSecret: "" });
-    await expect(
-      missingSecret.verifyWebhook(createStandardRequest(fixture)),
-    ).resolves.toMatchObject({
-      ok: false,
-      error: { code: "missing_signing_secret", status: 503 },
-    });
+  it("retains valid full-precision and lowercase RFC3339 envelope timestamps", async () => {
+    for (const createdAt of [
+      "2026-02-05T19:52:18.101373886Z",
+      "2026-02-05t20:52:18.101373886+01:00",
+    ]) {
+      const payload = { ...fixture, created_at: createdAt };
+
+      await expect(
+        createTestAdapter().verifyWebhook(createStandardRequest(payload)),
+      ).resolves.toMatchObject({
+        ok: true,
+        webhook: { envelope: { createdAt }, rawEvent: payload },
+      });
+    }
   });
 
   it("enforces Standard Webhook timestamp boundaries", async () => {
@@ -149,26 +163,21 @@ describe("LinqAdapter verified webhook ingress", () => {
   });
 
   it("reports invalid Standard secrets as configuration failures", async () => {
-    const invalidSecret = createLinqAdapter({
-      apiKey: "test_linq_api_key",
-      signingSecret: "whsec_not-valid-base64!",
-    });
-
-    await expect(
-      invalidSecret.verifyWebhook(createStandardRequest(fixture)),
-    ).resolves.toMatchObject({
-      ok: false,
-      error: { code: "invalid_signing_secret", status: 503 },
-    });
+    expect(() =>
+      createLinqAdapter({
+        apiKey: "test_linq_api_key",
+        signingSecret: "whsec_not-valid-base64!",
+      }),
+    ).toThrow("valid Standard Webhooks signing secret");
   });
 
-  it("returns 400 from the one-step path for a malformed signed current payload", async () => {
+  it("acknowledges a malformed authenticated current payload without false dispatch", async () => {
     const response = await createTestAdapter().handleWebhook(
       createStandardRequest({ ...fixture, data: { ...fixture.data, parts: "bad" } }),
     );
 
-    expect(response.status).toBe(400);
-    await expect(response.text()).resolves.toBe("Invalid Linq webhook payload");
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("OK");
   });
 
   it("exposes current envelope, transport, endpoint, message, attachment, and reply facts", async () => {
@@ -633,6 +642,57 @@ describe("LinqAdapter verified webhook ingress", () => {
         handled: "ignored",
       });
     }
+  });
+
+  it("keeps invalid curated reaction and handle timestamps generic-only", async () => {
+    const adapter = createTestAdapter();
+    const reaction = {
+      ...fixture,
+      event_id: "invalid-reaction-timestamp",
+      event_type: "reaction.added",
+      data: {
+        is_from_me: false,
+        reaction_type: "like",
+        chat_id: fixture.data.chat.id,
+        message_id: fixture.data.id,
+        reacted_at: "2026-02-30T00:00:00Z",
+        from_handle: fixture.data.sender_handle,
+      },
+    };
+    const invalidHandle = structuredClone(fixture);
+    invalidHandle.event_id = "invalid-handle-timestamp";
+    invalidHandle.data.sender_handle.joined_at = "2026-08-01T24:00:00Z";
+
+    await expect(adapter.verifyWebhook(createStandardRequest(reaction))).resolves.toMatchObject({
+      ok: true,
+      webhook: { kind: "unhandled", rawEvent: reaction },
+    });
+    await expect(
+      adapter.verifyWebhook(createStandardRequest(invalidHandle)),
+    ).resolves.toMatchObject({
+      ok: true,
+      webhook: { kind: "unhandled", rawEvent: invalidHandle },
+    });
+  });
+
+  it.each([
+    ["reserved chat ID", "chat.id", "pending"],
+    ["thread-shaped chat ID", "chat.id", "chat:group"],
+    ["whitespace-altered message ID", "id", ` ${fixture.data.id}`],
+  ] as const)("keeps a received message with %s generic-only", async (_label, field, value) => {
+    const adapter = createTestAdapter();
+    const payload = cloneFixture();
+    payload.event_id = `invalid-${field}-${value}`;
+    if (field === "chat.id") {
+      payload.data.chat.id = value;
+    } else {
+      payload.data.id = value;
+    }
+
+    await expect(adapter.verifyWebhook(createStandardRequest(payload))).resolves.toMatchObject({
+      ok: true,
+      webhook: { kind: "unhandled", rawEvent: payload },
+    });
   });
 
   it("keeps sticker reaction webhook metadata typed without inventing a standard emoji", async () => {

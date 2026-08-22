@@ -15,6 +15,10 @@ interface LinqAttachmentLookup {
   ): PromiseLike<LinqAttachmentDetails>;
 }
 
+type LinqAttachmentLookupSource =
+  | LinqAttachmentLookup
+  | (() => LinqAttachmentLookup | Promise<LinqAttachmentLookup>);
+
 export interface LinqInboundAttachmentReference {
   readonly attachmentId: string;
   readonly filename: string;
@@ -29,14 +33,14 @@ interface LinqInboundMediaDependencies {
 }
 
 export function createLinqAttachmentFetcher(
-  attachments: LinqAttachmentLookup,
+  attachments: LinqAttachmentLookupSource,
   reference: LinqInboundAttachmentReference,
 ): () => Promise<Buffer> {
   return () => downloadLinqAttachment(attachments, reference);
 }
 
 export async function downloadLinqAttachment(
-  attachments: LinqAttachmentLookup,
+  attachments: LinqAttachmentLookupSource,
   reference: LinqInboundAttachmentReference,
   dependencies: LinqInboundMediaDependencies = {},
 ): Promise<Buffer> {
@@ -54,7 +58,8 @@ export async function downloadLinqAttachment(
   }, timeoutMs);
 
   try {
-    const details = await attachments.retrieve(reference.attachmentId, {
+    const lookup = typeof attachments === "function" ? await attachments() : attachments;
+    const details = await lookup.retrieve(reference.attachmentId, {
       signal: controller.signal,
       timeout: timeoutMs,
     });

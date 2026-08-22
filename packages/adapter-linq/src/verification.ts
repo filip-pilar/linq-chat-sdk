@@ -12,6 +12,15 @@ const STANDARD_SIGNATURE_HEADER = "webhook-signature";
 const STANDARD_TIMESTAMP_HEADER = "webhook-timestamp";
 const MAX_WEBHOOK_AGE_SECONDS = 5 * 60;
 
+/** Validate a static secret with the same implementation used for request verification. */
+export function assertValidStandardWebhookSigningSecret(signingSecret: string): void {
+  try {
+    new Webhook(signingSecret);
+  } catch {
+    throw new TypeError("Linq requires a valid Standard Webhooks signing secret.");
+  }
+}
+
 export type LinqWebhookAuthenticationResult =
   | {
       readonly ok: true;
@@ -42,6 +51,41 @@ export async function authenticateLinqWebhookRequest(
   }
 
   return verifyStandardWebhook(request, signingSecret);
+}
+
+export async function authenticateTrustedLinqWebhookRequest(
+  request: Request,
+  verifier: (request: Request, rawBody: Uint8Array) => unknown | Promise<unknown>,
+): Promise<LinqWebhookAuthenticationResult> {
+  const rawBytes = new Uint8Array(await request.arrayBuffer());
+
+  try {
+    // A trusted verifier is an authentication authority, not an owner of the
+    // bytes that downstream parsing and lossless observations depend on.
+    const verified = await verifier(request, rawBytes.slice());
+    if (verified === false) {
+      return invalidSignature();
+    }
+  } catch {
+    return invalidSignature();
+  }
+
+  const rawBody = new TextDecoder().decode(rawBytes);
+  try {
+    return {
+      ok: true,
+      event: JSON.parse(rawBody) as unknown,
+      rawBody,
+      rawBodyBase64: Buffer.from(rawBytes).toString("base64"),
+      transport: {
+        scheme: "trusted_forwarder",
+        webhookId: trimmedHeader(request.headers, STANDARD_ID_HEADER),
+        timestamp: trimmedHeader(request.headers, STANDARD_TIMESTAMP_HEADER) ?? "",
+      },
+    };
+  } catch {
+    return invalidJson();
+  }
 }
 
 async function verifyStandardWebhook(

@@ -246,7 +246,10 @@ describe("Linq decoration transport", () => {
 });
 
 function createAdapterHarness() {
-  const adapter = createLinqAdapter({ apiKey: "test-key", signingSecret: "test-secret" });
+  const adapter = createLinqAdapter({
+    apiKey: "test-key",
+    signingSecret: "whsec_dGVzdC1zZWNyZXQ=",
+  });
   const send = vi.fn().mockResolvedValue({
     chat_id: "chat-123",
     message: {
@@ -263,6 +266,7 @@ function createAdapterHarness() {
     created_at: "2026-08-20T00:00:00.000Z",
     delivery_status: "sent",
     id: "message-1",
+    is_from_me: true,
     is_read: false,
     parts: [],
     sent_at: "2026-08-20T00:00:00.000Z",

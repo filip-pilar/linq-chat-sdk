@@ -61,9 +61,9 @@ describe("standard operation reliability", () => {
     expect(history.nextCursor).toBe("cursor-older");
     expect(harness.retrieveMessage).toHaveBeenCalledWith(MESSAGE_ID);
     expect(refreshed).toMatchObject({
-      id: historyFixture.messages[0]?.id,
+      id: MESSAGE_ID,
       threadId: THREAD_ID,
-      raw: historyFixture.messages[0],
+      raw: harness.retrieveResponse,
     });
     expect(harness.updateMessage).toHaveBeenCalledWith(MESSAGE_ID, {
       part_index: 0,
@@ -133,10 +133,26 @@ describe("standard operation reliability", () => {
     const harness = createHarness();
     harness.retrieveMessage.mockResolvedValueOnce({
       ...historyFixture.messages[0],
+      id: MESSAGE_ID,
       chat_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
     });
 
     await expect(harness.adapter.fetchMessage(THREAD_ID, MESSAGE_ID)).resolves.toBeNull();
+    expect(harness.retrieveMessage).toHaveBeenCalledWith(MESSAGE_ID);
+  });
+
+  it("never fabricates refreshed message facts from a malformed provider row", async () => {
+    const harness = createHarness();
+    harness.retrieveMessage.mockResolvedValueOnce({
+      ...historyFixture.messages[0],
+      id: MESSAGE_ID,
+      sent_at: "2026-02-30T00:00:00Z",
+      created_at: null,
+    });
+
+    await expect(harness.adapter.fetchMessage(THREAD_ID, MESSAGE_ID)).rejects.toThrow(
+      "invalid response while attempting to retrieve message",
+    );
     expect(harness.retrieveMessage).toHaveBeenCalledWith(MESSAGE_ID);
   });
 
@@ -207,13 +223,17 @@ const standardOperations: StandardOperation[] = [
 ];
 
 function createHarness() {
-  const adapter = createLinqAdapter({ apiKey: "test-key", signingSecret: "test-secret" });
+  const adapter = createLinqAdapter({
+    apiKey: "test-key",
+    signingSecret: "whsec_dGVzdC1zZWNyZXQ=",
+  });
   const chatResponse = { display_name: "Test chat", id: CHAT_ID, is_group: false };
   const editResponse = {
     chat_id: CHAT_ID,
     created_at: "2026-08-20T00:00:00.000Z",
     delivery_status: "sent",
     id: MESSAGE_ID,
+    is_from_me: true,
     is_read: false,
     parts: [],
     sent_at: "2026-08-20T00:00:00.000Z",
@@ -223,7 +243,8 @@ function createHarness() {
     messages: [historyFixture.messages[0]],
     next_cursor: historyFixture.next_cursor,
   });
-  const retrieveMessage = vi.fn().mockResolvedValue(historyFixture.messages[0]);
+  const retrieveResponse = { ...historyFixture.messages[0], id: MESSAGE_ID };
+  const retrieveMessage = vi.fn().mockResolvedValue(retrieveResponse);
   const updateMessage = vi.fn().mockResolvedValue(editResponse);
   const react = vi.fn().mockResolvedValue({ message: "Reaction processed", status: "ok" });
   const warn = vi.fn();
@@ -253,6 +274,7 @@ function createHarness() {
     react,
     retrieveChat,
     retrieveMessage,
+    retrieveResponse,
     send,
     updateMessage,
     warn,

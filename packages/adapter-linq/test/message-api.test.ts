@@ -88,7 +88,10 @@ describe("linqMessage", () => {
 
 describe("linqMessage Chat SDK transport", () => {
   it("uses the ordinary Linq send path for implemented message options", async () => {
-    const adapter = createLinqAdapter({ apiKey: "test-key", signingSecret: "test-secret" });
+    const adapter = createLinqAdapter({
+      apiKey: "test-key",
+      signingSecret: "whsec_dGVzdC1zZWNyZXQ=",
+    });
     const send = vi.spyOn(adapter.client.chats.messages, "send").mockResolvedValue({
       chat_id: "chat-123",
       message: {
@@ -306,7 +309,10 @@ async function createTransportContext(): Promise<{
   state: StateAdapter;
   thread: ReturnType<Chat<{ linq: LinqAdapter }>["thread"]>;
 }> {
-  const adapter = createLinqAdapter({ apiKey: "test-key", signingSecret: "test-secret" });
+  const adapter = createLinqAdapter({
+    apiKey: "test-key",
+    signingSecret: "whsec_dGVzdC1zZWNyZXQ=",
+  });
   const postMessage = vi
     .spyOn(adapter, "postMessage")
     .mockResolvedValue(rawMessage("posted-message"));

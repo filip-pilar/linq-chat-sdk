@@ -49,8 +49,7 @@ async function sendFromFixedLine(
   void result.chat.message.id;
 }
 
-function assertNegativeArchitectureContracts(adapter: LinqAdapter, thread: Thread): void {
-  // @ts-expect-error -- Linq exposes no adapter openDM implementation; use the native recipe.
+function assertIdentityContracts(adapter: LinqAdapter, thread: Thread): void {
   void adapter.openDM("+15550000001");
 
   // @ts-expect-error -- Chat SDK Thread identity is immutable and cannot adopt a returned chat ID.
@@ -59,4 +58,4 @@ function assertNegativeArchitectureContracts(adapter: LinqAdapter, thread: Threa
 
 void sendWithAutoSelectedSender;
 void sendFromFixedLine;
-void assertNegativeArchitectureContracts;
+void assertIdentityContracts;

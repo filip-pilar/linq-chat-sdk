@@ -8,6 +8,12 @@ capability status is maintained in
 
 - Standard Chat SDK operations for existing chats: post, reply, edit, history, refresh, reactions,
   typing, mark-read, cards, files, attachments, and buffered streams.
+- Released proactive `openDM()` bootstrap semantics: pending handle identity before the first post,
+  then canonical provider identity from the accepted send.
+- Static and lazy rotating credentials, explicit trusted webhook forwarding, and the released
+  delivery-status compatibility callback over the richer verified event pipeline.
+- Released `adapter.markRead()` source compatibility as an alias of the preferred standard
+  `Thread.markAsRead()` chat-wide acknowledgement.
 - Canonical `linq:{chatId}` identity and decode-only compatibility for persisted
   `linq:{chatId}:dm/group` values.
 - Deterministic text/decoration compilation, service/effect policy, native rich links, outbound
@@ -15,16 +21,17 @@ capability status is maintained in
 - Standard Webhook verification over the exact raw body, stable typed/lossless observations,
   current message/reaction dispatch, atomic event dedupe, callback isolation, and Chat SDK
   `waitUntil` integration.
+- Exact static signing-secret validation, full-precision provider timestamp ordering, and narrow
+  SDK-response guards for facts used in public identities/results.
 - A narrow `adapter.conversation(threadOrId)` extension for part-targeted replies/reactions,
   stop-typing, contact-card sharing, voice memos, existing-group operations, and location.
-- A read-only `adapter.client` escape hatch for official Linq SDK operations that do not need an
-  adapter abstraction.
+- A truthful official-client escape hatch: synchronous `adapter.client` for static credentials and
+  `await adapter.getClient()` for static or lazy credentials.
 
 ## Deliberate limits
 
-- `openDM()` is unsupported. Proactive sends use `adapter.client.messages.create()` or an
-  intentionally fixed-line `adapter.client.chats.create()`, followed by canonical Chat SDK thread
-  construction from Linq's returned chat ID.
+- A pending `openDM()` thread is only a bootstrap address. Its identity is not migrated; consumers
+  use the returned `SentMessage.threadId` for subscriptions and later ordinary operations.
 - The adapter does not own provider delivery, ordering, retries beyond the SDK, account
   administration, capability discovery, workflow state, databases, durable queues, polling,
   retention/deletion policy, transcription, or request-to-event correlation.
@@ -33,10 +40,22 @@ capability status is maintained in
 - A malformed `message.received` event without a canonical or previously learned chat kind remains
   available through verified raw observation but is not guessed, looked up, or sent to the wrong
   standard handler.
+- Valid canonical events without curated adapter models reach named handlers with raw data. Known
+  curated events with unusable payloads remain available only through the generic lossless seam and
+  receive `2xx`; they do not produce false named, curated, delivery, or standard dispatch.
+- A schema-valid timestamp string that JavaScript `Date` cannot represent remains observable in a
+  truthful Linq event; only the incompatible standard `Message` projection is skipped.
 - Inbound voice memos are ordinary downloadable audio attachments. Linq's current schema does not
   reliably distinguish them from other audio media.
-- Current history traversal is backward-only and bounded. It skips a bounded number of malformed
-  empty provider pages so usable later messages are not hidden.
+- Current history traversal is backward-only and bounded. It skips a bounded number of all-filtered
+  provider pages so usable later messages are not hidden. Rows without truthful canonical identity,
+  authorship, and RFC3339 timestamps are omitted; usable messages are stably oldest-first by the
+  complete normalized provider instant while immutable raw values retain their original precision.
+- Public result identities are built only from required validated provider facts. A malformed
+  response after possible mutation acceptance is not retried or treated as safe to clean up.
+- Adapter-performed attachment uploads reject redirects and obvious local-network literal targets
+  and time out after 30 seconds. The filter is intentionally not a registry of every special-use
+  address; DNS and Linq-issued upload-host integrity remain provider/host network concerns.
 
 ## Deferred possibilities
 

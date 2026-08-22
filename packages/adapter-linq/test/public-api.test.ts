@@ -7,6 +7,10 @@ import type {
   LinqAnyEvent,
   LinqAdapterConfig,
   LinqConversation,
+  LinqCredentialProvider,
+  LinqCredentials,
+  LinqDeliveryStatusEvent,
+  LinqDeliveryStatusListener,
   LinqEventMap,
   LinqFutureEvent,
   LinqGroupConversation,
@@ -28,6 +32,7 @@ import type {
   LinqPostableMessage,
   LinqVoiceMemoResult,
   LinqVoiceMemoSource,
+  LinqWebhookVerifier,
   LinqVerifiedUnhandledWebhook,
   LinqVerifiedWebhook,
   LinqWebhookVerificationResult,
@@ -35,7 +40,7 @@ import type {
 
 const API_KEY = "test_linq_api_key";
 const BASE_URL = "https://sandbox.example.com/api/partner";
-const SIGNING_SECRET = "test_linq_webhook_secret";
+const SIGNING_SECRET = "whsec_dGVzdC1zZWNyZXQ=";
 
 const config = {
   apiKey: API_KEY,
@@ -49,6 +54,43 @@ function assertClientCannotBeReassigned(adapter: LinqAdapter): void {
 }
 
 void assertClientCannotBeReassigned;
+
+function assertConvergedCompatibilityContracts(adapter: LinqAdapter): void {
+  const credentials: LinqCredentials = { apiKey: "rotating", signingSecret: "whsec_test" };
+  credentials.apiKey = "rotated";
+  credentials.signingSecret = "whsec_rotated";
+  const provider: LinqCredentialProvider = async () => credentials;
+  const verifier: LinqWebhookVerifier = async (_request, rawBody) => rawBody.byteLength > 0;
+  const lazyConfig = {
+    credentials: provider,
+    webhookVerifier: verifier,
+  } satisfies LinqAdapterConfig;
+  const lazyDirectConfig = { credentials: provider } satisfies LinqAdapterConfig;
+  const staticForwardedConfig = {
+    apiKey: API_KEY,
+    webhookVerifier: verifier,
+  } satisfies LinqAdapterConfig;
+
+  expectTypeOf(adapter.getClient()).resolves.toEqualTypeOf<LinqAPIV3>();
+  expectTypeOf(adapter.openDM("+15550000001")).resolves.toBeString();
+  expectTypeOf(adapter.markRead("linq:chat-id", "message-id")).resolves.toBeVoid();
+  const unsubscribe = adapter.onDeliveryStatus(async (event) => {
+    expectTypeOf(event).toEqualTypeOf<LinqDeliveryStatusEvent>();
+  });
+  const thenableListener: LinqDeliveryStatusListener = () => Promise.resolve();
+  adapter.onDeliveryStatus(thenableListener);
+  expectTypeOf(unsubscribe).toEqualTypeOf<() => void>();
+  void lazyConfig;
+  void lazyDirectConfig;
+  void staticForwardedConfig;
+  const structurallyPermittedButRuntimeInvalid = {
+    apiKey: API_KEY,
+    signingSecret: undefined,
+  } satisfies LinqAdapterConfig;
+  void structurallyPermittedButRuntimeInvalid;
+}
+
+void assertConvergedCompatibilityContracts;
 
 function assertVerifiedWebhookCannotBeConstructed(adapter: LinqAdapter): void {
   const structurallyComplete: Pick<
@@ -115,6 +157,11 @@ function assertTypedEventRegistration(adapter: LinqAdapter): void {
     expectTypeOf(event.data.providerMessageId).toBeString();
     expectTypeOf(event.data.partIndex).toBeNumber();
     expectTypeOf(event.data.editedAt).toBeString();
+  });
+  adapter.onLinqEvent("chat.created", (event) => {
+    expectTypeOf(event).toEqualTypeOf<LinqEventMap["chat.created"]>();
+    expectTypeOf(event.type).toEqualTypeOf<"chat.created">();
+    expectTypeOf(event.data).not.toBeAny();
   });
   const unsubscribeAll = adapter.onLinqEvent((event) => {
     expectTypeOf(event).toEqualTypeOf<LinqAnyEvent>();
@@ -415,6 +462,7 @@ describe("public adapter foundation", () => {
 
     expectTypeOf(adapter.reply).toBeFunction();
     expectTypeOf(adapter.markAsRead).toBeFunction();
+    expectTypeOf(adapter.markRead).toBeFunction();
     expect(adapter).not.toHaveProperty("persistMessageHistory");
   });
 

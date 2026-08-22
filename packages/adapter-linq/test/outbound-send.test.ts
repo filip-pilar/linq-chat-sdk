@@ -18,6 +18,7 @@ const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -44,7 +45,7 @@ describe("reliable existing-chat send validation", () => {
     const adapter = createLinqAdapter({
       apiKey: "test-key",
       baseURL: "https://linq-sdk-retry.example.test",
-      signingSecret: "test-secret",
+      signingSecret: "whsec_dGVzdC1zZWNyZXQ=",
     });
 
     await adapter.postMessage("linq:chat-123", "retry safely");
@@ -345,6 +346,40 @@ describe("reliable existing-chat send errors", () => {
 });
 
 describe("reliable existing-chat attachment cleanup", () => {
+  it.each([
+    ["missing attachment id", { attachment_id: null }, false],
+    ["missing upload URL", { upload_url: null }, true],
+    ["wrong method", { http_method: "POST" }, true],
+    ["missing headers", { required_headers: null }, true],
+    ["non-string header", { required_headers: { "content-type": 42 } }, true],
+  ] as const)(
+    "rejects provider attachment response with %s before upload",
+    async (_label, override, canClean) => {
+      const { adapter, create, deleteAttachment, send } = createOutboundTestAdapter();
+      create.mockResolvedValueOnce({
+        attachment_id: "attachment-malformed",
+        download_url: "https://cdn.linqapp.com/attachment-malformed",
+        expires_at: "2026-08-02T18:00:00.000Z",
+        http_method: "PUT",
+        required_headers: { "content-type": "application/octet-stream" },
+        upload_url: "https://uploads.linqapp.com/attachment-malformed",
+        ...override,
+      });
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      await expect(
+        adapter.postMessage("linq:chat-123", {
+          markdown: "",
+          files: [{ data: Buffer.from([1]), filename: "file.png", mimeType: "image/png" }],
+        }),
+      ).rejects.toBeInstanceOf(AdapterError);
+
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(deleteAttachment).toHaveBeenCalledTimes(canClean ? 1 : 0);
+      expect(send).not.toHaveBeenCalled();
+    },
+  );
+
   it("rejects an unsafe provider upload URL and cleans up the created attachment", async () => {
     const { adapter, create, deleteAttachment, send } = createOutboundTestAdapter();
     create.mockResolvedValueOnce({
@@ -367,6 +402,123 @@ describe("reliable existing-chat attachment cleanup", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(deleteAttachment).toHaveBeenCalledWith("attachment-unsafe");
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "not a URL",
+    "https://user:secret@uploads.linqapp.com/upload",
+    "https://localhost/upload",
+    "https://uploads.localhost/upload",
+    "https://127.0.0.1/upload",
+    "https://0.0.0.0/upload",
+    "https://10.1.2.3/upload",
+    "https://100.64.0.1/upload",
+    "https://169.254.1.1/upload",
+    "https://172.16.0.1/upload",
+    "https://192.168.1.1/upload",
+    "https://224.0.0.1/upload",
+    "https://[::]/upload",
+    "https://[::1]/upload",
+    "https://[fc00::1]/upload",
+    "https://[fe80::1]/upload",
+    "https://[ff02::1]/upload",
+    "https://[::ffff:127.0.0.1]/upload",
+    "https://[::ffff:10.0.0.1]/upload",
+  ])("rejects provider upload target %s before upload I/O", async (uploadUrl) => {
+    const { adapter, create, deleteAttachment, send } = createOutboundTestAdapter();
+    create.mockResolvedValueOnce({
+      attachment_id: "attachment-local-target",
+      download_url: "https://cdn.linqapp.com/attachment-local-target",
+      expires_at: "2026-08-02T18:00:00.000Z",
+      http_method: "PUT",
+      required_headers: { "content-type": "application/octet-stream" },
+      upload_url: uploadUrl,
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    await expect(
+      adapter.postMessage("linq:chat-123", {
+        markdown: "",
+        files: [{ data: Buffer.from([1]), filename: "file.png", mimeType: "image/png" }],
+      }),
+    ).rejects.toBeInstanceOf(ValidationError);
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(deleteAttachment).toHaveBeenCalledWith("attachment-local-target");
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("bounds a provider-issued upload and preserves timeout over cleanup failure", async () => {
+    vi.useFakeTimers();
+    const { adapter, deleteAttachment, send } = createOutboundTestAdapter();
+    deleteAttachment.mockRejectedValue(new Error("cleanup failed"));
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (_input, init) =>
+        await new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), {
+            once: true,
+          });
+        }),
+    );
+
+    const result = adapter
+      .postMessage("linq:chat-123", {
+        markdown: "",
+        files: [{ data: Buffer.from([1]), filename: "file.png", mimeType: "image/png" }],
+      })
+      .catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(30_000);
+    const error = (await result) as NetworkError & {
+      cause: Error & { cause?: unknown };
+    };
+
+    expect(error).toBeInstanceOf(NetworkError);
+    expect(error.cause).toBeInstanceOf(Error);
+    expect(error.cause.message).toContain("timed out after 30000ms");
+    expect(error.cause.cause).toBeDefined();
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://uploads.linqapp.com/attachment-1",
+      expect.objectContaining({ redirect: "error", signal: expect.any(AbortSignal) }),
+    );
+    expect(deleteAttachment).toHaveBeenCalledWith("attachment-1");
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("rejects provider upload redirects and cleans up before message sending", async () => {
+    const { adapter, deleteAttachment, send } = createOutboundTestAdapter();
+    const redirectFailure = new TypeError("fetch failed: redirect mode is error");
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(redirectFailure);
+
+    const error = (await adapter
+      .postMessage("linq:chat-123", {
+        markdown: "",
+        files: [{ data: Buffer.from([1]), filename: "file.png", mimeType: "image/png" }],
+      })
+      .catch((caught: unknown) => caught)) as NetworkError;
+
+    expect(error).toBeInstanceOf(NetworkError);
+    expect(error.cause).toBe(redirectFailure);
+    expect(deleteAttachment).toHaveBeenCalledWith("attachment-1");
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("uploads to a public credential-free HTTPS target with a bounded signal", async () => {
+    const { adapter, deleteAttachment, send } = createOutboundTestAdapter();
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(null, { status: 200 }));
+
+    await adapter.postMessage("linq:chat-123", {
+      markdown: "",
+      files: [{ data: Buffer.from([1]), filename: "file.png", mimeType: "image/png" }],
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://uploads.linqapp.com/attachment-1",
+      expect.objectContaining({ redirect: "error", signal: expect.any(AbortSignal) }),
+    );
+    expect(deleteAttachment).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledOnce();
   });
 
   it("best-effort deletes a created attachment when preparation later fails", async () => {
@@ -401,6 +553,21 @@ describe("reliable existing-chat attachment cleanup", () => {
         files: [{ data: Buffer.from([1]), filename: "file.png", mimeType: "image/png" }],
       }),
     ).rejects.toBeInstanceOf(AdapterError);
+    expect(deleteAttachment).not.toHaveBeenCalled();
+  });
+
+  it("does not retry or clean up after a malformed response from a begun send", async () => {
+    const { adapter, send, deleteAttachment } = createOutboundTestAdapter();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 200 }));
+    send.mockResolvedValue({ ...createSendResponse(), chat_id: null });
+
+    await expect(
+      adapter.postMessage("linq:chat-123", {
+        markdown: "",
+        files: [{ data: Buffer.from([1]), filename: "file.png", mimeType: "image/png" }],
+      }),
+    ).rejects.toBeInstanceOf(AdapterError);
+    expect(send).toHaveBeenCalledOnce();
     expect(deleteAttachment).not.toHaveBeenCalled();
   });
 });
@@ -458,6 +625,26 @@ describe("thread.post() contract", () => {
 
     expect(markAsRead).toHaveBeenCalledWith("chat-123");
   });
+
+  it("keeps released adapter.markRead() as one translated chat-wide acknowledgement", async () => {
+    const { adapter, markAsRead } = createOutboundTestAdapter();
+
+    await adapter.markRead("linq:chat-123", "message-inbound");
+    expect(markAsRead).toHaveBeenCalledOnce();
+    expect(markAsRead).toHaveBeenCalledWith("chat-123");
+
+    const original = providerError(403, 2001, "trace-mark-read");
+    markAsRead.mockRejectedValueOnce(original);
+    const error = await adapter
+      .markRead("linq:chat-123", "message-inbound")
+      .catch((caught) => caught);
+    expect(error).toBeInstanceOf(PermissionError);
+    expect(error).toMatchObject({
+      cause: original,
+      providerCode: 2001,
+      traceId: "trace-mark-read",
+    });
+  });
 });
 
 function createOutboundTestAdapter(): {
@@ -467,7 +654,10 @@ function createOutboundTestAdapter(): {
   markAsRead: ReturnType<typeof vi.fn>;
   send: ReturnType<typeof vi.fn>;
 } {
-  const adapter = createLinqAdapter({ apiKey: "test-key", signingSecret: "test-secret" });
+  const adapter = createLinqAdapter({
+    apiKey: "test-key",
+    signingSecret: "whsec_dGVzdC1zZWNyZXQ=",
+  });
   const send = vi.fn().mockResolvedValue(createSendResponse());
   const create = vi.fn().mockImplementation(async () => {
     const attachmentId = `attachment-${create.mock.calls.length}`;
