@@ -386,7 +386,7 @@ export function normalizeAuthenticatedLinqWebhook(
     const message = parseMessageObservation(rawEvent.data);
 
     if (!message) {
-      return invalidPayload();
+      return authenticatedUnhandled(base);
     }
 
     return {
@@ -399,7 +399,7 @@ export function normalizeAuthenticatedLinqWebhook(
     const lifecycle = parseMessageLifecycleEventData(envelope.eventType, rawEvent.data);
 
     if (!lifecycle) {
-      return invalidPayload();
+      return authenticatedUnhandled(base);
     }
 
     return {
@@ -412,7 +412,7 @@ export function normalizeAuthenticatedLinqWebhook(
     const failureObservation = parseMessageFailedEventData(rawEvent.data);
 
     if (!failureObservation) {
-      return invalidPayload();
+      return authenticatedUnhandled(base);
     }
 
     return {
@@ -425,7 +425,7 @@ export function normalizeAuthenticatedLinqWebhook(
     const edit = parseMessageEditedEventData(rawEvent.data);
 
     if (!edit) {
-      return invalidPayload();
+      return authenticatedUnhandled(base);
     }
 
     return {
@@ -438,7 +438,7 @@ export function normalizeAuthenticatedLinqWebhook(
     const reaction = parseReactionObservation(rawEvent.data);
 
     if (!reaction) {
-      return invalidPayload();
+      return authenticatedUnhandled(base);
     }
 
     return {
@@ -451,7 +451,7 @@ export function normalizeAuthenticatedLinqWebhook(
     const locationSharing = parseLocationSharingEventData(envelope.eventType, rawEvent.data);
 
     if (!locationSharing) {
-      return invalidPayload();
+      return authenticatedUnhandled(base);
     }
 
     return {
@@ -464,7 +464,7 @@ export function normalizeAuthenticatedLinqWebhook(
     const locationSharing = parseLocationSharingEventData(envelope.eventType, rawEvent.data);
 
     if (!locationSharing) {
-      return invalidPayload();
+      return authenticatedUnhandled(base);
     }
 
     return {
@@ -473,6 +473,15 @@ export function normalizeAuthenticatedLinqWebhook(
     };
   }
 
+  return {
+    ok: true,
+    webhook: Object.freeze({ ...base, kind: "unhandled" }),
+  };
+}
+
+function authenticatedUnhandled(
+  base: Omit<LinqVerifiedUnhandledWebhook, "kind">,
+): LinqWebhookVerificationResult {
   return {
     ok: true,
     webhook: Object.freeze({ ...base, kind: "unhandled" }),

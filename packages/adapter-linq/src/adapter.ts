@@ -110,8 +110,10 @@ export interface LinqDeliveryStatusEvent {
   readonly raw: unknown;
 }
 
-/** Receives delivery-status changes. Listener return values are ignored. */
-export type LinqDeliveryStatusListener = (event: LinqDeliveryStatusEvent) => void;
+/** Receives delivery-status changes. Completion is observed only to isolate failures. */
+export type LinqDeliveryStatusListener = (
+  event: LinqDeliveryStatusEvent,
+) => void | PromiseLike<void>;
 
 type LinqPartReactionOptions = {
   readonly partIndex?: number;
@@ -1007,7 +1009,8 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     options?: WebhookOptions,
   ): Promise<LinqVerifiedWebhookDispatchResult> {
     const event = getVerifiedLinqWebhookEvent(webhook, this.webhookVerificationAuthority);
-    const includeNamed = webhook.envelope.versionStatus === "current";
+    const includeNamed =
+      webhook.envelope.versionStatus === "current" && webhook.kind !== "unhandled";
     const genericHandlers = this.linqEvents.handlersFor(webhook.envelope.eventType, includeNamed);
 
     if (this.state) {
@@ -1033,6 +1036,13 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
     if (genericHandlers.length > 0 && options?.waitUntil) {
       options.waitUntil(genericDispatch);
+    }
+
+    // A current known event with an authenticated envelope but an unusable
+    // curated payload remains losslessly observable without entering a named
+    // or standard handler that would require guessing missing facts.
+    if (webhook.kind === "unhandled") {
+      return { handled: "ignored" };
     }
 
     if (webhook.envelope.versionStatus === "older") {
@@ -1089,9 +1099,20 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
     for (const listener of this.deliveryStatusListeners) {
       try {
-        listener(delivery);
+        const completion = listener(delivery);
+        if (completion != null) {
+          void Promise.resolve(completion).catch((error: unknown) => {
+            this.logger.warn("Linq delivery-status listener failed", {
+              error,
+              eventType: webhook.envelope.eventType,
+            });
+          });
+        }
       } catch (error) {
-        this.logger.warn("Linq delivery-status listener threw", { error });
+        this.logger.warn("Linq delivery-status listener failed", {
+          error,
+          eventType: webhook.envelope.eventType,
+        });
       }
     }
   }

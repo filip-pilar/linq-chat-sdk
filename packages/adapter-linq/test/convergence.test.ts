@@ -128,6 +128,40 @@ describe("trusted forwarding convergence", () => {
     expect(arrayBuffer).toHaveBeenCalledTimes(1);
   });
 
+  it("isolates retained webhook bytes from a mutating trusted verifier", async () => {
+    const rawBody = `${JSON.stringify(fixture)}\n`;
+    const originalBase64 = Buffer.from(rawBody).toString("base64");
+    const verifier = vi.fn((_request: Request, bytes: Uint8Array) => {
+      bytes.fill(0x78);
+      return true;
+    });
+    const adapter = createLinqAdapter({ apiKey: "static-key", webhookVerifier: verifier });
+    const observed = vi.fn();
+    adapter.onLinqEvent(observed);
+    (adapter as unknown as { state: StateAdapter }).state = {
+      setIfNotExists: vi.fn().mockResolvedValue(true),
+    } as unknown as StateAdapter;
+    const request = new Request("https://forwarder.example.test/linq", {
+      method: "POST",
+      body: rawBody,
+    });
+
+    const result = await adapter.verifyWebhook(request);
+    expect(result).toMatchObject({
+      ok: true,
+      webhook: { rawBody, rawBodyBase64: originalBase64, rawEvent: fixture },
+    });
+    if (!result.ok) throw new Error("Expected trusted verification success");
+
+    await expect(adapter.dispatchVerifiedWebhook(result.webhook)).resolves.toEqual({
+      handled: "ignored",
+    });
+    expect(observed).toHaveBeenCalledWith(
+      expect.objectContaining({ rawEvent: fixture, data: fixture.data }),
+    );
+    expect(result.webhook.envelope.eventId).toBe(fixture.event_id);
+  });
+
   it("does not fall back to a valid direct signature when the forwarder rejects", async () => {
     const verifier = vi.fn().mockReturnValue(false);
     const adapter = createLinqAdapter({

@@ -85,13 +85,16 @@ describe("typed Linq location-sharing events", () => {
     [startedFixture, { ends_at: null }],
     [startedFixture, { ends_at: 42 }],
     [stoppedFixture, { shared_by: null }],
-  ] as const)("rejects malformed current location payloads", async (fixture, override) => {
-    const payload = { ...fixture, data: { ...fixture.data, ...override } };
+  ] as const)(
+    "preserves malformed current location payloads losslessly",
+    async (fixture, override) => {
+      const payload = { ...fixture, data: { ...fixture.data, ...override } };
 
-    await expect(
-      createTestAdapter().verifyWebhook(createStandardRequest(payload)),
-    ).resolves.toMatchObject({ ok: false, error: { code: "invalid_payload", status: 400 } });
-  });
+      await expect(
+        createTestAdapter().verifyWebhook(createStandardRequest(payload)),
+      ).resolves.toMatchObject({ ok: true, webhook: { kind: "unhandled", rawEvent: payload } });
+    },
+  );
 
   it("keeps future webhook versions authenticated, lossless, and unsupported", async () => {
     const payload = {

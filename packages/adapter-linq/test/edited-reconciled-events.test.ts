@@ -74,15 +74,12 @@ describe("typed edited and reconciled Linq messages", () => {
     ["part index", { ...editedFixture.data, part: { ...editedFixture.data.part, index: -1 } }],
     ["part text", { ...editedFixture.data, part: { ...editedFixture.data.part, text: 42 } }],
     ["edit timestamp", { ...editedFixture.data, edited_at: "" }],
-  ])("rejects malformed edited payload %s", async (_label, data) => {
+  ])("preserves malformed edited payload %s losslessly", async (_label, data) => {
     const payload = { ...editedFixture, data };
 
     await expect(
       createTestAdapter().verifyWebhook(createStandardRequest(payload)),
-    ).resolves.toMatchObject({
-      ok: false,
-      error: { code: "invalid_payload", status: 400 },
-    });
+    ).resolves.toMatchObject({ ok: true, webhook: { kind: "unhandled", rawEvent: payload } });
   });
 
   it.each(["2025-01-01", "2099-01-01", "preview"])(
@@ -168,7 +165,7 @@ describe("typed edited and reconciled Linq messages", () => {
     });
   });
 
-  it.each([null, ""])("rejects malformed reconciled_at=%s", async (reconciledAt) => {
+  it.each([null, ""])("preserves malformed reconciled_at=%s losslessly", async (reconciledAt) => {
     const payload = {
       ...reconciledFixture,
       data: { ...reconciledFixture.data, reconciled_at: reconciledAt },
@@ -176,10 +173,7 @@ describe("typed edited and reconciled Linq messages", () => {
 
     await expect(
       createTestAdapter().verifyWebhook(createStandardRequest(payload)),
-    ).resolves.toMatchObject({
-      ok: false,
-      error: { code: "invalid_payload", status: 400 },
-    });
+    ).resolves.toMatchObject({ ok: true, webhook: { kind: "unhandled", rawEvent: payload } });
   });
 
   it("keeps ordinary current inbound messages on standard dispatch", async () => {

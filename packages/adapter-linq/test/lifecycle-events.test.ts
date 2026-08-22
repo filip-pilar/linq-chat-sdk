@@ -117,16 +117,16 @@ describe("typed Linq message lifecycle events", () => {
     [failedFixture, { failed_at: null }],
     [failedFixture, { service: "WhatsApp" }],
     [failedFixture, { detail_code: 1.5 }],
-  ] as const)("rejects malformed current lifecycle payloads", async (fixture, dataOverride) => {
-    const payload = { ...fixture, data: { ...fixture.data, ...dataOverride } };
+  ] as const)(
+    "preserves malformed current lifecycle payloads losslessly",
+    async (fixture, dataOverride) => {
+      const payload = { ...fixture, data: { ...fixture.data, ...dataOverride } };
 
-    await expect(
-      createTestAdapter().verifyWebhook(createStandardRequest(payload)),
-    ).resolves.toMatchObject({
-      ok: false,
-      error: { code: "invalid_payload", status: 400 },
-    });
-  });
+      await expect(
+        createTestAdapter().verifyWebhook(createStandardRequest(payload)),
+      ).resolves.toMatchObject({ ok: true, webhook: { kind: "unhandled", rawEvent: payload } });
+    },
+  );
 
   it("reuses atomic dedupe and does not enter standard message/reaction dispatch", async () => {
     const context = await createContext();

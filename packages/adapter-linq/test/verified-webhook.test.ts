@@ -54,7 +54,7 @@ describe("LinqAdapter verified webhook ingress", () => {
     });
   });
 
-  it("returns typed failures for authentication, JSON, payload, and version errors", async () => {
+  it("returns typed failures for authentication, JSON, and envelope errors", async () => {
     const adapter = createTestAdapter();
     const cases: Array<[Request, string, number]> = [
       [
@@ -65,11 +65,6 @@ describe("LinqAdapter verified webhook ingress", () => {
       [createStandardRequest(fixture, { "webhook-timestamp": "0" }), "stale_timestamp", 401],
       [createStandardRequest(fixture, { signature: "v1,invalid" }), "invalid_signature", 401],
       [createSignedBody("{"), "invalid_json", 400],
-      [
-        createStandardRequest({ ...fixture, data: { ...fixture.data, parts: "bad" } }),
-        "invalid_payload",
-        400,
-      ],
       [createStandardRequest({ ...fixture, api_version: "v2" }), "invalid_payload", 400],
     ];
 
@@ -162,13 +157,13 @@ describe("LinqAdapter verified webhook ingress", () => {
     });
   });
 
-  it("returns 400 from the one-step path for a malformed signed current payload", async () => {
+  it("acknowledges a malformed authenticated current payload without false dispatch", async () => {
     const response = await createTestAdapter().handleWebhook(
       createStandardRequest({ ...fixture, data: { ...fixture.data, parts: "bad" } }),
     );
 
-    expect(response.status).toBe(400);
-    await expect(response.text()).resolves.toBe("Invalid Linq webhook payload");
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("OK");
   });
 
   it("exposes current envelope, transport, endpoint, message, attachment, and reply facts", async () => {

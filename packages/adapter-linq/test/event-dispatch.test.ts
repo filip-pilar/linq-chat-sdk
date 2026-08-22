@@ -67,6 +67,52 @@ describe("verified generic Linq event dispatch", () => {
     );
   });
 
+  it.each(["message.received", "message.delivered", "reaction.added", "location.sharing.started"])(
+    "acknowledges authenticated malformed %s losslessly without false curated dispatch",
+    async (eventType) => {
+      const context = await createContext();
+      const named = vi.fn();
+      const all = vi.fn();
+      const delivery = vi.fn();
+      const retrieve = vi.spyOn(context.adapter.client.chats, "retrieve");
+      const payload = {
+        ...fixture,
+        event_id: `malformed-${eventType}`,
+        event_type: eventType,
+        data: { malformed: true, nested: [1, null, { future: true }] },
+      };
+      const rawBody = JSON.stringify(payload);
+      context.adapter.onLinqEvent(eventType as never, named);
+      context.adapter.onLinqEvent(all);
+      context.adapter.onDeliveryStatus(delivery);
+
+      const verification = await context.adapter.verifyWebhook(createStandardRequest(payload));
+      expect(verification).toMatchObject({
+        ok: true,
+        webhook: { kind: "unhandled", rawBody, rawEvent: payload },
+      });
+      if (!verification.ok) throw new Error("Expected authenticated malformed event");
+      expect(Buffer.from(verification.webhook.rawBodyBase64, "base64").toString()).toBe(rawBody);
+
+      const first = await context.adapter.handleWebhook(createStandardRequest(payload));
+      const duplicate = await context.adapter.handleWebhook(
+        createStandardRequest(payload, { "webhook-id": `duplicate-${eventType}` }),
+      );
+
+      expect(first.status).toBe(200);
+      expect(duplicate.status).toBe(200);
+      expect(named).not.toHaveBeenCalled();
+      expect(all).toHaveBeenCalledOnce();
+      expect(all).toHaveBeenCalledWith(
+        expect.objectContaining({ type: eventType, data: payload.data, rawEvent: payload }),
+      );
+      expect(delivery).not.toHaveBeenCalled();
+      expect(context.processMessage).not.toHaveBeenCalled();
+      expect(context.processReaction).not.toHaveBeenCalled();
+      expect(retrieve).not.toHaveBeenCalled();
+    },
+  );
+
   it("suppresses concurrent duplicate standard and generic attempts", async () => {
     const context = await createContext();
     const handler = vi.fn();

@@ -51,7 +51,9 @@ export async function authenticateTrustedLinqWebhookRequest(
   const rawBytes = new Uint8Array(await request.arrayBuffer());
 
   try {
-    const verified = await verifier(request, rawBytes);
+    // A trusted verifier is an authentication authority, not an owner of the
+    // bytes that downstream parsing and lossless observations depend on.
+    const verified = await verifier(request, rawBytes.slice());
     if (verified === false) {
       return invalidSignature();
     }
