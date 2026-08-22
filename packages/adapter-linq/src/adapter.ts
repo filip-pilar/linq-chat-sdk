@@ -599,15 +599,28 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
           resourceType: "chat",
         });
       }
-      const messages: Message<LinqRawMessage>[] = [];
+      const parsedRows: Array<{
+        readonly message: Message<LinqRawMessage>;
+        readonly providerIndex: number;
+        readonly timestamp: number | undefined;
+      }> = [];
 
-      for (const raw of Array.isArray(page.messages) ? page.messages : []) {
+      for (const [providerIndex, raw] of (Array.isArray(page.messages)
+        ? page.messages
+        : []
+      ).entries()) {
         try {
-          messages.push(this.parseMessage(raw));
+          parsedRows.push({
+            message: this.parseMessage(raw),
+            providerIndex,
+            timestamp: validProviderMessageTimestamp(raw),
+          });
         } catch (error) {
           this.logger.warn("Skipping malformed Linq history row", { error });
         }
       }
+
+      const messages = chronologicalHistoryMessages(parsedRows);
 
       const nextCursor = page.next_cursor || undefined;
 
@@ -1338,6 +1351,50 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     // Canonical webhooks and fetched chats warm this before handlers run.
     return this.decodeThreadId(threadId).isGroup === false;
   }
+}
+
+function validProviderMessageTimestamp(raw: unknown): number | undefined {
+  if (!isRecord(raw)) {
+    return undefined;
+  }
+
+  for (const candidate of [raw.sent_at, raw.created_at]) {
+    if (typeof candidate !== "string" || candidate.length === 0) {
+      continue;
+    }
+
+    const timestamp = Date.parse(candidate);
+    if (Number.isFinite(timestamp)) {
+      return timestamp;
+    }
+  }
+
+  return undefined;
+}
+
+function chronologicalHistoryMessages(
+  rows: readonly {
+    readonly message: Message<LinqRawMessage>;
+    readonly providerIndex: number;
+    readonly timestamp: number | undefined;
+  }[],
+): Message<LinqRawMessage>[] {
+  const chronological = rows
+    .filter(
+      (row): row is typeof row & { readonly timestamp: number } => row.timestamp !== undefined,
+    )
+    .sort(
+      (left, right) => left.timestamp - right.timestamp || left.providerIndex - right.providerIndex,
+    );
+  let chronologicalIndex = 0;
+
+  // Keep unusable timestamp rows in their provider-relative slots. Only rows
+  // with truthful provider timestamps participate in chronological ordering.
+  return rows.map((row) =>
+    row.timestamp === undefined
+      ? row.message
+      : (chronological[chronologicalIndex++]?.message ?? row.message),
+  );
 }
 
 export function createLinqAdapter(config: LinqAdapterConfig): LinqAdapter {

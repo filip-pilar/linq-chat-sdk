@@ -10,8 +10,12 @@ const CHAT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const THREAD_ID = `linq:${CHAT_ID}`;
 
 describe("Linq history fidelity", () => {
-  it("keeps usable normal and tombstone rows in provider order and preserves the cursor", async () => {
-    const { adapter, list, warn } = createHistoryAdapter(historyFixture);
+  it("returns usable rows oldest-first when the provider page is reversed", async () => {
+    const providerPage = {
+      ...historyFixture,
+      messages: [...historyFixture.messages].reverse(),
+    };
+    const { adapter, list, warn } = createHistoryAdapter(providerPage);
 
     const result = await adapter.fetchMessages(THREAD_ID, {
       cursor: "cursor-newer",
@@ -39,6 +43,44 @@ describe("Linq history fidelity", () => {
       reply_to: { message_id: "99999999-9999-4999-8999-999999999999", part_index: 0 },
       service: "iMessage",
     });
+  });
+
+  it("sorts valid timestamps stably while preserving invalid timestamp slots", async () => {
+    const base = historyFixture.messages[0];
+    if (!base || !("chat_id" in base)) throw new Error("Expected a retrieved-message fixture");
+    const row = (id: string, sentAt: unknown, createdAt: unknown) => ({
+      ...base,
+      id,
+      sent_at: sentAt,
+      created_at: createdAt,
+      parts: [{ type: "text", value: id }],
+    });
+    const page = {
+      messages: [
+        row("invalid-slot", "not-a-date", "also-not-a-date"),
+        row("late", "2026-08-01T10:04:00.000Z", "2026-08-01T10:04:00.000Z"),
+        row("missing-slot", null, null),
+        row("equal-first", "2026-08-01T10:02:00.000Z", "2026-08-01T10:02:00.000Z"),
+        row("early", "2026-08-01T10:01:00.000Z", "2026-08-01T10:01:00.000Z"),
+        row("equal-second", "2026-08-01T10:02:00.000Z", "2026-08-01T10:02:00.000Z"),
+      ],
+      next_cursor: "older",
+    };
+    const { adapter } = createHistoryAdapter(page);
+
+    const result = await adapter.fetchMessages(THREAD_ID);
+
+    expect(result.messages.map((message) => message.id)).toEqual([
+      "invalid-slot",
+      "early",
+      "missing-slot",
+      "equal-first",
+      "equal-second",
+      "late",
+    ]);
+    expect(result.messages[0]?.raw).toMatchObject({ sent_at: "not-a-date" });
+    expect(result.messages[2]?.raw).toMatchObject({ sent_at: null, created_at: null });
+    expect(result.nextCursor).toBe("older");
   });
 
   it("returns all tombstone rows and their cursor without fabricating text", async () => {
