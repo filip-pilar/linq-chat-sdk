@@ -379,7 +379,7 @@ function assertConversationErgonomics(
     url: "https://example.com/memo.m4a",
     attachmentId: "33333333-3333-3333-3333-333333333333",
   });
-  // @ts-expect-error -- raw bytes belong to the deferred media-lifecycle batch.
+  // @ts-expect-error -- raw bytes are not a supported voice-memo source.
   byId.sendVoiceMemo({ data: new Uint8Array([1]) });
   // @ts-expect-error -- a voice memo source cannot be omitted.
   byId.sendVoiceMemo({});

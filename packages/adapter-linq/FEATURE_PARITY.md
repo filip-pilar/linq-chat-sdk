@@ -63,17 +63,17 @@ Evidence labels:
 - `Provider-observed` / `Device-observed` labels record supplementary historical evidence; no
   executable live harness is maintained.
 
-## Deferred or excluded
+## Intentional boundaries
 
-| Item                                                                  | Disposition                                                           |
-| --------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| iMessage app messages; curated group/presence models                  | Deferred; no demonstrated adapter-owned need                          |
-| Raw voice-memo `FileUpload`; large-file streaming                     | Optional pending consumer/scale evidence                              |
-| Upload recovery, retention, databases, queues, polling, transcription | Application/host-owned                                                |
-| Account, subscription, administration, chat backgrounds               | Use native client; background enum discrepancy remains provider-owned |
-| AI-agent tools, prompts, authorization                                | Application-owned                                                     |
-| Delivery, retries, ordering, device presentation                      | Provider-owned                                                        |
-| Provider/device/live smoke                                            | Optional evidence only                                                |
+| Item                                                                  | Disposition                                                                                                          |
+| --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| iMessage app messages                                                 | Application/provider-native; require an application-owned Messages extension and remain on `.client` / `getClient()` |
+| Group, participant, and typing event state                            | Authenticated named/raw facts are available; no adapter-owned curated state model is currently justified             |
+| Message deletion                                                      | Intentionally unsupported; Linq API deletion does not remove the recipient-visible message                           |
+| Upload recovery, retention, databases, queues, polling, transcription | Application/host-owned                                                                                               |
+| Account, subscription, administration, chat backgrounds               | Use native client; background enum discrepancy remains provider-owned                                                |
+| AI-agent tools, prompts, authorization                                | Application-owned                                                                                                    |
+| Delivery, retries, ordering, device presentation                      | Provider-owned                                                                                                       |
 
 ## Maintenance rule
 

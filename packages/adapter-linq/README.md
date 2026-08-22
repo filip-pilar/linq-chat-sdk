@@ -197,6 +197,11 @@ account, subscription, administrative, background, and other provider-native ope
 background guidance mentions `glitter`, while the installed SDK/request schema exposes `sky`,
 `water`, and `aurora`; no adapter wrapper freezes that discrepancy.
 
+iMessage app messages also remain provider-native: they require an application-owned Messages
+extension and should be sent through `adapter.client` / `getClient()`. `SentMessage.delete()` is
+unsupported because Linq's native deletion removes only its API record and does not unsend the
+recipient-visible message.
+
 The adapter emits only `linq:{chatId}` and decode-only supports persisted
 `linq:{chatId}:dm/group` values. Released `adapter.markRead(threadId, messageId)` remains an alias
 of the preferred `Thread.markAsRead()` chat-wide acknowledgement.

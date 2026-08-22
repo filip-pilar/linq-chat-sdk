@@ -31,11 +31,13 @@ adapter itself performs. They do not imply provider delivery, presentation, or w
 The adapter does not add capability probes, hidden identity migration, automatic recovery from
 uncertain mutation acceptance, provider workflows, or deployment policy.
 
-## Deliberate deferred/non-goal notes
+## Intentional limitations
 
-- iMessage app messages and curated group/presence models have no demonstrated adapter-owned need.
-- A raw `FileUpload` voice-memo source and large-file streaming remain optional pending concrete
-  consumer or scale evidence.
+- `SentMessage.delete()` is unsupported because Linq's native deletion removes only its API record,
+  not the recipient-visible message.
+- iMessage app messages require an application-owned Messages extension and remain provider-native
+  through `adapter.client` / `getClient()`.
+- Canonical group, participant, and typing events are authenticated named/raw observations; the
+  adapter does not impose a curated conversation-state model.
 - Chat backgrounds stay on `adapter.client` / `getClient()` while guidance and request enums
   disagree (`glitter` versus `sky`/`water`/`aurora`).
-- Provider/device/live observations are optional evidence, never a universal completion gate.
