@@ -15,7 +15,8 @@ import type { CardElement } from "chat";
 import { describe, expect, it, vi } from "vitest";
 
 import { createLinqAdapter } from "../src/adapter";
-import { collectCardImageUrls, extractCardElement, renderLinqCardText } from "../src/cards";
+import { collectCardImageUrls, extractCardElement } from "../src/cards";
+import { compileLinqCardText } from "../src/message-compiler";
 
 describe("renderLinqCardText", () => {
   it("renders a full card as clean plain text", () => {
@@ -35,7 +36,7 @@ describe("renderLinqCardText", () => {
       ],
     });
 
-    expect(renderLinqCardText(card)).toBe(
+    expect(compileLinqCardText(card).text).toBe(
       [
         "Order #1234",
         "Placed today",
@@ -55,7 +56,7 @@ describe("renderLinqCardText", () => {
       children: [CardText("**Bold** and _italic_ and [a link](https://example.com)")],
     });
 
-    const text = renderLinqCardText(card);
+    const text = compileLinqCardText(card).text;
 
     expect(text).not.toContain("**");
     expect(text).not.toContain("_italic_");
@@ -70,7 +71,7 @@ describe("renderLinqCardText", () => {
       ],
     });
 
-    expect(renderLinqCardText(card)).toBe("Scan: http://internal.local/scan.png");
+    expect(compileLinqCardText(card).text).toBe("Scan: http://internal.local/scan.png");
   });
 
   it("renders tables as ascii text", () => {
@@ -83,7 +84,7 @@ describe("renderLinqCardText", () => {
       ],
     });
 
-    const text = renderLinqCardText(card);
+    const text = compileLinqCardText(card).text;
 
     expect(text).toContain("Name");
     expect(text).toContain("Alice");
@@ -111,7 +112,7 @@ describe("renderLinqCardText", () => {
       ],
     };
 
-    expect(renderLinqCardText(card)).toBe("Priority: High, Low");
+    expect(compileLinqCardText(card).text).toBe("Priority: High, Low");
   });
 
   it("renders nested section content", () => {
@@ -124,7 +125,9 @@ describe("renderLinqCardText", () => {
       ],
     });
 
-    expect(renderLinqCardText(card as CardElement)).toBe("Inside a section\nhttps://example.com");
+    expect(compileLinqCardText(card as CardElement).text).toBe(
+      "Inside a section\nhttps://example.com",
+    );
   });
 });
 

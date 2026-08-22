@@ -3,12 +3,13 @@ import { fileURLToPath } from "node:url";
 
 import YAML from "yaml";
 
-const inventoryPath = fileURLToPath(new URL("../openapi-inventory.json", import.meta.url));
+const OPENAPI_URL = "https://cdn.linqapp.com/openapi/linq-api-v3.yaml";
 const eventTypesPath = fileURLToPath(
   new URL("../src/linq-event-types.generated.ts", import.meta.url),
 );
-const inventory = JSON.parse(await readFile(inventoryPath, "utf8"));
-const response = await fetch(inventory.source);
+const checkedInEventTypes = await readFile(eventTypesPath, "utf8");
+const expected = readCheckedInEventNames(checkedInEventTypes);
+const response = await fetch(OPENAPI_URL);
 
 if (!response.ok) {
   throw new Error(`Failed to fetch canonical Linq OpenAPI: ${response.status}`);
@@ -22,17 +23,16 @@ if (!Array.isArray(eventNames)) {
 }
 
 const actual = [...eventNames].sort();
-const expected = [...inventory.eventNames].sort();
+const sortedExpected = [...expected].sort();
 
-if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-  const missing = expected.filter((name) => !actual.includes(name));
-  const added = actual.filter((name) => !expected.includes(name));
+if (JSON.stringify(actual) !== JSON.stringify(sortedExpected)) {
+  const missing = sortedExpected.filter((name) => !actual.includes(name));
+  const added = actual.filter((name) => !sortedExpected.includes(name));
   throw new Error(
     `Webhook event inventory drifted. Missing: ${missing.join(", ") || "none"}; added: ${added.join(", ") || "none"}`,
   );
 }
 
-const checkedInEventTypes = await readFile(eventTypesPath, "utf8");
 const generatedEventTypes = renderEventTypes(eventNames);
 
 if (checkedInEventTypes !== generatedEventTypes) {
@@ -42,6 +42,26 @@ if (checkedInEventTypes !== generatedEventTypes) {
 }
 
 console.log(`Linq OpenAPI webhook event contract matches (${eventNames.length} events).`);
+
+function readCheckedInEventNames(source) {
+  const match = /export const LINQ_KNOWN_EVENT_TYPES = \[([\s\S]*?)\] as const;/u.exec(source);
+
+  if (!match) {
+    throw new Error("Checked-in Linq event type source has no generated event tuple");
+  }
+
+  try {
+    const names = JSON.parse(`[${match[1].replace(/,\s*$/u, "")}]`);
+    if (!Array.isArray(names) || names.some((name) => typeof name !== "string")) {
+      throw new TypeError("event names must be strings");
+    }
+    return names;
+  } catch (error) {
+    throw new Error("Checked-in Linq event type tuple is not valid generated JSON", {
+      cause: error,
+    });
+  }
+}
 
 function renderEventTypes(eventNames) {
   const entries = eventNames.map((eventName) => `  ${JSON.stringify(eventName)},`).join("\n");

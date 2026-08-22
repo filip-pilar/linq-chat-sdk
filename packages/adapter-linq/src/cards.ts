@@ -2,7 +2,6 @@ import { isCardElement } from "chat";
 import type { AdapterPostableMessage, CardChild, CardElement } from "chat";
 
 import { isRecord } from "./guards.js";
-import { compileLinqCardText } from "./message-compiler.js";
 
 // Linq (iMessage/SMS) has no rich-card or interactive primitives, so cards are
 // flattened to their native equivalent: plain text plus real media parts for
@@ -55,13 +54,6 @@ function collectChildImageUrls(children: CardChild[], urls: string[]): void {
       collectChildImageUrls(child.children, urls);
     }
   }
-}
-
-// Render a card as plain text for Linq. Unlike the Chat SDK's default fallback
-// this strips markdown (iMessage renders `**` literally), keeps links, tables,
-// and action labels, and skips images that are sent as real media parts.
-export function renderLinqCardText(card: CardElement): string {
-  return compileLinqCardText(card).text;
 }
 
 // True when the card declares buttons or selects — interactive elements whose

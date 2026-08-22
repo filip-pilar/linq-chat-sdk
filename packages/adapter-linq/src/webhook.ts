@@ -1141,7 +1141,7 @@ function parseLocationSharingEventData(
     return Object.freeze({ sharedBy: value.shared_by, sharedWith: value.shared_with });
   }
 
-  if (!isOptionalValidTimestamp(value.began_at) || !isOptionalValidTimestamp(value.ends_at)) {
+  if (!isOptionalTimestamp(value.began_at) || !isOptionalTimestamp(value.ends_at)) {
     return null;
   }
 
@@ -1343,10 +1343,6 @@ function isValidTimestamp(value: unknown): value is string {
 }
 
 function isOptionalTimestamp(value: unknown): boolean {
-  return value === undefined || parseLinqTimestamp(value) !== null;
-}
-
-function isOptionalValidTimestamp(value: unknown): boolean {
   return value === undefined || parseLinqTimestamp(value) !== null;
 }
 
