@@ -1,0 +1,53 @@
+{
+  "api_version": "v3",
+  "webhook_version": "2026-02-03",
+  "event_type": "message.received",
+  "event_id": "81000000-0000-0000-0000-000000000001",
+  "created_at": "2026-08-22T12:00:00.123456789Z",
+  "trace_id": "vcard-message-trace",
+  "partner_id": "82000000-0000-0000-0000-000000000001",
+  "data": {
+    "id": "83000000-0000-0000-0000-000000000001",
+    "chat": {
+      "id": "84000000-0000-0000-0000-000000000001",
+      "is_group": false,
+      "owner_handle": {
+        "id": "85000000-0000-0000-0000-000000000001",
+        "is_me": true,
+        "handle": "owner@example.com",
+        "status": "active",
+        "left_at": null,
+        "service": "iMessage",
+        "joined_at": "2026-08-01T00:00:00Z"
+      }
+    },
+    "parts": [
+      {
+        "type": "media",
+        "id": "86000000-0000-4000-8000-000000000001",
+        "filename": "Jordan-Lee.vcf",
+        "mime_type": "text/vcard",
+        "size_bytes": 65,
+        "url": "https://uploads.example.com/Jordan-Lee.vcf"
+      }
+    ],
+    "effect": null,
+    "read_at": null,
+    "sent_at": "2026-08-22T12:00:00Z",
+    "delivered_at": "2026-08-22T12:00:00Z",
+    "service": "iMessage",
+    "reply_to": null,
+    "direction": "inbound",
+    "sender_handle": {
+      "id": "85000000-0000-0000-0000-000000000002",
+      "is_me": false,
+      "handle": "+14155550123",
+      "status": "active",
+      "left_at": null,
+      "service": "iMessage",
+      "joined_at": "2026-08-01T00:00:00Z"
+    },
+    "idempotency_key": null,
+    "preferred_service": null
+  }
+}
