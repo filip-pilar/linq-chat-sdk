@@ -89,6 +89,32 @@ describe("LinqAdapter verified webhook ingress", () => {
     }
   });
 
+  it.each([
+    {
+      case: "missing Standard Webhook headers",
+      request: () => new Request("https://example.com", { method: "POST", body: "{}" }),
+      status: 401,
+      body: "Missing Standard Webhook headers",
+    },
+    {
+      case: "an invalid Standard Webhook signature",
+      request: () => createStandardRequest(fixture, { signature: "v1,invalid" }),
+      status: 401,
+      body: "Invalid Linq webhook signature",
+    },
+    {
+      case: "validly signed invalid JSON",
+      request: () => createSignedBody("{"),
+      status: 400,
+      body: "Invalid JSON",
+    },
+  ])("maps $case to the public webhook response", async ({ request, status, body }) => {
+    const response = await createTestAdapter().handleWebhook(request());
+
+    expect(response.status).toBe(status);
+    await expect(response.text()).resolves.toBe(body);
+  });
+
   it("retains valid full-precision and lowercase RFC3339 envelope timestamps", async () => {
     for (const createdAt of [
       "2026-02-05T19:52:18.101373886Z",
