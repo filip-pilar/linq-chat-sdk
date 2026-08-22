@@ -79,6 +79,7 @@ describe("onDeliveryStatus compatibility", () => {
     adapter.onDeliveryStatus(
       () =>
         ({
+          // oxlint-disable-next-line unicorn/no-thenable -- verifies isolation for non-native thenables.
           then: (_resolve, reject) => {
             reject?.(thenableFailure);
           },
