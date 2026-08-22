@@ -13,10 +13,29 @@ const SIGNING_SECRET_B = `whsec_${Buffer.from(SIGNING_KEY_B).toString("base64")}
 
 describe("credential convergence", () => {
   it("rejects structurally permitted but unusable configurations at construction", () => {
+    const credentials = vi.fn();
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
     expect(() => createLinqAdapter({})).toThrow("requires apiKey or a credentials provider");
     expect(() => createLinqAdapter({ apiKey: "static-key" })).toThrow(
       "requires signingSecret, credentials, or a trusted webhookVerifier",
     );
+    expect(() => createLinqAdapter({ apiKey: "static-key", signingSecret: undefined })).toThrow(
+      "requires signingSecret, credentials, or a trusted webhookVerifier",
+    );
+    expect(() => createLinqAdapter({ apiKey: "static-key", signingSecret: "" })).toThrow(
+      "requires signingSecret, credentials, or a trusted webhookVerifier",
+    );
+    expect(() => createLinqAdapter({ apiKey: "static-key", signingSecret: "   " })).toThrow(
+      "requires signingSecret, credentials, or a trusted webhookVerifier",
+    );
+    expect(() => createLinqAdapter({ credentials })).not.toThrow();
+    expect(() =>
+      createLinqAdapter({ apiKey: "static-key", webhookVerifier: () => true }),
+    ).not.toThrow();
+    expect(credentials).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 
   it("keeps synchronous client access for static credentials", async () => {
@@ -105,6 +124,43 @@ describe("credential convergence", () => {
     await expect(adapter.startTyping("linq:not-a-uuid")).rejects.toThrow("valid chat UUID");
     await expect(adapter.postMessage("linq:chat-id", "x".repeat(10_001))).rejects.toThrow("10000");
     expect(credentials).not.toHaveBeenCalled();
+  });
+
+  it("uses one lazy credential snapshot for the released markRead compatibility alias", async () => {
+    const credentials = vi.fn().mockResolvedValue({ apiKey: "mark-read-key" });
+    const requests: Request[] = [];
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      requests.push(input instanceof Request ? input : new Request(input, init));
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const adapter = createLinqAdapter({
+      baseURL: "https://provider.example.test/api/partner",
+      credentials,
+      webhookVerifier: () => true,
+    });
+
+    await adapter.markRead("linq:11111111-1111-4111-8111-111111111111", "message-id");
+
+    expect(credentials).toHaveBeenCalledOnce();
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.headers.get("authorization")).toBe("Bearer mark-read-key");
+    expect(requests[0]?.url).toContain("/v3/chats/11111111-1111-4111-8111-111111111111/read");
+    fetchSpy.mockRestore();
+  });
+
+  it("rejects an invalid compatibility mark-read ID before lazy credentials or provider I/O", async () => {
+    const credentials = vi.fn().mockResolvedValue({ apiKey: "unused" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const adapter = createLinqAdapter({ credentials, webhookVerifier: () => true });
+
+    await expect(adapter.markRead("foreign:chat", "message-id")).rejects.toThrow(
+      "Invalid Linq thread ID",
+    );
+    expect(credentials).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
 

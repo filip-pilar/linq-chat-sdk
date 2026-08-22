@@ -76,14 +76,6 @@ describe("LinqAdapter verified webhook ingress", () => {
         expect(result.error.status).toBe(status);
       }
     }
-
-    const missingSecret = createLinqAdapter({ apiKey: "test_linq_api_key", signingSecret: "" });
-    await expect(
-      missingSecret.verifyWebhook(createStandardRequest(fixture)),
-    ).resolves.toMatchObject({
-      ok: false,
-      error: { code: "missing_signing_secret", status: 503 },
-    });
   });
 
   it("enforces Standard Webhook timestamp boundaries", async () => {

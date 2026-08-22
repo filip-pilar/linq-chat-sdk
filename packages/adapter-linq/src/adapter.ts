@@ -73,8 +73,8 @@ const LINQ_EVENT_DEDUPE_TTL_MS = 60 * 60 * 1000;
 
 /** Credentials for provider operations and direct Standard Webhook verification. */
 export interface LinqCredentials {
-  readonly apiKey: string;
-  readonly signingSecret?: string;
+  apiKey: string;
+  signingSecret?: string;
 }
 
 /** Resolves current credentials for each adapter-owned provider operation. */
@@ -212,8 +212,7 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     if (!config.apiKey && !config.credentials) {
       throw new Error("Linq requires apiKey or a credentials provider.");
     }
-    const hasStaticSigningSecret = Object.prototype.hasOwnProperty.call(config, "signingSecret");
-    if (!config.webhookVerifier && !hasStaticSigningSecret && !config.credentials) {
+    if (!config.webhookVerifier && !config.signingSecret?.trim() && !config.credentials) {
       throw new Error("Linq requires signingSecret, credentials, or a trusted webhookVerifier.");
     }
 
@@ -986,6 +985,11 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
         resourceType: "chat",
       });
     }
+  }
+
+  /** Released compatibility alias; prefer Chat SDK `Thread.markAsRead()`. */
+  async markRead(threadId: string, messageId: string): Promise<void> {
+    return this.markAsRead(threadId, messageId);
   }
 
   async stream(

@@ -576,6 +576,26 @@ describe("thread.post() contract", () => {
 
     expect(markAsRead).toHaveBeenCalledWith("chat-123");
   });
+
+  it("keeps released adapter.markRead() as one translated chat-wide acknowledgement", async () => {
+    const { adapter, markAsRead } = createOutboundTestAdapter();
+
+    await adapter.markRead("linq:chat-123", "message-inbound");
+    expect(markAsRead).toHaveBeenCalledOnce();
+    expect(markAsRead).toHaveBeenCalledWith("chat-123");
+
+    const original = providerError(403, 2001, "trace-mark-read");
+    markAsRead.mockRejectedValueOnce(original);
+    const error = await adapter
+      .markRead("linq:chat-123", "message-inbound")
+      .catch((caught) => caught);
+    expect(error).toBeInstanceOf(PermissionError);
+    expect(error).toMatchObject({
+      cause: original,
+      providerCode: 2001,
+      traceId: "trace-mark-read",
+    });
+  });
 });
 
 function createOutboundTestAdapter(): {

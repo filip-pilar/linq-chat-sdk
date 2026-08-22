@@ -57,6 +57,8 @@ void assertClientCannotBeReassigned;
 
 function assertConvergedCompatibilityContracts(adapter: LinqAdapter): void {
   const credentials: LinqCredentials = { apiKey: "rotating", signingSecret: "whsec_test" };
+  credentials.apiKey = "rotated";
+  credentials.signingSecret = "whsec_rotated";
   const provider: LinqCredentialProvider = async () => credentials;
   const verifier: LinqWebhookVerifier = async (_request, rawBody) => rawBody.byteLength > 0;
   const lazyConfig = {
@@ -71,6 +73,7 @@ function assertConvergedCompatibilityContracts(adapter: LinqAdapter): void {
 
   expectTypeOf(adapter.getClient()).resolves.toEqualTypeOf<LinqAPIV3>();
   expectTypeOf(adapter.openDM("+15550000001")).resolves.toBeString();
+  expectTypeOf(adapter.markRead("linq:chat-id", "message-id")).resolves.toBeVoid();
   const unsubscribe = adapter.onDeliveryStatus(async (event) => {
     expectTypeOf(event).toEqualTypeOf<LinqDeliveryStatusEvent>();
   });
@@ -80,6 +83,11 @@ function assertConvergedCompatibilityContracts(adapter: LinqAdapter): void {
   void lazyConfig;
   void lazyDirectConfig;
   void staticForwardedConfig;
+  const structurallyPermittedButRuntimeInvalid = {
+    apiKey: API_KEY,
+    signingSecret: undefined,
+  } satisfies LinqAdapterConfig;
+  void structurallyPermittedButRuntimeInvalid;
 }
 
 void assertConvergedCompatibilityContracts;
@@ -449,6 +457,7 @@ describe("public adapter foundation", () => {
 
     expectTypeOf(adapter.reply).toBeFunction();
     expectTypeOf(adapter.markAsRead).toBeFunction();
+    expectTypeOf(adapter.markRead).toBeFunction();
     expect(adapter).not.toHaveProperty("persistMessageHistory");
   });
 
