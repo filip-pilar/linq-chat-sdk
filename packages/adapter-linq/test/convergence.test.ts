@@ -12,6 +12,13 @@ const SIGNING_SECRET_A = `whsec_${Buffer.from(SIGNING_KEY_A).toString("base64")}
 const SIGNING_SECRET_B = `whsec_${Buffer.from(SIGNING_KEY_B).toString("base64")}`;
 
 describe("credential convergence", () => {
+  it("rejects structurally permitted but unusable configurations at construction", () => {
+    expect(() => createLinqAdapter({})).toThrow("requires apiKey or a credentials provider");
+    expect(() => createLinqAdapter({ apiKey: "static-key" })).toThrow(
+      "requires signingSecret, credentials, or a trusted webhookVerifier",
+    );
+  });
+
   it("keeps synchronous client access for static credentials", async () => {
     const adapter = createLinqAdapter({ apiKey: "static-key", signingSecret: SIGNING_SECRET_A });
 

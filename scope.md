@@ -36,10 +36,16 @@ capability status is maintained in
 - A malformed `message.received` event without a canonical or previously learned chat kind remains
   available through verified raw observation but is not guessed, looked up, or sent to the wrong
   standard handler.
+- Authenticated known events with unusable payloads remain available through the generic lossless
+  seam and receive `2xx`; they do not produce false curated or standard dispatch.
 - Inbound voice memos are ordinary downloadable audio attachments. Linq's current schema does not
   reliably distinguish them from other audio media.
 - Current history traversal is backward-only and bounded. It skips a bounded number of malformed
-  empty provider pages so usable later messages are not hidden.
+  empty provider pages so usable later messages are not hidden. Valid provider timestamps are
+  stably ordered oldest-first; invalid or missing timestamp rows retain provider-relative slots.
+- Adapter-performed attachment uploads reject redirects and obvious local-network literal targets
+  and time out after 30 seconds. DNS and Linq-issued upload-host integrity remain provider/host
+  network concerns.
 
 ## Deferred possibilities
 

@@ -10,6 +10,7 @@ import type {
   LinqCredentialProvider,
   LinqCredentials,
   LinqDeliveryStatusEvent,
+  LinqDeliveryStatusListener,
   LinqEventMap,
   LinqFutureEvent,
   LinqGroupConversation,
@@ -62,14 +63,23 @@ function assertConvergedCompatibilityContracts(adapter: LinqAdapter): void {
     credentials: provider,
     webhookVerifier: verifier,
   } satisfies LinqAdapterConfig;
+  const lazyDirectConfig = { credentials: provider } satisfies LinqAdapterConfig;
+  const staticForwardedConfig = {
+    apiKey: API_KEY,
+    webhookVerifier: verifier,
+  } satisfies LinqAdapterConfig;
 
   expectTypeOf(adapter.getClient()).resolves.toEqualTypeOf<LinqAPIV3>();
   expectTypeOf(adapter.openDM("+15550000001")).resolves.toBeString();
-  const unsubscribe = adapter.onDeliveryStatus((event) => {
+  const unsubscribe = adapter.onDeliveryStatus(async (event) => {
     expectTypeOf(event).toEqualTypeOf<LinqDeliveryStatusEvent>();
   });
+  const thenableListener: LinqDeliveryStatusListener = () => Promise.resolve();
+  adapter.onDeliveryStatus(thenableListener);
   expectTypeOf(unsubscribe).toEqualTypeOf<() => void>();
   void lazyConfig;
+  void lazyDirectConfig;
+  void staticForwardedConfig;
 }
 
 void assertConvergedCompatibilityContracts;
