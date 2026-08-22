@@ -12,7 +12,10 @@ OpenAPI/docs, and the repository's `chat-sdk` and `integrating-linq` skills.
   request body for inbound Standard Webhook authentication.
 - Emit canonical `linq:{chatId}` identities. Decode old `linq:{chatId}:dm/group` values only for
   persisted compatibility; do not expose or document them as active identity forms.
-- Keep endpoint-shaped account and administrative operations on `adapter.client`.
+- Keep endpoint-shaped account and administrative operations on the official client escape hatch:
+  `.client` for static credentials and `await .getClient()` for lazy credentials.
+- Preserve released lazy credential rotation, explicit trusted forwarding, proactive `openDM()`,
+  and `onDeliveryStatus()` while sharing the fork's stronger internal machinery.
 - Validate constraints that prevent adapter-created side effects. Leave provider capabilities and
   provider-enforced policy to Linq rather than adding probes or speculative rules.
 - Translate provider failures through shared Chat SDK adapter errors and retain supported Linq

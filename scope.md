@@ -8,6 +8,10 @@ capability status is maintained in
 
 - Standard Chat SDK operations for existing chats: post, reply, edit, history, refresh, reactions,
   typing, mark-read, cards, files, attachments, and buffered streams.
+- Released proactive `openDM()` bootstrap semantics: pending handle identity before the first post,
+  then canonical provider identity from the accepted send.
+- Static and lazy rotating credentials, explicit trusted webhook forwarding, and the released
+  delivery-status compatibility callback over the richer verified event pipeline.
 - Canonical `linq:{chatId}` identity and decode-only compatibility for persisted
   `linq:{chatId}:dm/group` values.
 - Deterministic text/decoration compilation, service/effect policy, native rich links, outbound
@@ -17,14 +21,13 @@ capability status is maintained in
   `waitUntil` integration.
 - A narrow `adapter.conversation(threadOrId)` extension for part-targeted replies/reactions,
   stop-typing, contact-card sharing, voice memos, existing-group operations, and location.
-- A read-only `adapter.client` escape hatch for official Linq SDK operations that do not need an
-  adapter abstraction.
+- A truthful official-client escape hatch: synchronous `adapter.client` for static credentials and
+  `await adapter.getClient()` for static or lazy credentials.
 
 ## Deliberate limits
 
-- `openDM()` is unsupported. Proactive sends use `adapter.client.messages.create()` or an
-  intentionally fixed-line `adapter.client.chats.create()`, followed by canonical Chat SDK thread
-  construction from Linq's returned chat ID.
+- A pending `openDM()` thread is only a bootstrap address. Its identity is not migrated; consumers
+  use the returned `SentMessage.threadId` for subscriptions and later ordinary operations.
 - The adapter does not own provider delivery, ordering, retries beyond the SDK, account
   administration, capability discovery, workflow state, databases, durable queues, polling,
   retention/deletion policy, transcription, or request-to-event correlation.

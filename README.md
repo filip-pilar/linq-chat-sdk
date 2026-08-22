@@ -20,7 +20,7 @@ pnpm check
 `pnpm check` runs the canonical webhook event-name drift check, lint, formatting, tests,
 TypeScript contracts, and workspace builds. CI runs the same check on Node.js 20 and 24.
 
-The adapter currently uses `@linqapp/sdk@0.42.0` for provider operations, Chat SDK `4.38.1`, and
+The adapter currently uses `@linqapp/sdk@0.44.3` for provider operations, Chat SDK `4.38.1`, and
 `standardwebhooks` for inbound authentication. Its verified webhook envelope remains adapter-owned
 because the installed Linq SDK does not provide the required verification/event contract.
 
