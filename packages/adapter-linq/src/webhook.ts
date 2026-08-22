@@ -1,6 +1,7 @@
 import type { LinqAPIV3 } from "@linqapp/sdk";
 
 import { isRecord } from "./guards.js";
+import { parseLinqTimestamp } from "./timestamps.js";
 
 export const LINQ_WEBHOOK_VERSION = "2026-02-03" as const;
 
@@ -385,7 +386,7 @@ export function normalizeAuthenticatedLinqWebhook(
   if (envelope.eventType === "message.received") {
     const message = parseMessageObservation(rawEvent.data);
 
-    if (!message) {
+    if (!message || message.timestamps.sentAt === null) {
       return authenticatedUnhandled(base);
     }
 
@@ -1025,20 +1026,15 @@ function isNullableBoolean(value: unknown): boolean {
 }
 
 function isNullableTimestamp(value: unknown): boolean {
-  return value === undefined || value === null || isNonEmptyString(value);
+  return value === undefined || value === null || parseLinqTimestamp(value) !== null;
 }
 
 function isOptionalTimestamp(value: unknown): boolean {
-  return value === undefined || isNonEmptyString(value);
+  return value === undefined || parseLinqTimestamp(value) !== null;
 }
 
 function isOptionalValidTimestamp(value: unknown): boolean {
-  return (
-    value === undefined ||
-    (isNonEmptyString(value) &&
-      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value) &&
-      Number.isFinite(Date.parse(value)))
-  );
+  return value === undefined || parseLinqTimestamp(value) !== null;
 }
 
 function nullableTimestamp(value: unknown): string | null {

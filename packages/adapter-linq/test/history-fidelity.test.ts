@@ -45,7 +45,7 @@ describe("Linq history fidelity", () => {
     });
   });
 
-  it("sorts valid timestamps stably while preserving invalid timestamp slots", async () => {
+  it("omits untruthful rows and sorts every usable message stably oldest-first", async () => {
     const base = historyFixture.messages[0];
     if (!base || !("chat_id" in base)) throw new Error("Expected a retrieved-message fixture");
     const row = (id: string, sentAt: unknown, createdAt: unknown) => ({
@@ -57,11 +57,12 @@ describe("Linq history fidelity", () => {
     });
     const page = {
       messages: [
-        row("invalid-slot", "01/02/2026", "not-a-provider-timestamp"),
+        row("invalid-both", "01/02/2026", "not-a-provider-timestamp"),
         row("late", "2026-08-01T10:04:00.000Z", "2026-08-01T10:04:00.000Z"),
-        row("missing-slot", null, null),
+        row("missing-both", null, null),
+        row("fallback", "invalid", "2026-08-01T10:03:00.000Z"),
         row("equal-first", "2026-08-01T10:02:00.000Z", "2026-08-01T10:02:00.000Z"),
-        row("early", "2026-08-01T10:01:00.000Z", "2026-08-01T10:01:00.000Z"),
+        row("early", "2026-08-01T14:01:00.000+04:00", "2026-08-01T10:01:00.000Z"),
         row("equal-second", "2026-08-01T10:02:00.000Z", "2026-08-01T10:02:00.000Z"),
       ],
       next_cursor: "older",
@@ -71,15 +72,58 @@ describe("Linq history fidelity", () => {
     const result = await adapter.fetchMessages(THREAD_ID);
 
     expect(result.messages.map((message) => message.id)).toEqual([
-      "invalid-slot",
       "early",
-      "missing-slot",
       "equal-first",
       "equal-second",
+      "fallback",
       "late",
     ]);
-    expect(result.messages[0]?.raw).toMatchObject({ sent_at: "01/02/2026" });
-    expect(result.messages[2]?.raw).toMatchObject({ sent_at: null, created_at: null });
+    expect(result.messages.map((message) => message.metadata.dateSent.toISOString())).toEqual([
+      "2026-08-01T10:01:00.000Z",
+      "2026-08-01T10:02:00.000Z",
+      "2026-08-01T10:02:00.000Z",
+      "2026-08-01T10:03:00.000Z",
+      "2026-08-01T10:04:00.000Z",
+    ]);
+    expect(result.messages[3]?.raw).toMatchObject({ sent_at: "invalid" });
+    expect(result.nextCursor).toBe("older");
+  });
+
+  it("rejects calendar-invalid timestamps and malformed canonical scalar facts", async () => {
+    const base = historyFixture.messages[0];
+    if (!base || !("chat_id" in base)) throw new Error("Expected a retrieved-message fixture");
+    const valid = (id: string, timestamp: string) => ({
+      ...base,
+      id,
+      created_at: timestamp,
+      sent_at: timestamp,
+      parts: [{ type: "text", value: id }],
+    });
+    const page = {
+      messages: [
+        valid("leap-day", "2028-02-29T23:59:59.123456789Z"),
+        valid("offset-boundary", "2026-08-02T00:00:00+14:00"),
+        valid("february-30", "2026-02-30T00:00:00Z"),
+        valid("non-leap-day", "2027-02-29T00:00:00Z"),
+        valid("hour-24", "2026-08-01T24:00:00Z"),
+        valid("bad-offset", "2026-08-01T00:00:00+14:01"),
+        { ...valid("", "2026-08-01T00:00:00Z"), id: "" },
+        { ...valid("bad-chat", "2026-08-01T00:00:00Z"), chat_id: 42 },
+        { ...valid("bad-boolean", "2026-08-01T00:00:00Z"), is_from_me: "false" },
+      ],
+      next_cursor: "older",
+    };
+    const { adapter, warn } = createHistoryAdapter(page);
+
+    const result = await adapter.fetchMessages(THREAD_ID);
+
+    expect(result.messages.map((message) => message.id)).toEqual(["offset-boundary", "leap-day"]);
+    expect(result.messages.map((message) => message.metadata.dateSent.toISOString())).toEqual([
+      "2026-08-01T10:00:00.000Z",
+      "2028-02-29T23:59:59.123Z",
+    ]);
+    expect(result.messages.every((message) => typeof message.author.isMe === "boolean")).toBe(true);
+    expect(warn).toHaveBeenCalledTimes(7);
     expect(result.nextCursor).toBe("older");
   });
 
@@ -94,6 +138,10 @@ describe("Linq history fidelity", () => {
 
     expect(result.messages).toHaveLength(2);
     expect(result.messages.map((message) => message.text)).toEqual(["", ""]);
+    expect(result.messages.map((message) => message.metadata.dateSent.toISOString())).toEqual([
+      "2026-08-01T10:00:00.000Z",
+      "2026-08-01T10:01:00.000Z",
+    ]);
     expect(
       result.messages.map((message) => ("parts" in message.raw ? message.raw.parts : undefined)),
     ).toEqual([null, null]);
@@ -156,6 +204,44 @@ describe("Linq history fidelity", () => {
     expect(warn).toHaveBeenCalledWith("Skipping malformed Linq history row", {
       error: expect.any(Error),
     });
+  });
+
+  it("uses one lazy client snapshot across bounded filtered-page traversal", async () => {
+    const credentials = vi.fn().mockResolvedValue({ apiKey: "history-snapshot-key" });
+    const requests: Request[] = [];
+    const usable = historyFixture.messages[0];
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      requests.push(request);
+      const cursor = new URL(request.url).searchParams.get("cursor");
+      return new Response(
+        JSON.stringify(
+          cursor === "cursor-after-filtered"
+            ? { messages: [usable], next_cursor: null }
+            : { messages: [{ id: null }], next_cursor: "cursor-after-filtered" },
+        ),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    const adapter = createLinqAdapter({
+      baseURL: "https://provider.example.test/api/partner",
+      credentials,
+      webhookVerifier: () => true,
+    });
+
+    try {
+      const result = await adapter.fetchMessages(THREAD_ID);
+
+      expect(result.messages.map((message) => message.id)).toEqual([usable?.id]);
+      expect(credentials).toHaveBeenCalledOnce();
+      expect(requests).toHaveLength(2);
+      expect(requests.map((request) => request.headers.get("authorization"))).toEqual([
+        "Bearer history-snapshot-key",
+        "Bearer history-snapshot-key",
+      ]);
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 
   it("stops safely when an empty filtered page repeats its cursor", async () => {

@@ -44,6 +44,7 @@ import { planLinqOutboundMessage, prepareLinqOutboundParts } from "./outbound-me
 import { compileLinqMessageText, compileLinqSendOptions } from "./message-compiler.js";
 import { getLinqReplyPartIndex, withLinqReplyPartIndex } from "./message.js";
 import { fromLinqReaction, toLinqReaction } from "./reactions.js";
+import { parseLinqTimestamp, selectLinqMessageTimestamp } from "./timestamps.js";
 import {
   authenticateLinqWebhookRequest,
   authenticateTrustedLinqWebhookRequest,
@@ -601,7 +602,7 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       const parsedRows: Array<{
         readonly message: Message<LinqRawMessage>;
         readonly providerIndex: number;
-        readonly timestamp: number | undefined;
+        readonly timestamp: number;
       }> = [];
 
       for (const [providerIndex, raw] of (Array.isArray(page.messages)
@@ -609,10 +610,17 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
         : []
       ).entries()) {
         try {
+          const timestamp = validProviderMessageTimestamp(raw);
+          if (timestamp === undefined) {
+            throw new NotImplementedError(
+              "Linq retrieved message is missing a valid provider timestamp",
+            );
+          }
+
           parsedRows.push({
             message: this.parseMessage(raw),
             providerIndex,
-            timestamp: validProviderMessageTimestamp(raw),
+            timestamp,
           });
         } catch (error) {
           this.logger.warn("Skipping malformed Linq history row", { error });
@@ -1363,40 +1371,21 @@ function validProviderMessageTimestamp(raw: unknown): number | undefined {
     return undefined;
   }
 
-  for (const candidate of [raw.sent_at, raw.created_at]) {
-    if (typeof candidate !== "string" || !isValidProviderTimestamp(candidate)) {
-      continue;
-    }
-
-    return Date.parse(candidate);
-  }
-
-  return undefined;
+  return selectLinqMessageTimestamp(raw.sent_at, raw.created_at)?.getTime();
 }
 
 function chronologicalHistoryMessages(
   rows: readonly {
     readonly message: Message<LinqRawMessage>;
     readonly providerIndex: number;
-    readonly timestamp: number | undefined;
+    readonly timestamp: number;
   }[],
 ): Message<LinqRawMessage>[] {
-  const chronological = rows
-    .filter(
-      (row): row is typeof row & { readonly timestamp: number } => row.timestamp !== undefined,
-    )
+  return [...rows]
     .sort(
       (left, right) => left.timestamp - right.timestamp || left.providerIndex - right.providerIndex,
-    );
-  let chronologicalIndex = 0;
-
-  // Keep unusable timestamp rows in their provider-relative slots. Only rows
-  // with truthful provider timestamps participate in chronological ordering.
-  return rows.map((row) =>
-    row.timestamp === undefined
-      ? row.message
-      : (chronological[chronologicalIndex++]?.message ?? row.message),
-  );
+    )
+    .map((row) => row.message);
 }
 
 export function createLinqAdapter(config: LinqAdapterConfig): LinqAdapter {
@@ -1631,10 +1620,7 @@ function normalizeLocationSnapshot(threadId: string, response: unknown): LinqLoc
     if (typeof properties.locality === "string") {
       location.locality = properties.locality;
     }
-    if (
-      typeof properties.updated_at === "string" &&
-      isValidProviderTimestamp(properties.updated_at)
-    ) {
+    if (typeof properties.updated_at === "string" && parseLinqTimestamp(properties.updated_at)) {
       location.updatedAt = properties.updated_at;
     }
 
@@ -1642,13 +1628,6 @@ function normalizeLocationSnapshot(threadId: string, response: unknown): LinqLoc
   });
 
   return Object.freeze({ threadId, locations: Object.freeze(locations) });
-}
-
-function isValidProviderTimestamp(value: string): boolean {
-  return (
-    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value) &&
-    Number.isFinite(Date.parse(value))
-  );
 }
 
 function normalizePublicHTTPSURL(value: unknown, message: string): string {

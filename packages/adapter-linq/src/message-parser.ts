@@ -4,6 +4,7 @@ import type { Attachment, FormattedContent, LinkPreview } from "chat";
 
 import { isRecord } from "./guards.js";
 import { createLinqAttachmentFetcher } from "./inbound-media.js";
+import { parseLinqTimestamp, selectLinqMessageTimestamp } from "./timestamps.js";
 import type {
   LinqMessageReceivedWebhookData,
   LinqMessageReceivedWebhookEvent,
@@ -66,9 +67,9 @@ export function parseLinqMessage(
       isMe,
     },
     metadata: {
-      dateSent: dateFrom(message.sentAt),
+      dateSent: message.sentAt,
       edited: message.edited,
-      editedAt: message.editedAt ? dateFrom(message.editedAt) : undefined,
+      editedAt: message.editedAt ? requiredTimestamp(message.editedAt) : undefined,
     },
     attachments,
     links,
@@ -96,7 +97,7 @@ function normalizeMessage(value: LinqRawMessage): {
   parts: LinqMessagePart[];
   isMe: boolean;
   sender: LinqAPIV3.ChatHandle | null | undefined;
-  sentAt: string | null | undefined;
+  sentAt: Date;
   edited: boolean;
   editedAt?: string | null;
 } {
@@ -104,6 +105,8 @@ function normalizeMessage(value: LinqRawMessage): {
     if (!isRecord(value.chat) || typeof value.chat.id !== "string") {
       throw new NotImplementedError("Linq message event is missing canonical chat identity");
     }
+
+    const sentAt = requiredTimestamp(value.sent_at);
 
     return {
       id: value.id,
@@ -116,12 +119,17 @@ function normalizeMessage(value: LinqRawMessage): {
       sender: isRecord(value.sender_handle)
         ? (value.sender_handle as unknown as LinqAPIV3.ChatHandle)
         : null,
-      sentAt: value.sent_at,
+      sentAt,
       edited: false,
     };
   }
 
   if (isMessageSendResponse(value)) {
+    const sentAt = selectLinqMessageTimestamp(value.message.sent_at, value.message.created_at);
+    if (!sentAt) {
+      throw new NotImplementedError("Linq message response is missing a valid provider timestamp");
+    }
+
     return {
       id: value.message.id,
       chatId: value.chat_id,
@@ -129,20 +137,25 @@ function normalizeMessage(value: LinqRawMessage): {
       parts: validParts(value.message.parts),
       isMe: true,
       sender: value.message.from_handle,
-      sentAt: value.message.sent_at || value.message.created_at,
+      sentAt,
       edited: false,
     };
   }
 
   if (isRetrievedMessage(value)) {
+    const sentAt = selectLinqMessageTimestamp(value.sent_at, value.created_at);
+    if (!sentAt) {
+      throw new NotImplementedError("Linq retrieved message is missing a valid provider timestamp");
+    }
+
     return {
       id: value.id,
       chatId: value.chat_id,
       isGroup: undefined,
       parts: validParts(value.parts),
-      isMe: value.is_from_me || value.from_handle?.is_me === true,
+      isMe: value.is_from_me,
       sender: value.from_handle,
-      sentAt: value.sent_at || value.created_at,
+      sentAt,
       // `updated_at` also changes for delivery state. Only message.edited webhooks
       // confirm an edit, and the retrieved Message schema exposes no edit timestamp.
       edited: false,
@@ -168,20 +181,25 @@ function isMessageSendResponse(value: LinqRawMessage): value is LinqMessageSendR
   return isRecord(value) && "chat_id" in value && "message" in value && isRecord(value.message);
 }
 
-function isRetrievedMessage(value: LinqRawMessage): value is LinqRetrievedMessage {
-  return isRecord(value) && "chat_id" in value && "is_from_me" in value && "created_at" in value;
+function isRetrievedMessage(value: unknown): value is LinqRetrievedMessage {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    value.id.length > 0 &&
+    typeof value.chat_id === "string" &&
+    value.chat_id.length > 0 &&
+    typeof value.is_from_me === "boolean" &&
+    "created_at" in value
+  );
 }
 
-function dateFrom(value: string | null | undefined): Date {
-  if (value) {
-    const date = new Date(value);
-
-    if (!Number.isNaN(date.getTime())) {
-      return date;
-    }
+function requiredTimestamp(value: unknown): Date {
+  const timestamp = parseLinqTimestamp(value);
+  if (!timestamp) {
+    throw new NotImplementedError("Linq message is missing a valid provider timestamp");
   }
 
-  return new Date();
+  return timestamp;
 }
 
 function messageText(parts: LinqMessagePart[], attachments: Attachment[]): string {

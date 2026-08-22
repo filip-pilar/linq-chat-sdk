@@ -111,6 +111,7 @@ describe("typed Linq message lifecycle events", () => {
 
   it.each([
     [sentFixture, { sent_at: null }],
+    [sentFixture, { sent_at: "2026-02-30T00:00:00Z" }],
     [deliveredFixture, { delivered_at: null }],
     [readFixture, { read_at: null }],
     [failedFixture, { code: "4006" }],

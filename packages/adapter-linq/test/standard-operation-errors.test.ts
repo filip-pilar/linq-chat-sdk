@@ -140,6 +140,20 @@ describe("standard operation reliability", () => {
     expect(harness.retrieveMessage).toHaveBeenCalledWith(MESSAGE_ID);
   });
 
+  it("never fabricates refreshed message facts from a malformed provider row", async () => {
+    const harness = createHarness();
+    harness.retrieveMessage.mockResolvedValueOnce({
+      ...historyFixture.messages[0],
+      sent_at: "2026-02-30T00:00:00Z",
+      created_at: null,
+    });
+
+    await expect(harness.adapter.fetchMessage(THREAD_ID, MESSAGE_ID)).rejects.toThrow(
+      "valid provider timestamp",
+    );
+    expect(harness.retrieveMessage).toHaveBeenCalledWith(MESSAGE_ID);
+  });
+
   it("rejects locally knowable invalid input before any provider operation", async () => {
     for (const operation of standardOperations) {
       const harness = createHarness();

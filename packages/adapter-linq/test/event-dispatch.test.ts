@@ -113,6 +113,26 @@ describe("verified generic Linq event dispatch", () => {
     },
   );
 
+  it("keeps an authenticated received message with an untruthful timestamp generic-only", async () => {
+    const context = await createContext();
+    const named = vi.fn();
+    const all = vi.fn();
+    const payload = structuredClone(fixture);
+    payload.event_id = "malformed-received-timestamp";
+    payload.data.sent_at = "2026-02-30T00:00:00Z";
+    context.adapter.onLinqEvent("message.received", named);
+    context.adapter.onLinqEvent(all);
+
+    const response = await context.adapter.handleWebhook(createStandardRequest(payload));
+
+    expect(response.status).toBe(200);
+    expect(named).not.toHaveBeenCalled();
+    expect(all).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "message.received", rawEvent: payload }),
+    );
+    expect(context.processMessage).not.toHaveBeenCalled();
+  });
+
   it("suppresses concurrent duplicate standard and generic attempts", async () => {
     const context = await createContext();
     const handler = vi.fn();
