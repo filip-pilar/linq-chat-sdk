@@ -21,6 +21,8 @@ capability status is maintained in
 - Standard Webhook verification over the exact raw body, stable typed/lossless observations,
   current message/reaction dispatch, atomic event dedupe, callback isolation, and Chat SDK
   `waitUntil` integration.
+- Exact static signing-secret validation, full-precision provider timestamp ordering, and narrow
+  SDK-response guards for facts used in public identities/results.
 - A narrow `adapter.conversation(threadOrId)` extension for part-targeted replies/reactions,
   stop-typing, contact-card sharing, voice memos, existing-group operations, and location.
 - A truthful official-client escape hatch: synchronous `adapter.client` for static credentials and
@@ -38,13 +40,19 @@ capability status is maintained in
 - A malformed `message.received` event without a canonical or previously learned chat kind remains
   available through verified raw observation but is not guessed, looked up, or sent to the wrong
   standard handler.
-- Authenticated known events with unusable payloads remain available through the generic lossless
-  seam and receive `2xx`; they do not produce false curated or standard dispatch.
+- Valid canonical events without curated adapter models reach named handlers with raw data. Known
+  curated events with unusable payloads remain available only through the generic lossless seam and
+  receive `2xx`; they do not produce false named, curated, delivery, or standard dispatch.
+- A schema-valid timestamp string that JavaScript `Date` cannot represent remains observable in a
+  truthful Linq event; only the incompatible standard `Message` projection is skipped.
 - Inbound voice memos are ordinary downloadable audio attachments. Linq's current schema does not
   reliably distinguish them from other audio media.
 - Current history traversal is backward-only and bounded. It skips a bounded number of all-filtered
   provider pages so usable later messages are not hidden. Rows without truthful canonical identity,
-  authorship, and RFC3339 timestamps are omitted; usable messages are stably oldest-first.
+  authorship, and RFC3339 timestamps are omitted; usable messages are stably oldest-first by the
+  complete normalized provider instant while immutable raw values retain their original precision.
+- Public result identities are built only from required validated provider facts. A malformed
+  response after possible mutation acceptance is not retried or treated as safe to clean up.
 - Adapter-performed attachment uploads reject redirects and obvious local-network literal targets
   and time out after 30 seconds. The filter is intentionally not a registry of every special-use
   address; DNS and Linq-issued upload-host integrity remain provider/host network concerns.

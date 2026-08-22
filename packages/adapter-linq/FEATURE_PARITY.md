@@ -13,18 +13,18 @@ Evidence labels:
 
 ## Standard Chat SDK surface
 
-| Capability                        | Status   | Evidence and boundary                                                                                                                  |
-| --------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Existing-chat post/reply          | Complete | `Contract-verified`; canonical identity, idempotency, cards/files/attachments, shared errors                                           |
-| Edit message                      | Complete | `Contract-verified`; current provider operation is text-only                                                                           |
-| Thread/history/message retrieval  | Complete | `Contract-verified`; untruthful rows omitted, truthful rows stable oldest-first, cursor preservation, bounded malformed-page traversal |
-| Whole-message reactions           | Complete | `Contract-verified`; ordinary Chat SDK API                                                                                             |
-| Typing and mark-read              | Complete | `Contract-verified`; direct/group start typing, standard chat-wide read plus released `markRead()` alias                               |
-| Inbound message/reaction dispatch | Complete | `Contract-verified`; unknown/malformed facts do not corrupt sibling dispatch                                                           |
-| Static cards and buffered streams | Complete | `Contract-verified`; compiled text/media rather than native interactive cards or native streaming                                      |
-| Inbound/outbound media            | Complete | `Contract-verified`; bounded upload fetches, literal-target/redirect checks, stable inbound identity, conservative cleanup             |
-| Proactive `openDM()`              | Complete | `Contract-verified`; pending bootstrap, first-post creation, canonical returned identity, explicit immutable-thread boundary           |
-| Lazy/static credentials           | Complete | `Contract-verified`; per-operation lazy resolution and rotation; truthful sync/async native-client access                              |
+| Capability                        | Status   | Evidence and boundary                                                                                                        |
+| --------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Existing-chat post/reply          | Complete | `Contract-verified`; validated provider identity, idempotency, cards/files/attachments, shared errors                        |
+| Edit message                      | Complete | `Contract-verified`; current provider operation is text-only                                                                 |
+| Thread/history/message retrieval  | Complete | `Contract-verified`; untruthful rows omitted, full-precision stable chronology, cursors, bounded malformed-page traversal    |
+| Whole-message reactions           | Complete | `Contract-verified`; ordinary Chat SDK API                                                                                   |
+| Typing and mark-read              | Complete | `Contract-verified`; direct/group start typing, standard chat-wide read plus released `markRead()` alias                     |
+| Inbound message/reaction dispatch | Complete | `Contract-verified`; unknown/malformed facts do not corrupt sibling dispatch                                                 |
+| Static cards and buffered streams | Complete | `Contract-verified`; compiled text/media rather than native interactive cards or native streaming                            |
+| Inbound/outbound media            | Complete | `Contract-verified`; bounded upload fetches, literal-target/redirect checks, stable inbound identity, conservative cleanup   |
+| Proactive `openDM()`              | Complete | `Contract-verified`; pending bootstrap, first-post creation, canonical returned identity, explicit immutable-thread boundary |
+| Lazy/static credentials           | Complete | `Contract-verified`; per-operation lazy resolution and rotation; truthful sync/async native-client access                    |
 
 ## Linq-specific surface
 
@@ -44,7 +44,7 @@ Evidence labels:
 | Capability                                   | Status   | Evidence and boundary                                                                                         |
 | -------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------- |
 | Direct/trusted webhook authentication        | Complete | `Contract-verified`, `Provider-observed`; exact raw body, explicit authority, no fallback/double verification |
-| Typed/lossless event observation             | Complete | `Contract-verified`; truthful current projections plus immutable malformed/unknown/future raw events          |
+| Typed/lossless event observation             | Complete | `Contract-verified`; curated projections, named canonical raw events, generic malformed/unknown/future facts  |
 | Lifecycle/edit/reconciliation/location facts | Complete | `Contract-verified`; observations only, no ordering/terminal/correlation claims                               |
 | Atomic dedupe/callback isolation/`waitUntil` | Complete | `Contract-verified`; per-event listener snapshots and rejected callbacks do not delay acknowledgement         |
 | Missing current chat kind                    | Complete | `Contract-verified`; reuse a known fact or retain raw observation without lookup/guess/standard dispatch      |
@@ -61,6 +61,10 @@ Evidence labels:
   request limits, rate limiting, durable queues, persistence, and availability policy terminate at
   the adapter boundary. Linq upload-host integrity and hostname resolution remain provider/host
   network concerns.
+- Static direct webhook secrets are validated exactly with `standardwebhooks`; lazy secrets are
+  validated per request, while explicit trusted forwarding remains an exclusive authority.
+- Provider responses are checked only for facts required by public adapter results. Malformed
+  post-acceptance responses do not trigger retries or uncertain-send cleanup.
 - Historical selective provider/device observations confirmed Standard Webhook compatibility,
   exact-line routing, unsupported request fields, and representative message/media behavior. Those
   observations are supplementary and no executable live harness is maintained here.

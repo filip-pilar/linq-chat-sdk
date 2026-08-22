@@ -11,7 +11,7 @@ import { createLinqAdapter } from "@forma/linq-chat-sdk-adapter";
 
 const linq = createLinqAdapter({
   apiKey: process.env.LINQ_API_KEY!,
-  signingSecret: process.env.LINQ_SIGNING_SECRET!, // Standard Webhooks whsec_ secret
+  signingSecret: process.env.LINQ_SIGNING_SECRET!, // Standard Webhooks secret
 });
 
 const chat = new Chat({ adapters: { linq } });
@@ -33,7 +33,10 @@ Every adapter-owned provider operation resolves a fresh client from lazy credent
 Configuration is validated when the adapter is constructed. The exported configuration interface
 remains structurally compatible with released static, lazy, and trusted-forwarder combinations;
 its optional fields alone do not prove that a usable credential and webhook authority were supplied.
-Static direct verification requires a non-empty signing secret at construction.
+Static direct verification validates the exact configured secret with `standardwebhooks` at
+construction; malformed, empty, or whitespace-altered values fail without being trimmed. Lazy
+secrets are validated when resolved for a request. An explicit trusted forwarder is the sole
+authority and does not inspect an otherwise unused direct secret.
 
 The host must pass the untouched request body to the route. The adapter verifies the
 `webhook-id`, `webhook-signature`, and `webhook-timestamp` headers and enforces the Standard
@@ -64,7 +67,10 @@ and resolve a fresh downloadable URL when `fetchData()` runs.
 
 History parsing isolates malformed/null/unknown parts and tombstones so usable siblings remain
 available. Rows that cannot provide truthful canonical IDs, authorship, and RFC3339 timestamps are
-omitted from the standard Chat SDK page; usable rows are returned oldest-first with stable ties.
+omitted from the standard Chat SDK page. Usable rows are returned oldest-first by their complete
+provider instant, including fractional precision beyond JavaScript milliseconds and normalized
+offsets; exact ties preserve provider-relative order. `metadata.dateSent` remains a JavaScript
+`Date`, while the immutable raw message retains the original full-precision timestamp.
 Backward traversal skips at most ten consecutive all-filtered provider pages and stops on repeated
 cursors. Forward history is not claimed.
 
@@ -171,10 +177,15 @@ sibling callbacks and acknowledgement.
 
 Verification preserves immutable envelope, transport, normalized observations, `rawEvent`, exact
 raw text, and raw bytes. Current known payloads receive typed discriminants when their facts support
-a truthful projection; unknown/future Standard Webhook events remain lossless and are acknowledged
-without being forced through an incompatible standard handler. An authenticated known event whose
-payload cannot support that projection follows the same generic-only path. Generic callbacks are
-failure-isolated and participate in Chat SDK `waitUntil`.
+a truthful projection. Canonical event names without a curated adapter model (for example group,
+participant, status, or typing events) reach their exact named handler with raw provider data as
+well as the all-event handler; this does not create a curated model. An authenticated curated event
+whose payload cannot support its promised projection is generic/lossless only. Unknown/future
+names are also generic-only, and none are forced through an incompatible standard handler. Generic
+callbacks are failure-isolated and participate in Chat SDK `waitUntil`.
+Schema-valid timestamp strings that JavaScript `Date` cannot represent remain available to the
+truthful Linq named/generic observation; only the incompatible standard `Message` projection is
+skipped.
 Atomic provider/partner/event dedupe uses the configured Chat SDK state adapter.
 
 This seam does not make the adapter a queue or database. Hosts own request-size/rate limits,
@@ -203,7 +214,11 @@ It delegates to the same chat-wide acknowledgement as the preferred Chat SDK
 Provider authentication, permission, validation, rate-limit, not-found, network, and provider
 failures use the shared Chat SDK error taxonomy while retaining supported Linq code, trace ID,
 retry-after, and cause data. A message-refresh `404` remains `null`; other missing resources use the
-applicable shared not-found error.
+applicable shared not-found error. SDK JSON responses are checked for the minimum IDs, booleans,
+timestamps, and nested facts needed to construct public Chat SDK/facade results. A malformed success
+response fails as a provider-protocol error rather than fabricating an identity. Once a mutation may
+have been accepted, the adapter neither retries nor performs preparation cleanup; recovery from
+uncertain acceptance remains application/provider-owned.
 
 The adapter does not own provider delivery/reliability, retries beyond the official SDK, account
 configuration, capability probes, request-to-event correlation, ordering, queues, databases,
