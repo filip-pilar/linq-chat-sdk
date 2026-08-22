@@ -389,6 +389,7 @@ describe("reliable existing-chat attachment cleanup", () => {
     "https://[fe80::1]/upload",
     "https://[ff02::1]/upload",
     "https://[::ffff:127.0.0.1]/upload",
+    "https://[::ffff:10.0.0.1]/upload",
   ])("rejects provider upload target %s before upload I/O", async (uploadUrl) => {
     const { adapter, create, deleteAttachment, send } = createOutboundTestAdapter();
     create.mockResolvedValueOnce({

@@ -63,7 +63,10 @@ describe("onDeliveryStatus compatibility", () => {
   it("isolates synchronous and asynchronous listener failures from siblings and acknowledgement", async () => {
     const adapter = createTestAdapter();
     const warn = vi.fn();
-    (adapter as unknown as { logger: Pick<Logger, "warn"> }).logger = { warn };
+    (adapter as unknown as { logger: Pick<Logger, "debug" | "warn"> }).logger = {
+      debug: vi.fn(),
+      warn,
+    };
     const syncFailure = new Error("sync listener exploded");
     const asyncFailure = new Error("async listener exploded");
     const thenableFailure = new Error("foreign thenable exploded");
@@ -109,6 +112,11 @@ describe("onDeliveryStatus compatibility", () => {
 
   it("removes listeners and dispatches each only once per deduped event", async () => {
     const adapter = createTestAdapter();
+    const warn = vi.fn();
+    (adapter as unknown as { logger: Pick<Logger, "debug" | "warn"> }).logger = {
+      debug: vi.fn(),
+      warn,
+    };
     const claimed = new Set<string>();
     (adapter as unknown as { state: { setIfNotExists: (key: string) => Promise<boolean> } }).state =
       {
@@ -120,15 +128,47 @@ describe("onDeliveryStatus compatibility", () => {
       };
     const retained = vi.fn();
     const removed = vi.fn();
+    const generic = vi.fn();
     adapter.onDeliveryStatus(retained);
+    adapter.onDeliveryStatus(async () => {
+      throw new Error("isolated delivery failure");
+    });
     const unsubscribe = adapter.onDeliveryStatus(removed);
+    adapter.onLinqEvent("message.delivered", generic);
     unsubscribe();
+    const tasks: Promise<unknown>[] = [];
 
-    await adapter.handleWebhook(signed(deliveredFixture));
+    await adapter.handleWebhook(signed(deliveredFixture), {
+      waitUntil: (task) => tasks.push(task),
+    });
+    await Promise.all(tasks);
+    await new Promise<void>((resolve) => setImmediate(resolve));
     await adapter.handleWebhook(signed(deliveredFixture));
 
     expect(retained).toHaveBeenCalledOnce();
     expect(removed).not.toHaveBeenCalled();
+    expect(generic).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith("Linq delivery-status listener failed", {
+      error: expect.objectContaining({ message: "isolated delivery failure" }),
+      eventType: "message.delivered",
+    });
+  });
+
+  it("acknowledges without awaiting delivery-listener completion", async () => {
+    const adapter = createTestAdapter();
+    adapter.onDeliveryStatus(() => new Promise<void>(() => {}));
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+
+    const result = await Promise.race([
+      adapter.handleWebhook(signed(deliveredFixture)),
+      new Promise<"timeout">((resolve) => {
+        timeout = setTimeout(() => resolve("timeout"), 100);
+      }),
+    ]);
+    clearTimeout(timeout);
+
+    expect(result).not.toBe("timeout");
+    expect(result).toMatchObject({ status: 200 });
   });
 });
 

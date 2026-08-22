@@ -144,9 +144,10 @@ describe("trusted forwarding convergence", () => {
     });
     const adapter = createLinqAdapter({ apiKey: "static-key", webhookVerifier: verifier });
     const observed = vi.fn();
+    const setIfNotExists = vi.fn().mockResolvedValue(true);
     adapter.onLinqEvent(observed);
     (adapter as unknown as { state: StateAdapter }).state = {
-      setIfNotExists: vi.fn().mockResolvedValue(true),
+      setIfNotExists,
     } as unknown as StateAdapter;
     const request = new Request("https://forwarder.example.test/linq", {
       method: "POST",
@@ -167,6 +168,11 @@ describe("trusted forwarding convergence", () => {
       expect.objectContaining({ rawEvent: fixture, data: fixture.data }),
     );
     expect(result.webhook.envelope.eventId).toBe(fixture.event_id);
+    expect(setIfNotExists).toHaveBeenCalledWith(
+      `dedupe:linq:event:${fixture.partner_id}:${fixture.event_id}`,
+      true,
+      60 * 60 * 1000,
+    );
   });
 
   it("does not fall back to a valid direct signature when the forwarder rejects", async () => {
