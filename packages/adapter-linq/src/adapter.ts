@@ -1114,7 +1114,8 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       return;
     }
 
-    for (const listener of this.deliveryStatusListeners) {
+    const listeners = Array.from(this.deliveryStatusListeners);
+    for (const listener of listeners) {
       try {
         const completion = listener(delivery);
         if (completion != null) {

@@ -70,6 +70,8 @@ describe("onDeliveryStatus compatibility", () => {
     const syncFailure = new Error("sync listener exploded");
     const asyncFailure = new Error("async listener exploded");
     const thenableFailure = new Error("foreign thenable exploded");
+    const thenGetterFailure = new Error("then getter exploded");
+    const delayedFailure = new Error("delayed listener exploded");
     const sibling = vi.fn();
     const unhandled = vi.fn();
     process.on("unhandledRejection", unhandled);
@@ -88,6 +90,21 @@ describe("onDeliveryStatus compatibility", () => {
           },
         }) as PromiseLike<void>,
     );
+    adapter.onDeliveryStatus(
+      () =>
+        // oxlint-disable-next-line unicorn/no-thenable -- verifies a throwing then accessor.
+        Object.defineProperty({}, "then", {
+          get() {
+            throw thenGetterFailure;
+          },
+        }) as PromiseLike<void>,
+    );
+    adapter.onDeliveryStatus(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          setImmediate(() => reject(delayedFailure));
+        }),
+    );
     adapter.onDeliveryStatus(sibling);
 
     try {
@@ -101,13 +118,61 @@ describe("onDeliveryStatus compatibility", () => {
 
     expect(sibling).toHaveBeenCalledOnce();
     expect(unhandled).not.toHaveBeenCalled();
-    expect(warn).toHaveBeenCalledTimes(3);
-    for (const error of [syncFailure, asyncFailure, thenableFailure]) {
+    expect(warn).toHaveBeenCalledTimes(5);
+    for (const error of [
+      syncFailure,
+      asyncFailure,
+      thenableFailure,
+      thenGetterFailure,
+      delayedFailure,
+    ]) {
       expect(warn).toHaveBeenCalledWith("Linq delivery-status listener failed", {
         error,
         eventType: "message.failed",
       });
     }
+  });
+
+  it("freezes listener membership for one event despite hostile registry mutation", async () => {
+    const adapter = createTestAdapter();
+    const claimed = new Set<string>();
+    (adapter as unknown as { state: { setIfNotExists: (key: string) => Promise<boolean> } }).state =
+      {
+        setIfNotExists: async (key) => {
+          if (claimed.has(key)) return false;
+          claimed.add(key);
+          return true;
+        },
+      };
+    const self = vi.fn();
+    const added = vi.fn();
+    const removedSibling = vi.fn();
+    let unsubscribeSelf = () => {};
+    let unsubscribeSibling = () => {};
+    const selfMutating = () => {
+      self();
+      unsubscribeSelf();
+      unsubscribeSelf = adapter.onDeliveryStatus(selfMutating);
+    };
+    unsubscribeSelf = adapter.onDeliveryStatus(selfMutating);
+    adapter.onDeliveryStatus(() => {
+      adapter.onDeliveryStatus(added);
+      unsubscribeSibling();
+    });
+    unsubscribeSibling = adapter.onDeliveryStatus(removedSibling);
+
+    const first = await adapter.handleWebhook(signed(deliveredFixture));
+    const duplicate = await adapter.handleWebhook(signed(deliveredFixture));
+    const next = await adapter.handleWebhook(
+      signed({ ...deliveredFixture, event_id: `${deliveredFixture.event_id}-next` }),
+    );
+
+    expect(first.status).toBe(200);
+    expect(duplicate.status).toBe(200);
+    expect(next.status).toBe(200);
+    expect(self).toHaveBeenCalledTimes(2);
+    expect(removedSibling).toHaveBeenCalledOnce();
+    expect(added).toHaveBeenCalledOnce();
   });
 
   it("removes listeners and dispatches each only once per deduped event", async () => {
