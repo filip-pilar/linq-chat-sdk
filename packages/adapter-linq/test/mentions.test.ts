@@ -1,8 +1,16 @@
 import { createHmac } from "node:crypto";
 
-import { ResourceNotFoundError, ValidationError } from "@chat-adapter/shared";
-import { Chat } from "chat";
-import type { ChatInstance, StateAdapter } from "chat";
+import {
+  AdapterError,
+  AdapterRateLimitError,
+  AuthenticationError,
+  NetworkError,
+  PermissionError,
+  ResourceNotFoundError,
+  ValidationError,
+} from "@chat-adapter/shared";
+import { Chat, paragraph, root, text } from "chat";
+import type { AdapterPostableMessage, ChatInstance, StateAdapter } from "chat";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createLinqAdapter, linqMessage, type LinqAdapter } from "../src/index.js";
@@ -16,8 +24,22 @@ const TARGET_HANDLE = "+15550002000";
 const SIGNING_KEY = "test_linq_webhook_secret";
 const SIGNING_SECRET = `whsec_${Buffer.from(SIGNING_KEY).toString("base64")}`;
 
+const { adapterRandomUUID } = vi.hoisted(() => ({ adapterRandomUUID: vi.fn() }));
+
+vi.mock("node:crypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:crypto")>();
+  return {
+    ...actual,
+    randomUUID: (options?: { disableEntropyCache?: boolean }) => {
+      adapterRandomUUID();
+      return actual.randomUUID(options);
+    },
+  };
+});
+
 afterEach(() => {
   vi.restoreAllMocks();
+  adapterRandomUUID.mockClear();
 });
 
 describe("native Linq mentions", () => {
@@ -48,24 +70,29 @@ describe("native Linq mentions", () => {
     expect(Object.isFrozen(message.linq.mention?.range)).toBe(true);
   });
 
-  it("translates one standard Chat SDK mention token by direct handle", async () => {
+  it.each([TARGET_HANDLE, "kevin@example.com"])(
+    "translates one complete Chat SDK mention token for %s without lookup",
+    async (targetHandle) => {
+      const { adapter, retrieve, send } = createHarness(true);
+      adapterRandomUUID.mockClear();
+
+      await adapter.postMessage(`linq:${CHAT_ID}`, `Hi (<@${targetHandle}>), welcome!`);
+
+      expect(retrieve).not.toHaveBeenCalled();
+      expect(adapterRandomUUID).toHaveBeenCalledOnce();
+      expect(send.mock.calls[0]?.[1].message.parts).toEqual([
+        {
+          type: "text",
+          value: `Hi (${targetHandle}), welcome!`,
+          mention: targetHandle,
+          mention_range: [4, 4 + targetHandle.length],
+        },
+      ]);
+    },
+  );
+
+  it("uses Thread.mentionUser() through ordinary Chat SDK post and reply paths", async () => {
     const { adapter, retrieve, send } = createHarness(true);
-
-    await adapter.postMessage(`linq:${CHAT_ID}`, `Hi <@${TARGET_HANDLE}>!`);
-
-    expect(retrieve).not.toHaveBeenCalled();
-    expect(send.mock.calls[0]?.[1].message.parts).toEqual([
-      {
-        type: "text",
-        value: `Hi ${TARGET_HANDLE}!`,
-        mention: TARGET_HANDLE,
-        mention_range: [3, 3 + TARGET_HANDLE.length],
-      },
-    ]);
-  });
-
-  it("preserves ordinary Chat SDK Thread post and reply ergonomics", async () => {
-    const { adapter, send } = createHarness(true);
     const chat = new Chat({
       adapters: { linq: adapter },
       logger: "silent",
@@ -75,9 +102,10 @@ describe("native Linq mentions", () => {
     await chat.initialize();
     const thread = chat.thread(`linq:${CHAT_ID}`);
 
-    await thread.post(`Hi <@${TARGET_HANDLE}>`);
-    await thread.reply(MESSAGE_ID, `Replying to <@${TARGET_HANDLE}>`);
+    await thread.post(`Hi ${thread.mentionUser(PARTICIPANT_ID)}`);
+    await thread.reply(MESSAGE_ID, `Replying to ${thread.mentionUser(TARGET_HANDLE)}`);
 
+    expect(retrieve).toHaveBeenCalledOnce();
     expect(send).toHaveBeenCalledTimes(2);
     expect(send.mock.calls[0]?.[1].message.parts[0]).toMatchObject({ mention: TARGET_HANDLE });
     expect(send.mock.calls[1]?.[1].message).toMatchObject({
@@ -85,6 +113,76 @@ describe("native Linq mentions", () => {
       parts: [expect.objectContaining({ mention: TARGET_HANDLE })],
     });
   });
+
+  it("preserves ordinary angle-bracket text and compiles AST mention text with media", async () => {
+    const { adapter, retrieve, send } = createHarness(true);
+
+    await adapter.postMessage(`linq:${CHAT_ID}`, "Compare <one> and 2 < 3 > 1.");
+    await adapter.postMessage(`linq:${CHAT_ID}`, {
+      ast: root([paragraph([text(`AST <@${TARGET_HANDLE}>`)])]),
+      attachments: [{ type: "image", url: "https://example.com/photo.png" }],
+    });
+
+    expect(retrieve).not.toHaveBeenCalled();
+    expect(send.mock.calls[0]?.[1].message.parts).toEqual([
+      { type: "text", value: "Compare <one> and 2 < 3 > 1." },
+    ]);
+    expect(send.mock.calls[1]?.[1].message.parts).toEqual([
+      {
+        type: "text",
+        value: `AST ${TARGET_HANDLE}`,
+        mention: TARGET_HANDLE,
+        mention_range: [4, 4 + TARGET_HANDLE.length],
+      },
+      { type: "media", url: "https://example.com/photo.png" },
+    ]);
+  });
+
+  it.each([
+    ["nested opening", `Hi <@<@${TARGET_HANDLE}>>`],
+    ["ambiguous outer wrapper", `Hi <<@${TARGET_HANDLE}>>`],
+    ["empty target", "Hi <@>"],
+    ["unclosed token", `Hi <@${TARGET_HANDLE}`],
+    ["extra opening delimiter", `Hi <<@${TARGET_HANDLE}>`],
+    ["extra closing delimiter", `Hi <@${TARGET_HANDLE}>>`],
+    ["multiple targets", `Hi <@${TARGET_HANDLE}> and <@owner@example.com>`],
+    ["valid plus malformed", `Hi <@${TARGET_HANDLE}> and <@owner@example.com`],
+  ])(
+    "rejects %s before credentials, UUIDs, logging, media, or provider I/O",
+    async (_name, raw) => {
+      const credentials = vi.fn().mockResolvedValue({ apiKey: "unused-key" });
+      const logger = silentLogger();
+      const adapter = createLinqAdapter({ credentials, webhookVerifier: () => true });
+      adapter.encodeThreadId({ chatId: CHAT_ID, isGroup: true });
+      await adapter.initialize({
+        getLogger: () => logger,
+        getState: () => ({ setIfNotExists: vi.fn() }) as unknown as StateAdapter,
+        processMessage: vi.fn(),
+        processReaction: vi.fn(),
+      } as unknown as ChatInstance);
+      const fetch = vi.spyOn(globalThis, "fetch");
+      for (const method of [logger.debug, logger.error, logger.info, logger.warn])
+        method.mockClear();
+      adapterRandomUUID.mockClear();
+
+      const message = {
+        raw,
+        files: [
+          { data: Buffer.from("not prepared"), filename: "note.txt", mimeType: "text/plain" },
+        ],
+      } as AdapterPostableMessage;
+      await expect(adapter.postMessage(`linq:${CHAT_ID}`, message)).rejects.toBeInstanceOf(
+        ValidationError,
+      );
+
+      expect(credentials).not.toHaveBeenCalled();
+      expect(adapterRandomUUID).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
+      for (const method of [logger.debug, logger.error, logger.info, logger.warn]) {
+        expect(method).not.toHaveBeenCalled();
+      }
+    },
+  );
 
   it("resolves a provider participant ID once on the same client snapshot", async () => {
     const { adapter, retrieve, send } = createHarness(true);
@@ -159,6 +257,117 @@ describe("native Linq mentions", () => {
 
     expect(credentials).toHaveBeenCalledOnce();
     expect(authorizations).toEqual(["Bearer rotating-mention-key", "Bearer rotating-mention-key"]);
+  });
+
+  it.each([
+    ["active with a null leave time", participantRecord({ status: "active", left_at: null })],
+    ["omitted status and leave time", participantRecord({}, ["status", "left_at"])],
+    ["null status and leave time", participantRecord({ status: null, left_at: null })],
+  ])("resolves a current participant represented as %s", async (_name, participant) => {
+    const { adapter, retrieve, send } = createHarness(true);
+    retrieve.mockResolvedValueOnce(chatResponse([participant]));
+
+    await adapter.postMessage(`linq:${CHAT_ID}`, `<@${PARTICIPANT_ID}>`);
+
+    expect(retrieve).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledOnce();
+    expect(send.mock.calls[0]?.[1].message.parts[0]).toMatchObject({ mention: TARGET_HANDLE });
+  });
+
+  it.each([
+    ["left status", participantRecord({ status: "left", left_at: null })],
+    ["removed status", participantRecord({ status: "removed", left_at: null })],
+    [
+      "omitted status with leave evidence",
+      participantRecord({ left_at: "2026-08-21T23:00:00Z" }, ["status"]),
+    ],
+    [
+      "null status with leave evidence",
+      participantRecord({ status: null, left_at: "2026-08-21T23:00:00Z" }),
+    ],
+  ])("rejects a no-longer-current participant represented as %s", async (_name, participant) => {
+    const { adapter, createAttachment, retrieve, send } = createHarness(true);
+    const logger = silentLogger();
+    await initializeWithLogger(adapter, logger);
+    retrieve.mockResolvedValueOnce(chatResponse([participant]));
+    clearLogger(logger);
+    adapterRandomUUID.mockClear();
+
+    await expect(
+      adapter.postMessage(`linq:${CHAT_ID}`, participantMentionWithFile()),
+    ).rejects.toBeInstanceOf(ValidationError);
+
+    expect(send).not.toHaveBeenCalled();
+    expect(createAttachment).not.toHaveBeenCalled();
+    expect(adapterRandomUUID).not.toHaveBeenCalled();
+    expectLoggerUnused(logger);
+  });
+
+  it.each([
+    [
+      "active status with leave evidence",
+      chatResponse([participantRecord({ status: "active", left_at: "2026-08-21T23:00:00Z" })]),
+    ],
+    ["unknown status", chatResponse([participantRecord({ status: "departed" })])],
+    ["malformed status", chatResponse([participantRecord({ status: 42 })])],
+    ["malformed leave time", chatResponse([participantRecord({ left_at: "not-a-date" })])],
+    ["malformed handle", chatResponse([participantRecord({ handle: "not a handle" })])],
+    ["malformed collection entry", chatResponse([null])],
+    ["duplicate participant ID", chatResponse([participantRecord(), participantRecord()])],
+    [
+      "cross-chat response",
+      chatResponse(undefined, { id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" }),
+    ],
+  ])("rejects malformed provider membership facts: %s", async (_name, response) => {
+    const { adapter, createAttachment, retrieve, send } = createHarness(true);
+    const logger = silentLogger();
+    await initializeWithLogger(adapter, logger);
+    retrieve.mockResolvedValueOnce(response);
+    clearLogger(logger);
+    adapterRandomUUID.mockClear();
+
+    const error = await adapter
+      .postMessage(`linq:${CHAT_ID}`, participantMentionWithFile())
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(AdapterError);
+    expect(error).not.toBeInstanceOf(ValidationError);
+    expect((error as Error).cause).toBeInstanceOf(TypeError);
+    expect(send).not.toHaveBeenCalled();
+    expect(createAttachment).not.toHaveBeenCalled();
+    expect(adapterRandomUUID).not.toHaveBeenCalled();
+    expectLoggerUnused(logger);
+  });
+
+  it.each([
+    [400, ValidationError],
+    [401, AuthenticationError],
+    [403, PermissionError],
+    [404, ResourceNotFoundError],
+    [429, AdapterRateLimitError],
+    [500, AdapterError],
+    [undefined, NetworkError],
+  ] as const)("translates participant-resolution provider status %s", async (status, ErrorType) => {
+    const { adapter, createAttachment, retrieve, send } = createHarness(true);
+    const original =
+      status === undefined
+        ? new Error("network unavailable")
+        : providerError(status, status === 429 ? 1007 : 2001, `trace-${status}`, 7);
+    retrieve.mockRejectedValueOnce(original);
+    adapterRandomUUID.mockClear();
+
+    const error = await adapter
+      .postMessage(`linq:${CHAT_ID}`, participantMentionWithFile())
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ErrorType);
+    expect((error as Error).cause).toBe(original);
+    if (status !== undefined) {
+      expect(error).toMatchObject({ providerCode: status === 429 ? 1007 : 2001 });
+    }
+    expect(send).not.toHaveBeenCalled();
+    expect(createAttachment).not.toHaveBeenCalled();
+    expect(adapterRandomUUID).not.toHaveBeenCalled();
   });
 
   it("allows media but rejects mention conflicts and unsupported paths before sending", async () => {
@@ -359,31 +568,51 @@ describe("native Linq mentions", () => {
 
 function createHarness(isGroup: boolean): {
   adapter: LinqAdapter;
+  createAttachment: ReturnType<typeof vi.fn>;
   retrieve: ReturnType<typeof vi.fn>;
   send: ReturnType<typeof vi.fn>;
 } {
   const adapter = createLinqAdapter({ apiKey: "test-key", signingSecret: SIGNING_SECRET });
+  const createAttachment = vi.fn();
   const send = vi.fn().mockResolvedValue({
     chat_id: CHAT_ID,
     message: { id: MESSAGE_ID, created_at: "2026-08-22T00:00:00Z", sent_at: null, parts: [] },
   });
-  const retrieve = vi.fn().mockResolvedValue({
-    id: CHAT_ID,
-    is_group: true,
-    handles: [
-      {
-        id: PARTICIPANT_ID,
-        handle: TARGET_HANDLE,
-        joined_at: "2026-08-22T00:00:00Z",
-        service: "iMessage",
-        status: "active",
-      },
-    ],
-  });
+  const retrieve = vi.fn().mockResolvedValue(chatResponse());
+  Object.assign(adapter.client.attachments, { create: createAttachment });
   Object.assign(adapter.client.chats, { retrieve });
   Object.assign(adapter.client.chats.messages, { send });
   adapter.encodeThreadId({ chatId: CHAT_ID, isGroup });
-  return { adapter, retrieve, send };
+  return { adapter, createAttachment, retrieve, send };
+}
+
+function participantRecord(
+  overrides: Record<string, unknown> = {},
+  omitted: readonly string[] = [],
+): Record<string, unknown> {
+  const participant: Record<string, unknown> = {
+    id: PARTICIPANT_ID,
+    handle: TARGET_HANDLE,
+    joined_at: "2026-08-22T00:00:00Z",
+    left_at: null,
+    service: "iMessage",
+    status: "active",
+    ...overrides,
+  };
+  for (const field of omitted) delete participant[field];
+  return participant;
+}
+
+function chatResponse(
+  handles: readonly unknown[] = [participantRecord()],
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id: CHAT_ID,
+    is_group: true,
+    handles: [...handles],
+    ...overrides,
+  };
 }
 
 function mentionPayload(ownerHandle: string) {
@@ -420,6 +649,56 @@ function createStandardRequest(payload: unknown): Request {
       "webhook-timestamp": timestamp,
     },
     body,
+  });
+}
+
+function participantMentionWithFile(): AdapterPostableMessage {
+  return {
+    raw: `File for <@${PARTICIPANT_ID}>`,
+    files: [
+      {
+        data: Buffer.from("not prepared"),
+        filename: "mention.txt",
+        mimeType: "text/plain",
+      },
+    ],
+  } as AdapterPostableMessage;
+}
+
+async function initializeWithLogger(
+  adapter: LinqAdapter,
+  logger: ReturnType<typeof silentLogger>,
+): Promise<void> {
+  await adapter.initialize({
+    getLogger: () => logger,
+    getState: () => ({ setIfNotExists: vi.fn() }) as unknown as StateAdapter,
+    processMessage: vi.fn(),
+    processReaction: vi.fn(),
+  } as unknown as ChatInstance);
+}
+
+function clearLogger(logger: ReturnType<typeof silentLogger>): void {
+  for (const method of [logger.debug, logger.error, logger.info, logger.warn]) method.mockClear();
+}
+
+function expectLoggerUnused(logger: ReturnType<typeof silentLogger>): void {
+  for (const method of [logger.debug, logger.error, logger.info, logger.warn]) {
+    expect(method).not.toHaveBeenCalled();
+  }
+}
+
+function providerError(status: number, code: number, traceId: string, retryAfter?: number): Error {
+  const headers = new Headers({ "x-trace-id": traceId });
+  if (retryAfter !== undefined) headers.set("retry-after", String(retryAfter));
+
+  return Object.assign(new Error(`Linq HTTP ${status}`), {
+    error: {
+      error: { code, message: `Provider error ${code}`, retry_after: retryAfter, status },
+      success: false,
+      trace_id: traceId,
+    },
+    headers,
+    status,
   });
 }
 

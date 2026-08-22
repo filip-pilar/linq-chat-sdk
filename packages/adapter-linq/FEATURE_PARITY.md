@@ -28,17 +28,17 @@ Evidence labels:
 
 ## Linq-specific surface
 
-| Capability                                 | Status   | Evidence and boundary                                                                                                  |
-| ------------------------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `linqMessage(content, options)`            | Complete | `Contract-verified`; immutable options, UTF-16 formatting/mentions, service/effect policy, standalone HTTPS rich links |
-| Part-targeted replies/reactions            | Complete | `Contract-verified`; nested under `adapter.conversation()`; ordinary whole-message operations stay standard            |
-| Stop typing/contact card                   | Complete | `Contract-verified`; acknowledgement only                                                                              |
-| Voice memo from HTTPS URL or attachment ID | Complete | `Contract-verified`; returned IDs are acceptance facts, not delivery/presentation                                      |
-| Existing-group update/member/leave         | Complete | `Contract-verified`; acknowledgement only, no snapshot/correlation workflow                                            |
-| Location request/retrieve                  | Complete | `Contract-verified`; consent prompt plus defensive immutable longitude-first snapshots                                 |
-| Conversation polls                         | Complete | `Documented`, `Contract-verified`; create/add/vote/retrieve, immutable validated snapshots, no retry/workflow claims   |
-| Official SDK escape hatch                  | Complete | `Contract-verified`; static `.client`, universal async `.getClient()`, no stale lazy-client cache                      |
-| Delivery-status compatibility API          | Complete | `Contract-verified`; shared authenticated lifecycle facts with typed/lossless event delivery                           |
+| Capability                                 | Status   | Evidence and boundary                                                                                                                         |
+| ------------------------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `linqMessage(content, options)`            | Complete | `Contract-verified`; immutable options, strict current-member mentions, UTF-16 formatting, service/effect policy, standalone HTTPS rich links |
+| Part-targeted replies/reactions            | Complete | `Contract-verified`; nested under `adapter.conversation()`; ordinary whole-message operations stay standard                                   |
+| Stop typing/contact card                   | Complete | `Contract-verified`; acknowledgement only                                                                                                     |
+| Voice memo from HTTPS URL or attachment ID | Complete | `Contract-verified`; returned IDs are acceptance facts, not delivery/presentation                                                             |
+| Existing-group update/member/leave         | Complete | `Contract-verified`; acknowledgement only, no snapshot/correlation workflow                                                                   |
+| Location request/retrieve                  | Complete | `Contract-verified`; consent prompt plus defensive immutable longitude-first snapshots                                                        |
+| Conversation polls                         | Complete | `Documented`, `Contract-verified`; create/add/vote/retrieve, immutable validated snapshots, no retry/workflow claims                          |
+| Official SDK escape hatch                  | Complete | `Contract-verified`; static `.client`, universal async `.getClient()`, no stale lazy-client cache                                             |
+| Delivery-status compatibility API          | Complete | `Contract-verified`; shared authenticated lifecycle facts with typed/lossless event delivery                                                  |
 
 ## Verified webhook boundary
 

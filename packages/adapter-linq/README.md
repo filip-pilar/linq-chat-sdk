@@ -118,12 +118,17 @@ generation, attachment preparation, logging, or provider I/O.
 Ordinary Chat SDK mention tokens work for existing group posts and replies:
 
 ```ts
-await groupThread.post(`Please review this, <@${participantId}>`);
+await groupThread.post(`Please review this, ${groupThread.mentionUser(participantId)}`);
 ```
 
-When the token contains a Linq participant ID, the adapter resolves that ID against the existing
-chat once and sends the participant handle required by Linq. A handle can be used directly without
-a lookup. For explicit display text and range control, use `mention` (UTF-16 `[start, end)` offsets):
+Mention-like syntax is parsed strictly: exactly one complete `<@target>` token is accepted, while
+empty, nested, unbalanced, ambiguously wrapped, or multiple tokens fail before credentials, UUIDs,
+media preparation, logging, or provider I/O. When the token contains a stable Linq participant ID,
+the adapter resolves it once against that existing group and sends only when the response
+establishes one current participant with a usable handle. A handle can be used directly without a
+lookup. Provider-issued participant identity remains `Message.author.userId`; the handle remains
+`Message.author.userName` and the native mention target. For explicit display text and range
+control, use `mention` (UTF-16 `[start, end)` offsets):
 
 ```ts
 await groupThread.post(

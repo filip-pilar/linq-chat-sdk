@@ -1035,18 +1035,33 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
         throw invalidLinqProviderResponse("resolve message mention", "handles must be an array");
       }
 
-      const participant = chat.handles.find(
-        (handle) =>
-          isRecord(handle) &&
-          handle.id === target &&
-          handle.status !== "left" &&
-          handle.status !== "removed",
-      );
-      if (!isRecord(participant)) {
+      const participants = chat.handles.map((handle, index) => {
+        const participant = requireProviderRecord(
+          handle,
+          "resolve message mention",
+          `handles[${index}]`,
+        );
+        if (typeof participant.id !== "string" || !UUID_PATTERN.test(participant.id)) {
+          throw invalidLinqProviderResponse(
+            "resolve message mention",
+            `handles[${index}].id must be a UUID`,
+          );
+        }
+        return participant;
+      });
+      const matches = participants.filter((participant) => participant.id === target);
+      if (matches.length === 0) {
         throw validationError(
           "Linq mention participant IDs must identify a current participant of this chat.",
         );
       }
+      if (matches.length !== 1) {
+        throw invalidLinqProviderResponse(
+          "resolve message mention",
+          "handles must contain exactly one matching participant ID",
+        );
+      }
+      const participant = matches[0]!;
 
       let handle: string;
       try {
@@ -1055,6 +1070,40 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
         throw invalidLinqProviderResponse(
           "resolve message mention",
           "the matching participant handle must be E.164 or email",
+        );
+      }
+
+      const status = participant.status;
+      if (
+        status !== undefined &&
+        status !== null &&
+        status !== "active" &&
+        status !== "left" &&
+        status !== "removed"
+      ) {
+        throw invalidLinqProviderResponse(
+          "resolve message mention",
+          "the matching participant status must be active, left, removed, null, or omitted",
+        );
+      }
+
+      const leftAt = participant.left_at;
+      const hasLeaveTimestamp = leftAt !== undefined && leftAt !== null;
+      if (hasLeaveTimestamp && parseLinqTimestamp(leftAt) === null) {
+        throw invalidLinqProviderResponse(
+          "resolve message mention",
+          "the matching participant left_at must be an RFC3339 timestamp, null, or omitted",
+        );
+      }
+      if (status === "active" && hasLeaveTimestamp) {
+        throw invalidLinqProviderResponse(
+          "resolve message mention",
+          "an active participant cannot also have a leave timestamp",
+        );
+      }
+      if (status === "left" || status === "removed" || hasLeaveTimestamp) {
+        throw validationError(
+          "Linq mention participant IDs must identify a current participant of this chat.",
         );
       }
 

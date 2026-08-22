@@ -27,8 +27,8 @@ OpenAPI/docs, and the repository's `chat-sdk` and `integrating-linq` skills.
 - Compare provider history by the complete validated RFC3339 instant. Keep JavaScript `Date`
   metadata and immutable full-precision raw values as distinct representations.
 - Preserve provider-issued participant identity on inbound messages. Native mention targeting may
-  resolve an existing chat participant ID to its handle, but must not introduce identity storage or
-  replace `Message.author.userId` with a handle.
+  resolve one strictly parsed token's existing-chat participant ID to a truthful current member's
+  handle, but must not introduce identity storage or replace `Message.author.userId` with a handle.
 - Keep polls on the cohesive conversation facade. Preserve write idempotency/retry boundaries and
   treat returned snapshots and webhooks as provider observations rather than workflow state.
 - Keep vCard parsing, AI-agent tool policy, contact/address-book mutation, and background workflow

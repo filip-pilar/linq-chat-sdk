@@ -45,7 +45,6 @@ const SCREEN_EFFECTS = new Set([
 ]);
 const BUBBLE_EFFECTS = new Set(["slam", "loud", "gentle", "invisible"]);
 const PARTICIPANT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
-const MENTION_TOKEN_PATTERN = /<@([^<>]+)>/gu;
 
 type LinqDecorationStyle = Extract<LinqTextDecoration, { style: string }>["style"];
 type LinqDecorationAnimation = Extract<LinqTextDecoration, { animation: string }>["animation"];
@@ -213,15 +212,12 @@ function compileMention(
   text: string,
 ): { text: string; mention: NonNullable<CompiledLinqMessageText["mention"]> } | undefined {
   const explicit = extractExplicitMention(message);
-  const tokens = [...text.matchAll(MENTION_TOKEN_PATTERN)];
+  const token = parseMentionToken(text);
 
-  if (explicit && tokens.length > 0) {
+  if (explicit && token) {
     throw validationError(
       "Linq messages must use either one Chat SDK mention token or explicit mention options, not both.",
     );
-  }
-  if (tokens.length > 1) {
-    throw validationError("Linq messages support exactly one native mention target.");
   }
 
   if (explicit) {
@@ -239,17 +235,12 @@ function compileMention(
     };
   }
 
-  const token = tokens[0];
-  if (!token || token.index === undefined) return undefined;
-  const target = token[1];
-  if (!target) {
-    throw validationError("Linq mention tokens require a participant handle or ID.");
-  }
+  if (!token) return undefined;
+  const { end, start, target } = token;
 
   const targetKind = PARTICIPANT_ID_PATTERN.test(target) ? "participant_id" : "handle";
   if (targetKind === "handle") validateMentionHandle(target);
-  const start = token.index;
-  const replaced = `${text.slice(0, start)}${target}${text.slice(start + token[0].length)}`;
+  const replaced = `${text.slice(0, start)}${target}${text.slice(end)}`;
 
   return {
     text: replaced,
@@ -259,6 +250,48 @@ function compileMention(
       targetKind,
     },
   };
+}
+
+type MentionToken = {
+  /** Index immediately after the token's closing `>`. */
+  end: number;
+  start: number;
+  target: string;
+};
+
+/**
+ * Recognize exactly one complete Chat SDK `<@target>` token without treating a
+ * valid-looking substring inside malformed delimiters as native mention intent.
+ */
+function parseMentionToken(text: string): MentionToken | undefined {
+  const openings: number[] = [];
+  let cursor = 0;
+
+  while (cursor < text.length) {
+    const opening = text.indexOf("<@", cursor);
+    if (opening === -1) break;
+    openings.push(opening);
+    cursor = opening + 2;
+  }
+
+  if (openings.length === 0) return undefined;
+  if (openings.length !== 1) {
+    throw validationError("Linq messages support exactly one complete native mention token.");
+  }
+
+  const start = openings[0]!;
+  const closing = text.indexOf(">", start + 2);
+  if (closing === -1) {
+    throw validationError("Linq mention tokens must be complete <@target> values.");
+  }
+
+  const target = text.slice(start + 2, closing);
+  const ambiguouslyWrapped = text[start - 1] === "<" || text[closing + 1] === ">";
+  if (!target || target.includes("<") || ambiguouslyWrapped) {
+    throw validationError("Linq mention tokens must be complete, non-nested <@target> values.");
+  }
+
+  return { end: closing + 1, start, target };
 }
 
 function extractExplicitMention(message: AdapterPostableMessage): LinqMentionOptions | undefined {

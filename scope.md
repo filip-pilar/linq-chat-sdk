@@ -18,7 +18,9 @@ capability status is maintained in
   `linq:{chatId}:dm/group` values.
 - Deterministic text/decoration compilation, service/effect policy, native rich links, outbound
   native group mentions, media preparation/downloads, shared error translation, and defensive
-  parsing. Authenticated owner-targeted mentions enter standard Chat SDK `onNewMention()` routing.
+  parsing. Mention-like tokens are strict, and stable participant IDs resolve once to a truthful
+  current member of the existing group. Authenticated owner-targeted mentions enter standard Chat
+  SDK `onNewMention()` routing without replacing provider-issued author identity.
 - Standard Webhook verification over the exact raw body, stable typed/lossless observations,
   current message/reaction dispatch, atomic event dedupe, callback isolation, and Chat SDK
   `waitUntil` integration.
