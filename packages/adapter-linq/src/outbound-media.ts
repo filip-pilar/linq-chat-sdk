@@ -1,3 +1,4 @@
+import { isIP } from "node:net";
 import { ValidationError } from "@chat-adapter/shared";
 import { LinqAPIV3 } from "@linqapp/sdk";
 import type { AdapterPostableMessage, Attachment, FileUpload } from "chat";
@@ -12,6 +13,7 @@ const MAX_PUBLIC_URL_PARTS = 40;
 const MAX_TEXT_CHARACTERS = 10_000;
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 const MIN_UPLOAD_BYTES = 1;
+const UPLOAD_TIMEOUT_MS = 30_000;
 
 // Linq downloads `url`-based media on send and caps those at 10MB. Larger media
 // has to use caller-supplied bytes through the pre-upload flow, which allows up
@@ -268,13 +270,34 @@ async function uploadBytes(
   );
   onAttachmentCreated(created.attachment_id);
   assertValidUploadUrl(created.upload_url);
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, UPLOAD_TIMEOUT_MS);
+  let upload: Response;
 
-  const upload = await fetch(created.upload_url, {
-    method: created.http_method,
-    headers: created.required_headers,
-    body: bytes,
-    redirect: "error",
-  });
+  try {
+    upload = await fetch(created.upload_url, {
+      method: created.http_method,
+      headers: created.required_headers,
+      body: bytes,
+      redirect: "error",
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (timedOut) {
+      throw new Error(
+        `Linq attachment upload timed out after ${UPLOAD_TIMEOUT_MS}ms for ${filename}`,
+        { cause: error },
+      );
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!upload.ok) {
     throw new Error(
@@ -409,7 +432,8 @@ function assertValidUploadUrl(url: string): void {
       parsed.protocol === "https:" &&
       parsed.hostname &&
       parsed.username === "" &&
-      parsed.password === ""
+      parsed.password === "" &&
+      !isLocalUploadHostname(parsed.hostname)
     ) {
       return;
     }
@@ -417,7 +441,85 @@ function assertValidUploadUrl(url: string): void {
     // Fall through to the standard validation error.
   }
 
-  throw validationError("Linq attachment upload URLs must be credential-free HTTPS URLs.");
+  throw validationError("Linq attachment upload URLs must be credential-free public HTTPS URLs.");
+}
+
+function isLocalUploadHostname(hostname: string): boolean {
+  const normalized = hostname
+    .replace(/^\[|\]$/g, "")
+    .replace(/\.$/, "")
+    .toLowerCase();
+  if (normalized === "localhost" || normalized.endsWith(".localhost")) {
+    return true;
+  }
+
+  const version = isIP(normalized);
+  if (version === 4) {
+    return isNonPublicIPv4(normalized);
+  }
+
+  if (version === 6) {
+    const groups = parseIPv6Groups(normalized);
+    if (!groups) return true;
+
+    const first = groups[0] ?? 0;
+    const isUnspecified = groups.every((group) => group === 0);
+    const isLoopback = groups.slice(0, 7).every((group) => group === 0) && groups[7] === 1;
+    const isUniqueLocal = (first & 0xfe00) === 0xfc00;
+    const isLinkLocal = (first & 0xffc0) === 0xfe80;
+    const isSiteLocal = (first & 0xffc0) === 0xfec0;
+    const isMulticast = (first & 0xff00) === 0xff00;
+    const isIPv4Mapped = groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff;
+    const isIPv4Compatible = groups.slice(0, 6).every((group) => group === 0);
+
+    if (isIPv4Mapped || isIPv4Compatible) {
+      const high = groups[6] ?? 0;
+      const low = groups[7] ?? 0;
+      const ipv4 = `${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`;
+      return isNonPublicIPv4(ipv4);
+    }
+
+    return (
+      isUnspecified || isLoopback || isUniqueLocal || isLinkLocal || isSiteLocal || isMulticast
+    );
+  }
+
+  return false;
+}
+
+function isNonPublicIPv4(address: string): boolean {
+  const [first = 0, second = 0] = address.split(".").map(Number);
+
+  return (
+    first === 0 ||
+    first === 10 ||
+    first === 127 ||
+    (first === 100 && second >= 64 && second <= 127) ||
+    (first === 169 && second === 254) ||
+    (first === 172 && second >= 16 && second <= 31) ||
+    (first === 192 && (second === 0 || second === 168)) ||
+    (first === 198 && (second === 18 || second === 19)) ||
+    first >= 224
+  );
+}
+
+function parseIPv6Groups(address: string): number[] | null {
+  const halves = address.split("::");
+  if (halves.length > 2) return null;
+
+  const left = halves[0] ? halves[0].split(":") : [];
+  const right = halves[1] ? halves[1].split(":") : [];
+  const missing = 8 - left.length - right.length;
+  if ((halves.length === 1 && missing !== 0) || (halves.length === 2 && missing < 1)) {
+    return null;
+  }
+
+  const groups = [...left, ...Array.from({ length: missing }, () => "0"), ...right];
+  if (groups.length !== 8 || groups.some((group) => !/^[0-9a-f]{1,4}$/i.test(group))) {
+    return null;
+  }
+
+  return groups.map((group) => Number.parseInt(group, 16));
 }
 
 function exceedsUrlDownloadLimit(size: number | undefined): boolean {
