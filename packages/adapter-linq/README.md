@@ -2,6 +2,8 @@
 
 A Linq adapter for [Chat SDK](https://www.npmjs.com/package/chat). It implements ordinary Chat SDK
 behavior for existing Linq chats and exposes a deliberately small Linq-specific extension surface.
+This is the private workspace package for the Forma-maintained fork; Linq's published package is
+`@linqapp/chat-sdk-adapter`.
 
 ## Setup
 
@@ -193,10 +195,11 @@ durability, replay policy, application persistence, and long-running work.
 
 ## Native client escape hatch
 
-Static credential configurations expose `adapter.client`, the same read-only `LinqAPIV3` client
-used internally. All configurations expose `await adapter.getClient()`; lazy configurations create
-that client from the current credential result and intentionally reject synchronous `.client`
-access rather than cache a stale key. Use the native client for account, subscription,
+Static credential configurations expose `adapter.client`, the same official `LinqAPIV3` client used
+internally. The property is read-only, but the client retains the official SDK's provider
+operations. All configurations expose `await adapter.getClient()`; lazy configurations create that
+client from the current credential result and intentionally reject synchronous `.client` access
+rather than cache a stale key. Use the native client deliberately for account, subscription,
 administrative, or other provider-native operations that do not warrant adapter APIs.
 
 ## Identity and compatibility

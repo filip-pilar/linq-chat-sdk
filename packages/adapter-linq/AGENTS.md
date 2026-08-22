@@ -7,7 +7,8 @@ OpenAPI/docs, and the repository's `chat-sdk` and `integrating-linq` skills.
 ## Boundaries
 
 - Implement standard Chat SDK behavior first. Add Linq-specific surface only where a documented
-  provider semantic cannot be represented faithfully by Chat SDK or the read-only `adapter.client`.
+  provider semantic cannot be represented faithfully by Chat SDK or the official-client escape
+  hatch.
 - Use `@linqapp/sdk` for outbound and native operations. Use `standardwebhooks` and the exact raw
   request body for inbound Standard Webhook authentication.
 - Emit canonical `linq:{chatId}` identities. Decode old `linq:{chatId}:dm/group` values only for

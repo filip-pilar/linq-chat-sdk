@@ -6,7 +6,7 @@ description: Integrates the Linq Partner API for webhook intake, subscription se
 # Integrating Linq
 
 Use this workflow when changing Linq integration or `packages/adapter-linq`. Provider facts below
-were reverified on **2026-08-19**; recheck current sources before relying on versioned schemas,
+were reverified on **2026-08-22**; recheck current sources before relying on versioned schemas,
 operations, event names, limits, or delivery behavior.
 
 ## Evidence precedence
@@ -29,6 +29,7 @@ Start at:
 - `https://docs.linqapp.com/guides/webhooks/` — verification, versioning, and delivery guarantees;
 - `https://docs.linqapp.com/guides/webhooks/events/` — envelope and event examples;
 - `https://docs.linqapp.com/guides/webhooks/subscriptions/` — subscription lifecycle;
+- `https://docs.linqapp.com/guides/integrations/chat-sdk/` — Linq's published Chat SDK integration;
 - `https://docs.linqapp.com/guides/messaging/` — message behavior;
 - `https://docs.linqapp.com/getting-started/sdks/` — official client behavior; and
 - `https://cdn.linqapp.com/openapi/linq-api-v3.yaml` — canonical endpoints, schemas, and event enum.
@@ -78,10 +79,12 @@ The signed content is:
 ```
 
 The current adapter verifies this scheme directly with `standardwebhooks@1.0.0`. Standard secrets
-use the `whsec_` format, and signatures use `v1,{base64}` values. The current Linq documentation
-still describes SDK `webhooks.unwrap()`, but installed `@linqapp/sdk@0.44.3` does not expose that
-method or wrapper event types at runtime or in declarations. Treat that as a provider
-documentation/SDK discrepancy.
+use the `whsec_` format, and signatures use `v1,{base64}` values. Linq's current Chat SDK integration
+page still describes the older `{timestamp}.{body}` HMAC shape, while the primary webhook guide
+specifies Standard Webhooks over `{webhook-id}.{webhook-timestamp}.{body}`. The documentation also
+describes SDK `webhooks.unwrap()`, but installed `@linqapp/sdk@0.44.3` does not expose that method or
+wrapper event types at runtime or in declarations. Treat these as provider documentation/SDK
+discrepancies and follow the primary webhook guide plus the installed runtime.
 
 The repository adapter accepts Standard Webhooks only. Deprecated `X-Webhook-*` signature handling
 is not part of its public contract. Partial Standard header sets fail, and verified requests

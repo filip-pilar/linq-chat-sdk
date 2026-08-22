@@ -73,10 +73,10 @@ Evidence labels:
 
 | Item                                                               | Disposition                                               |
 | ------------------------------------------------------------------ | --------------------------------------------------------- |
-| iMessage app messages (`011`)                                      | Deferred; no adapter-owned consumer need established      |
-| Raw `FileUpload` voice-memo source (`012A`)                        | Optional; existing URL/attachment-ID sources are complete |
+| iMessage app messages                                              | Deferred; no adapter-owned consumer need established      |
+| Raw `FileUpload` voice-memo source                                 | Optional; existing URL/attachment-ID sources are complete |
 | Large-file streaming/upload recovery/retention workflows           | Deferred or application-owned; require demonstrated need  |
-| Curated group/presence event models (`013C`)                       | Deferred; lossless generic event access is available      |
+| Curated group/presence event models                                | Deferred; lossless generic event access is available      |
 | Account/subscription/admin endpoint wrappers                       | Use `.client` / `getClient()`                             |
 | Provider delivery, retries, ordering, device presentation          | Provider-owned                                            |
 | Queues, databases, polling, transcription, identity/product policy | Host/application-owned                                    |

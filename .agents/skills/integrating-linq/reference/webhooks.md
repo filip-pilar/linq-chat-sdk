@@ -1,6 +1,6 @@
 # Linq webhook checklist
 
-Provider facts here were reverified on **2026-08-19**. Start with the current
+Provider facts here were reverified on **2026-08-22**. Start with the current
 [`docs.linqapp.com` index](https://docs.linqapp.com/llms.txt),
 [webhook guide](https://docs.linqapp.com/guides/webhooks/), and
 [canonical OpenAPI](https://cdn.linqapp.com/openapi/linq-api-v3.yaml). Then inspect the resolved
@@ -19,6 +19,12 @@ Always preserve the raw request body until authentication succeeds.
 - Reject timestamps outside five minutes and compare signatures in constant time.
 - Use the direct `standardwebhooks` reference implementation. The current SDK's `Webhooks` class is
   empty even though provider documentation still describes `webhooks.unwrap()`.
+
+Linq's current [Chat SDK integration page](https://docs.linqapp.com/guides/integrations/chat-sdk/)
+also describes an older `{timestamp}.{body}` HMAC shape. The primary webhook guide and Standard
+Webhooks headers are authoritative for this adapter:
+`{webhook-id}.{webhook-timestamp}.{raw_body}`. Do not copy the integration page's older signature
+description into adapter verification.
 
 The repository adapter accepts Standard Webhooks only. Deprecated `X-Webhook-*` signature handling
 is outside its contract. Any partial Standard header set fails.

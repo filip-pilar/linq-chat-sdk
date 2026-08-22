@@ -10,6 +10,10 @@ faithful equivalent.
 - [`packages/adapter-linq`](packages/adapter-linq) contains the Forma-maintained adapter.
 - [`apps/api`](apps/api) is an example Nitro application using Linq alongside other adapters.
 
+`@forma/linq-chat-sdk-adapter` is a private workspace package for this fork. Linq's published
+package remains `@linqapp/chat-sdk-adapter`; this repository does not publish under Linq's package
+identity.
+
 ## Development
 
 ```bash

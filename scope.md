@@ -59,10 +59,10 @@ capability status is maintained in
 
 ## Deferred possibilities
 
-- iMessage app-message support remains deferred (`011`).
-- Accepting raw Chat SDK `FileUpload` as a third voice-memo source is optional (`012A`). Large-file
+- iMessage app-message support remains deferred.
+- Accepting raw Chat SDK `FileUpload` as a third voice-memo source is optional. Large-file
   streaming requires demonstrated need; upload workflows and retention remain out of scope.
-- Curated group/presence event models remain deferred (`013C`); lossless generic events remain
+- Curated group/presence event models remain deferred; lossless generic events remain
   available.
 
 These are not active roadmap commitments. Provider/device/live observations are optional evidence,
