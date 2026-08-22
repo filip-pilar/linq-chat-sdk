@@ -57,7 +57,7 @@ describe("Linq history fidelity", () => {
     });
     const page = {
       messages: [
-        row("invalid-slot", "not-a-date", "also-not-a-date"),
+        row("invalid-slot", "01/02/2026", "not-a-provider-timestamp"),
         row("late", "2026-08-01T10:04:00.000Z", "2026-08-01T10:04:00.000Z"),
         row("missing-slot", null, null),
         row("equal-first", "2026-08-01T10:02:00.000Z", "2026-08-01T10:02:00.000Z"),
@@ -78,7 +78,7 @@ describe("Linq history fidelity", () => {
       "equal-second",
       "late",
     ]);
-    expect(result.messages[0]?.raw).toMatchObject({ sent_at: "not-a-date" });
+    expect(result.messages[0]?.raw).toMatchObject({ sent_at: "01/02/2026" });
     expect(result.messages[2]?.raw).toMatchObject({ sent_at: null, created_at: null });
     expect(result.nextCursor).toBe("older");
   });

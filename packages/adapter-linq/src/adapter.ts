@@ -1359,14 +1359,11 @@ function validProviderMessageTimestamp(raw: unknown): number | undefined {
   }
 
   for (const candidate of [raw.sent_at, raw.created_at]) {
-    if (typeof candidate !== "string" || candidate.length === 0) {
+    if (typeof candidate !== "string" || !isValidProviderTimestamp(candidate)) {
       continue;
     }
 
-    const timestamp = Date.parse(candidate);
-    if (Number.isFinite(timestamp)) {
-      return timestamp;
-    }
+    return Date.parse(candidate);
   }
 
   return undefined;
