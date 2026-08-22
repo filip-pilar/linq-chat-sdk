@@ -17,9 +17,9 @@ Evidence labels:
 | --------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | Existing-chat post/reply          | Complete | `Contract-verified`; canonical identity, idempotency, cards/files/attachments, shared errors                                           |
 | Edit message                      | Complete | `Contract-verified`; current provider operation is text-only                                                                           |
-| Thread/history/message retrieval  | Complete | `Contract-verified`; defensive rows/parts, stable oldest-first valid timestamps, cursor preservation, bounded malformed-page traversal |
+| Thread/history/message retrieval  | Complete | `Contract-verified`; untruthful rows omitted, truthful rows stable oldest-first, cursor preservation, bounded malformed-page traversal |
 | Whole-message reactions           | Complete | `Contract-verified`; ordinary Chat SDK API                                                                                             |
-| Typing and mark-read              | Complete | `Contract-verified`; direct/group start typing, chat-wide read acknowledgement                                                         |
+| Typing and mark-read              | Complete | `Contract-verified`; direct/group start typing, standard chat-wide read plus released `markRead()` alias                               |
 | Inbound message/reaction dispatch | Complete | `Contract-verified`; unknown/malformed facts do not corrupt sibling dispatch                                                           |
 | Static cards and buffered streams | Complete | `Contract-verified`; compiled text/media rather than native interactive cards or native streaming                                      |
 | Inbound/outbound media            | Complete | `Contract-verified`; bounded upload fetches, literal-target/redirect checks, stable inbound identity, conservative cleanup             |
@@ -46,7 +46,7 @@ Evidence labels:
 | Direct/trusted webhook authentication        | Complete | `Contract-verified`, `Provider-observed`; exact raw body, explicit authority, no fallback/double verification |
 | Typed/lossless event observation             | Complete | `Contract-verified`; truthful current projections plus immutable malformed/unknown/future raw events          |
 | Lifecycle/edit/reconciliation/location facts | Complete | `Contract-verified`; observations only, no ordering/terminal/correlation claims                               |
-| Atomic dedupe/callback isolation/`waitUntil` | Complete | `Contract-verified`; rejected delivery/generic callbacks are isolated without delaying acknowledgement        |
+| Atomic dedupe/callback isolation/`waitUntil` | Complete | `Contract-verified`; per-event listener snapshots and rejected callbacks do not delay acknowledgement         |
 | Missing current chat kind                    | Complete | `Contract-verified`; reuse a known fact or retain raw observation without lookup/guess/standard dispatch      |
 | OpenAPI event-name drift                     | Complete | `Contract-verified`; only the canonical enum backing `onLinqEvent()` is inventoried                           |
 
@@ -56,7 +56,8 @@ Evidence labels:
   compatibility and are not an active identity feature.
 - Inbound voice memos are supported as ordinary downloadable audio attachments. The canonical
   inbound media schema does not reliably distinguish them from other audio files.
-- The adapter validates security/correctness constraints for network operations it performs. Host
+- The adapter validates focused security/correctness constraints for network operations it performs,
+  including locally sensitive literal upload targets. Host
   request limits, rate limiting, durable queues, persistence, and availability policy terminate at
   the adapter boundary. Linq upload-host integrity and hostname resolution remain provider/host
   network concerns.

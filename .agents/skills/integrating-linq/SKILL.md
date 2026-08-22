@@ -79,8 +79,9 @@ The signed content is:
 
 The current adapter verifies this scheme directly with `standardwebhooks@1.0.0`. Standard secrets
 use the `whsec_` format, and signatures use `v1,{base64}` values. The current Linq documentation
-still describes SDK `webhooks.unwrap()`, but `@linqapp/sdk@0.42.0` removes that method and its wrapper
-event types at runtime and in declarations. Treat that as a provider documentation/SDK discrepancy.
+still describes SDK `webhooks.unwrap()`, but installed `@linqapp/sdk@0.44.3` does not expose that
+method or wrapper event types at runtime or in declarations. Treat that as a provider
+documentation/SDK discrepancy.
 
 The repository adapter accepts Standard Webhooks only. Deprecated `X-Webhook-*` signature handling
 is not part of its public contract. Partial Standard header sets fail, and verified requests
@@ -104,13 +105,13 @@ identifies the sender, `chat` contains canonical chat facts including `id`, `is_
 `owner_handle`, and message fields such as `id`, `parts`, `sent_at`, `delivered_at`, and `read_at`
 live directly on `data`.
 
-`@linqapp/sdk@0.42.0` exposes the subscription event-name enum and useful lower-level resource
+Installed `@linqapp/sdk@0.44.3` exposes the subscription event-name enum and useful lower-level resource
 types, but no exhaustive webhook envelope union or unwrap runtime. The adapter therefore owns a
 stable envelope, a checked-in OpenAPI-derived event-name inventory, curated normalized
 message/reaction observations, and a lossless raw form for unknown/future events. The drift check
 intentionally does not inventory provider-wide operations.
 
-SDK `0.42.0` also adds the `app_clip` message part for a standalone Linq checkout URL. It is
+The installed SDK also includes the `app_clip` message part for a standalone Linq checkout URL. It is
 iMessage-only and does not downgrade to SMS or RCS. Keep outbound use on the typed native client;
 the adapter normalizes an inbound App Clip URL as ordinary text/link while retaining the full raw
 part for title, description, and image metadata.

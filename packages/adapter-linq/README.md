@@ -33,6 +33,7 @@ Every adapter-owned provider operation resolves a fresh client from lazy credent
 Configuration is validated when the adapter is constructed. The exported configuration interface
 remains structurally compatible with released static, lazy, and trusted-forwarder combinations;
 its optional fields alone do not prove that a usable credential and webhook authority were supplied.
+Static direct verification requires a non-empty signing secret at construction.
 
 The host must pass the untouched request body to the route. The adapter verifies the
 `webhook-id`, `webhook-signature`, and `webhook-timestamp` headers and enforces the Standard
@@ -53,17 +54,19 @@ For canonical Linq thread IDs (`linq:{chatId}`), the adapter supports:
 - canonical returned thread/message identities and lossless Linq raw message data.
 
 Outbound media accepts public HTTPS references or caller-supplied bytes. Adapter-performed uploads
-have a 30-second timeout, reject redirects, credentials, localhost names, and obvious non-public IP
-literals. DNS resolution and the integrity of Linq-issued upload hosts remain provider/host-network
-concerns. Preparation-only attachment cleanup is best effort; uncertain send recovery, retention,
-and deletion policy are not adapter workflows. Inbound attachments retain a stable Linq attachment
-ID and resolve a fresh downloadable URL when `fetchData()` runs.
+have a 30-second timeout and reject redirects, embedded credentials, localhost names, and literal
+loopback, unspecified, private, link-local, carrier-grade NAT, benchmarking, multicast, and mapped
+equivalents. This is a focused SSRF boundary, not a registry of every special-purpose address. DNS
+resolution and the integrity of Linq-issued upload hosts remain provider/host-network concerns.
+Preparation-only attachment cleanup is best effort; uncertain send recovery, retention, and
+deletion policy are not adapter workflows. Inbound attachments retain a stable Linq attachment ID
+and resolve a fresh downloadable URL when `fetchData()` runs.
 
 History parsing isolates malformed/null/unknown parts and tombstones so usable siblings remain
-available. Usable rows with valid provider timestamps are returned oldest-first with stable ties;
-rows without a valid timestamp keep deterministic provider-relative positions. Backward traversal
-skips at most ten consecutive all-filtered provider pages and stops on repeated cursors. Forward
-history is not claimed.
+available. Rows that cannot provide truthful canonical IDs, authorship, and RFC3339 timestamps are
+omitted from the standard Chat SDK page; usable rows are returned oldest-first with stable ties.
+Backward traversal skips at most ten consecutive all-filtered provider pages and stops on repeated
+cursors. Forward history is not claimed.
 
 ### Proactive direct messages
 
@@ -162,8 +165,9 @@ const unsubscribe = linq.onLinqEvent(["message.delivered", "message.failed"], as
 The released `onDeliveryStatus(listener)` API remains as a smaller compatibility view of the same
 authenticated `message.sent`, `message.delivered`, `message.read`, and `message.failed` facts. It
 shares verification and dedupe with `onLinqEvent()` and does not imply ordering, terminal state, or
-request correlation. Listener completion is not awaited; synchronous throws and rejected thenables
-are logged and isolated from sibling callbacks and acknowledgement.
+request correlation. Each event snapshots its listener membership before invocation. Listener
+completion is not awaited; synchronous throws and rejected thenables are logged and isolated from
+sibling callbacks and acknowledgement.
 
 Verification preserves immutable envelope, transport, normalized observations, `rawEvent`, exact
 raw text, and raw bytes. Current known payloads receive typed discriminants when their facts support
@@ -189,6 +193,10 @@ administrative, or other provider-native operations that do not warrant adapter 
 The adapter emits only `linq:{chatId}`. It still decodes persisted historical
 `linq:{chatId}:dm/group` values for released compatibility, but applications should not create new
 IDs in those forms.
+
+Released callers may still invoke `adapter.markRead(threadId, messageId)` as a compatibility alias.
+It delegates to the same chat-wide acknowledgement as the preferred Chat SDK
+`Thread.markAsRead()` path.
 
 ## Errors and responsibility boundary
 

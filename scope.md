@@ -12,6 +12,8 @@ capability status is maintained in
   then canonical provider identity from the accepted send.
 - Static and lazy rotating credentials, explicit trusted webhook forwarding, and the released
   delivery-status compatibility callback over the richer verified event pipeline.
+- Released `adapter.markRead()` source compatibility as an alias of the preferred standard
+  `Thread.markAsRead()` chat-wide acknowledgement.
 - Canonical `linq:{chatId}` identity and decode-only compatibility for persisted
   `linq:{chatId}:dm/group` values.
 - Deterministic text/decoration compilation, service/effect policy, native rich links, outbound
@@ -40,12 +42,12 @@ capability status is maintained in
   seam and receive `2xx`; they do not produce false curated or standard dispatch.
 - Inbound voice memos are ordinary downloadable audio attachments. Linq's current schema does not
   reliably distinguish them from other audio media.
-- Current history traversal is backward-only and bounded. It skips a bounded number of malformed
-  empty provider pages so usable later messages are not hidden. Valid provider timestamps are
-  stably ordered oldest-first; invalid or missing timestamp rows retain provider-relative slots.
+- Current history traversal is backward-only and bounded. It skips a bounded number of all-filtered
+  provider pages so usable later messages are not hidden. Rows without truthful canonical identity,
+  authorship, and RFC3339 timestamps are omitted; usable messages are stably oldest-first.
 - Adapter-performed attachment uploads reject redirects and obvious local-network literal targets
-  and time out after 30 seconds. DNS and Linq-issued upload-host integrity remain provider/host
-  network concerns.
+  and time out after 30 seconds. The filter is intentionally not a registry of every special-use
+  address; DNS and Linq-issued upload-host integrity remain provider/host network concerns.
 
 ## Deferred possibilities
 

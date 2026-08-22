@@ -64,8 +64,9 @@ behavior, or provider delivery reliability. Historical real-delivery observation
 `Provider-observed`.
 
 The checked-in inventory records only the canonical event-name enum supporting the public typed
-event contract. Run `pnpm openapi:check` to detect that schema drift. `@linqapp/sdk@0.42.0` has no
-unwrap union; do not use generated SDK webhook wrappers as a closed-world boundary.
+event contract. Run `pnpm openapi:check` to detect that schema drift. Installed
+`@linqapp/sdk@0.44.3` has no unwrap union; do not use generated SDK webhook wrappers as a
+closed-world boundary.
 
 ## Repository setup and storage
 

@@ -15,7 +15,8 @@ OpenAPI/docs, and the repository's `chat-sdk` and `integrating-linq` skills.
 - Keep endpoint-shaped account and administrative operations on the official client escape hatch:
   `.client` for static credentials and `await .getClient()` for lazy credentials.
 - Preserve released lazy credential rotation, explicit trusted forwarding, proactive `openDM()`,
-  and `onDeliveryStatus()` while sharing the fork's stronger internal machinery.
+  `onDeliveryStatus()`, and the `markRead()` compatibility alias while sharing the fork's stronger
+  internal machinery. Prefer standard `Thread.markAsRead()` in new examples.
 - Validate constraints that prevent adapter-created side effects. Leave provider capabilities and
   provider-enforced policy to Linq rather than adding probes or speculative rules.
 - Translate provider failures through shared Chat SDK adapter errors and retain supported Linq
