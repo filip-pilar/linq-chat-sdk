@@ -12,13 +12,18 @@ import type {
 } from "./webhook.js";
 
 type LinqMessageSendResponse = Awaited<ReturnType<LinqAPIV3["chats"]["messages"]["send"]>>;
+type LinqMessageCreateResponse = Awaited<ReturnType<LinqAPIV3["messages"]["create"]>>;
 type LinqRetrievedMessage = LinqAPIV3.Message;
 export type LinqRawMessage =
   | LinqMessageReceivedWebhookData
   | LinqMessageSendResponse
+  | LinqMessageCreateResponse
   | LinqRetrievedMessage;
 type LinqMessageEvent = LinqMessageReceivedWebhookData;
 type LinqMessagePart = Readonly<Record<string, unknown>>;
+type LinqAttachmentLookupSource =
+  | LinqAPIV3["attachments"]
+  | (() => LinqAPIV3["attachments"] | Promise<LinqAPIV3["attachments"]>);
 
 type LinqThreadId = {
   chatId: string;
@@ -28,7 +33,7 @@ type LinqThreadId = {
 export function parseLinqMessage(
   raw: LinqRawMessage,
   encodeThreadId: (platformData: LinqThreadId) => string,
-  attachmentLookup?: LinqAPIV3["attachments"],
+  attachmentLookup?: LinqAttachmentLookupSource,
 ): Message<LinqRawMessage> {
   const message = normalizeMessage(raw);
   const attachments = message.parts.flatMap((part): Attachment[] => {
@@ -220,7 +225,7 @@ function messageLinks(parts: LinqMessagePart[]): LinkPreview[] {
 
 function toAttachment(
   part: LinqMessagePart,
-  attachmentLookup?: LinqAPIV3["attachments"],
+  attachmentLookup?: LinqAttachmentLookupSource,
 ): Attachment {
   const reference = {
     attachmentId: part.id as string,

@@ -48,7 +48,7 @@
   },
   "dependencies": {
     "@chat-adapter/shared": "^4.38.1",
-    "@linqapp/sdk": "^0.42.0",
+    "@linqapp/sdk": "^0.44.3",
     "standardwebhooks": "^1.0.0"
   },
   "devDependencies": {

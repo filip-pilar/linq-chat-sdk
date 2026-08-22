@@ -7,6 +7,9 @@ import type {
   LinqAnyEvent,
   LinqAdapterConfig,
   LinqConversation,
+  LinqCredentialProvider,
+  LinqCredentials,
+  LinqDeliveryStatusEvent,
   LinqEventMap,
   LinqFutureEvent,
   LinqGroupConversation,
@@ -28,6 +31,7 @@ import type {
   LinqPostableMessage,
   LinqVoiceMemoResult,
   LinqVoiceMemoSource,
+  LinqWebhookVerifier,
   LinqVerifiedUnhandledWebhook,
   LinqVerifiedWebhook,
   LinqWebhookVerificationResult,
@@ -49,6 +53,26 @@ function assertClientCannotBeReassigned(adapter: LinqAdapter): void {
 }
 
 void assertClientCannotBeReassigned;
+
+function assertConvergedCompatibilityContracts(adapter: LinqAdapter): void {
+  const credentials: LinqCredentials = { apiKey: "rotating", signingSecret: "whsec_test" };
+  const provider: LinqCredentialProvider = async () => credentials;
+  const verifier: LinqWebhookVerifier = async (_request, rawBody) => rawBody.byteLength > 0;
+  const lazyConfig = {
+    credentials: provider,
+    webhookVerifier: verifier,
+  } satisfies LinqAdapterConfig;
+
+  expectTypeOf(adapter.getClient()).resolves.toEqualTypeOf<LinqAPIV3>();
+  expectTypeOf(adapter.openDM("+15550000001")).resolves.toBeString();
+  const unsubscribe = adapter.onDeliveryStatus((event) => {
+    expectTypeOf(event).toEqualTypeOf<LinqDeliveryStatusEvent>();
+  });
+  expectTypeOf(unsubscribe).toEqualTypeOf<() => void>();
+  void lazyConfig;
+}
+
+void assertConvergedCompatibilityContracts;
 
 function assertVerifiedWebhookCannotBeConstructed(adapter: LinqAdapter): void {
   const structurallyComplete: Pick<

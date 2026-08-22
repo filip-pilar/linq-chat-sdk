@@ -59,7 +59,7 @@ export type LinqReactionWebhookEvent = LinqWebhookEvent<LinqReactionWebhookData>
 };
 
 export interface LinqWebhookTransportObservation {
-  readonly scheme: "standard";
+  readonly scheme: "standard" | "trusted_forwarder";
   readonly webhookId: string | null;
   readonly timestamp: string;
 }

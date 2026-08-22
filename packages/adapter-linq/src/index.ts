@@ -1,7 +1,12 @@
 export { createLinqAdapter, LinqAdapter } from "./adapter.js";
 export type {
   LinqAdapterConfig,
+  LinqCredentialProvider,
+  LinqCredentials,
   LinqConversation,
+  LinqDeliveryStatus,
+  LinqDeliveryStatusEvent,
+  LinqDeliveryStatusListener,
   LinqGroupConversation,
   LinqGroupUpdateOptions,
   LinqLocationConversation,
@@ -9,6 +14,7 @@ export type {
   LinqSharedLocation,
   LinqVoiceMemoResult,
   LinqVoiceMemoSource,
+  LinqWebhookVerifier,
 } from "./adapter.js";
 export { linqMessage } from "./message.js";
 export type { LinqRawMessage } from "./message-parser.js";

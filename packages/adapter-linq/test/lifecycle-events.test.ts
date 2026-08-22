@@ -132,8 +132,10 @@ describe("typed Linq message lifecycle events", () => {
     const context = await createContext();
     const named = vi.fn();
     const all = vi.fn();
+    const delivery = vi.fn();
     context.adapter.onLinqEvent("message.delivered", named);
     context.adapter.onLinqEvent(all);
+    context.adapter.onDeliveryStatus(delivery);
 
     const first = await context.adapter.handleWebhook(createStandardRequest(deliveredFixture));
     const duplicate = await context.adapter.handleWebhook(
@@ -149,6 +151,13 @@ describe("typed Linq message lifecycle events", () => {
     );
     expect(named).toHaveBeenCalledTimes(1);
     expect(all).toHaveBeenCalledTimes(1);
+    expect(delivery).toHaveBeenCalledTimes(1);
+    expect(delivery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "delivered",
+        messageId: deliveredFixture.data.id,
+      }),
+    );
     expect(context.processMessage).not.toHaveBeenCalled();
     expect(context.processReaction).not.toHaveBeenCalled();
   });

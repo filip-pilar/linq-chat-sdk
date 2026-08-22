@@ -44,6 +44,39 @@ export async function authenticateLinqWebhookRequest(
   return verifyStandardWebhook(request, signingSecret);
 }
 
+export async function authenticateTrustedLinqWebhookRequest(
+  request: Request,
+  verifier: (request: Request, rawBody: Uint8Array) => unknown | Promise<unknown>,
+): Promise<LinqWebhookAuthenticationResult> {
+  const rawBytes = new Uint8Array(await request.arrayBuffer());
+
+  try {
+    const verified = await verifier(request, rawBytes);
+    if (verified === false) {
+      return invalidSignature();
+    }
+  } catch {
+    return invalidSignature();
+  }
+
+  const rawBody = new TextDecoder().decode(rawBytes);
+  try {
+    return {
+      ok: true,
+      event: JSON.parse(rawBody) as unknown,
+      rawBody,
+      rawBodyBase64: Buffer.from(rawBytes).toString("base64"),
+      transport: {
+        scheme: "trusted_forwarder",
+        webhookId: trimmedHeader(request.headers, STANDARD_ID_HEADER),
+        timestamp: trimmedHeader(request.headers, STANDARD_TIMESTAMP_HEADER) ?? "",
+      },
+    };
+  } catch {
+    return invalidJson();
+  }
+}
+
 async function verifyStandardWebhook(
   request: Request,
   signingSecret: string,

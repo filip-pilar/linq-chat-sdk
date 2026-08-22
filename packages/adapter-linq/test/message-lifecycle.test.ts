@@ -1,78 +1,73 @@
 import { Webhook } from "standardwebhooks";
 import { describe, expect, it, vi } from "vitest";
 
-import { createLinqAdapter } from "../src/adapter";
+import { createLinqAdapter } from "../src/adapter.js";
+import deliveredFixture from "./fixtures/message-delivered-2026-02-03.json";
+import failedFixture from "./fixtures/message-failed-2026-02-03.json";
+import receivedFixture from "./fixtures/message-received-2026-02-03.json";
+import readFixture from "./fixtures/message-read-2026-02-03.json";
+import sentFixture from "./fixtures/message-sent-2026-02-03.json";
 
 const SIGNING_SECRET = "whsec_c2hoaC10aGlzLWlzLWEtdGVzdC1zZWNyZXQtdmFsdWU=";
 const API_KEY = "test_linq_api_key";
-const CHAT_ID = "9c1f0a2e-3d4b-4c5d-8e9f-0a1b2c3d4e5f";
-const MESSAGE_ID = "0f2b6f77-4a0e-4a3e-9d5f-8f2f6b8e1c11";
 
-/**
- * Chat SDK has no delivery-status dispatch, so these surface on the adapter.
- * Without them a caller cannot tell a delivered message from one the carrier
- * rejected — the agent believes every send succeeded.
- */
-describe("message lifecycle events", () => {
-  it("reports a failed delivery", async () => {
+describe("onDeliveryStatus compatibility", () => {
+  it.each([
+    [sentFixture, "sent"],
+    [deliveredFixture, "delivered"],
+    [readFixture, "read"],
+  ] as const)("reports authenticated %s lifecycle facts", async (fixture, status) => {
     const adapter = createTestAdapter();
-    const onDeliveryStatus = vi.fn();
-    adapter.onDeliveryStatus(onDeliveryStatus);
+    const listener = vi.fn();
+    adapter.onDeliveryStatus(listener);
 
-    const response = await adapter.handleWebhook(
-      signed(
-        lifecycle("message.failed", {
-          error: { code: 2008, message: "Recipient not allowed" },
-        }),
-      ),
-    );
+    const response = await adapter.handleWebhook(signed(fixture));
 
     expect(response.status).toBe(200);
-    expect(onDeliveryStatus).toHaveBeenCalledWith(
-      expect.objectContaining({
-        status: "failed",
-        threadId: `linq:${CHAT_ID}`,
-        messageId: MESSAGE_ID,
-      }),
-    );
+    expect(listener).toHaveBeenCalledWith({
+      status,
+      threadId: `linq:${fixture.data.chat.id}`,
+      messageId: fixture.data.id,
+      raw: fixture,
+    });
   });
 
-  it("reports delivered and read", async () => {
-    for (const [eventType, status] of [
-      ["message.delivered", "delivered"],
-      ["message.read", "read"],
-    ] as const) {
-      const adapter = createTestAdapter();
-      const onDeliveryStatus = vi.fn();
-      adapter.onDeliveryStatus(onDeliveryStatus);
-
-      await adapter.handleWebhook(signed(lifecycle(eventType)));
-
-      expect(onDeliveryStatus, eventType).toHaveBeenCalledWith(
-        expect.objectContaining({ status, messageId: MESSAGE_ID }),
-      );
-    }
-  });
-
-  it("does not report an inbound message as delivery status", async () => {
+  it("reports canonical failure facts", async () => {
     const adapter = createTestAdapter();
-    const onDeliveryStatus = vi.fn();
-    adapter.onDeliveryStatus(onDeliveryStatus);
+    const listener = vi.fn();
+    adapter.onDeliveryStatus(listener);
 
-    await adapter.handleWebhook(signed(lifecycle("message.received")));
+    const response = await adapter.handleWebhook(signed(failedFixture));
 
-    expect(onDeliveryStatus).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(listener).toHaveBeenCalledWith({
+      status: "failed",
+      threadId: `linq:${failedFixture.data.chat_id}`,
+      messageId: failedFixture.data.message_id,
+      error: { code: failedFixture.data.code, message: failedFixture.data.reason },
+      raw: failedFixture,
+    });
   });
 
-  it("survives a listener that throws, so one bad handler cannot drop a webhook", async () => {
+  it("does not report inbound messages as delivery status", async () => {
+    const adapter = createTestAdapter();
+    const listener = vi.fn();
+    adapter.onDeliveryStatus(listener);
+
+    await adapter.handleWebhook(signed(receivedFixture));
+
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it("isolates listener failures from acknowledgement", async () => {
     const adapter = createTestAdapter();
     adapter.onDeliveryStatus(() => {
       throw new Error("listener exploded");
     });
 
-    const response = await adapter.handleWebhook(signed(lifecycle("message.failed")));
-
-    expect(response.status).toBe(200);
+    await expect(adapter.handleWebhook(signed(failedFixture))).resolves.toMatchObject({
+      status: 200,
+    });
   });
 });
 
@@ -82,7 +77,7 @@ function createTestAdapter() {
 
 function signed(payload: unknown): Request {
   const body = JSON.stringify(payload);
-  const id = "msg_lifecycle";
+  const id = `msg_${crypto.randomUUID()}`;
   const timestamp = new Date();
   const signature = new Webhook(SIGNING_SECRET).sign(id, timestamp, body);
 
@@ -96,26 +91,4 @@ function signed(payload: unknown): Request {
     },
     body,
   });
-}
-
-function lifecycle(eventType: string, extra: Record<string, unknown> = {}) {
-  return {
-    api_version: "v3",
-    webhook_version: "2026-02-03",
-    event_type: eventType,
-    event_id: `lifecycle-${eventType}`,
-    created_at: "2026-08-20T00:00:00.000Z",
-    trace_id: "lifecycle",
-    partner_id: "lifecycle",
-    data: {
-      id: MESSAGE_ID,
-      direction: eventType === "message.received" ? "inbound" : "outbound",
-      chat: { id: CHAT_ID, is_group: false },
-      sender_handle: { handle: "+12025550147", service: "iMessage" },
-      service: "iMessage",
-      parts: [{ type: "text", value: "hello" }],
-      sent_at: "2026-08-20T00:00:00.000Z",
-      ...extra,
-    },
-  };
 }

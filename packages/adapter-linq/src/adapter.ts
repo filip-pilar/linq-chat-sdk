@@ -44,8 +44,13 @@ import { planLinqOutboundMessage, prepareLinqOutboundParts } from "./outbound-me
 import { compileLinqMessageText, compileLinqSendOptions } from "./message-compiler.js";
 import { getLinqReplyPartIndex, withLinqReplyPartIndex } from "./message.js";
 import { fromLinqReaction, toLinqReaction } from "./reactions.js";
-import { authenticateLinqWebhookRequest } from "./verification.js";
 import {
+  authenticateLinqWebhookRequest,
+  authenticateTrustedLinqWebhookRequest,
+  type LinqWebhookAuthenticationResult,
+} from "./verification.js";
+import {
+  failure,
   getVerifiedLinqWebhookEvent,
   normalizeAuthenticatedLinqWebhook,
   responseForLinqWebhookFailure,
@@ -60,15 +65,53 @@ import {
 type LinqThreadId = {
   chatId: string;
   isGroup?: boolean;
+  /** Target handle for an upstream-compatible thread whose chat is created by its first post. */
+  pendingHandle?: string;
 };
 
 const LINQ_EVENT_DEDUPE_TTL_MS = 60 * 60 * 1000;
 
-export interface LinqAdapterConfig {
-  apiKey: string;
-  baseURL?: string;
-  signingSecret: string;
+/** Credentials for provider operations and direct Standard Webhook verification. */
+export interface LinqCredentials {
+  readonly apiKey: string;
+  readonly signingSecret?: string;
 }
+
+/** Resolves current credentials for each adapter-owned provider operation. */
+export type LinqCredentialProvider = () => LinqCredentials | Promise<LinqCredentials>;
+
+/** Authenticates a request delivered through an explicitly trusted forwarder. */
+export type LinqWebhookVerifier = (
+  request: Request,
+  rawBody: Uint8Array,
+) => unknown | Promise<unknown>;
+
+export interface LinqAdapterConfig {
+  /** Static API key. Omit when `credentials` supplies rotating credentials. */
+  apiKey?: string;
+  baseURL?: string;
+  /** Lazy credential source. A fresh client is built for each provider operation. */
+  credentials?: LinqCredentialProvider;
+  /** Static Standard Webhooks secret. May instead be supplied by `credentials`. */
+  signingSecret?: string;
+  /** Explicit verifier for authenticated forwarded webhooks; never falls back to direct signing. */
+  webhookVerifier?: LinqWebhookVerifier;
+}
+
+/** Delivery outcome Linq reported for an outbound message. */
+export type LinqDeliveryStatus = "sent" | "delivered" | "read" | "failed";
+
+/** A compatibility view over one authenticated lifecycle event. */
+export interface LinqDeliveryStatusEvent {
+  readonly status: LinqDeliveryStatus;
+  readonly threadId: string;
+  readonly messageId: string;
+  readonly error?: { readonly code?: number; readonly message?: string };
+  readonly raw: unknown;
+}
+
+/** Receives delivery-status changes. Listener return values are ignored. */
+export type LinqDeliveryStatusListener = (event: LinqDeliveryStatusEvent) => void;
 
 type LinqPartReactionOptions = {
   readonly partIndex?: number;
@@ -148,8 +191,11 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   readonly name: string = "linq";
   readonly userName: string = "linq";
-  private readonly apiClient: LinqAPIV3;
-  private readonly signingSecret: string;
+  private apiClient: LinqAPIV3 | null;
+  private readonly baseURL: string | undefined;
+  private readonly credentials: LinqCredentialProvider | undefined;
+  private readonly signingSecret: string | undefined;
+  private readonly webhookVerifier: LinqWebhookVerifier | undefined;
   private readonly webhookVerificationAuthority = {};
   private readonly linqEvents = new LinqEventRegistry();
 
@@ -158,18 +204,67 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   private logger: Logger;
   // chatId -> isGroup, learned from webhooks, fetchThread, and legacy thread IDs.
   private readonly chatKinds = new Map<string, boolean>();
+  private readonly deliveryStatusListeners = new Set<LinqDeliveryStatusListener>();
 
   constructor(config: LinqAdapterConfig) {
-    this.apiClient = new LinqAPIV3({
-      apiKey: config.apiKey,
-      baseURL: config.baseURL,
-    });
+    if (!config.apiKey && !config.credentials) {
+      throw new Error("Linq requires apiKey or a credentials provider.");
+    }
+    const hasStaticSigningSecret = Object.prototype.hasOwnProperty.call(config, "signingSecret");
+    if (!config.webhookVerifier && !hasStaticSigningSecret && !config.credentials) {
+      throw new Error("Linq requires signingSecret, credentials, or a trusted webhookVerifier.");
+    }
+
+    this.apiClient = config.apiKey
+      ? new LinqAPIV3({ apiKey: config.apiKey, baseURL: config.baseURL })
+      : null;
+    this.baseURL = config.baseURL;
+    this.credentials = config.credentials;
     this.signingSecret = config.signingSecret;
+    this.webhookVerifier = config.webhookVerifier;
     this.logger = new ConsoleLogger();
   }
 
+  /**
+   * Synchronous official client for static `apiKey` configurations.
+   * Lazy configurations must use `getClient()` so credential rotation remains truthful.
+   */
   get client(): LinqAPIV3 {
+    if (!this.apiClient) {
+      throw new Error("Linq lazy credentials require await adapter.getClient().");
+    }
     return this.apiClient;
+  }
+
+  /** Resolve an official client using the current credentials. */
+  async getClient(): Promise<LinqAPIV3> {
+    return this.getApiClient();
+  }
+
+  private async getApiClient(): Promise<LinqAPIV3> {
+    if (this.apiClient) {
+      return this.apiClient;
+    }
+
+    const credentials = await this.credentials?.();
+    if (!credentials?.apiKey) {
+      throw new Error("Linq credentials did not provide an API key.");
+    }
+
+    return new LinqAPIV3({ apiKey: credentials.apiKey, baseURL: this.baseURL });
+  }
+
+  private async getSigningSecret(): Promise<string> {
+    if (this.signingSecret) {
+      return this.signingSecret;
+    }
+
+    const credentials = await this.credentials?.();
+    if (!credentials?.signingSecret) {
+      throw new Error("Linq credentials did not provide a webhook signing secret.");
+    }
+
+    return credentials.signingSecret;
   }
 
   async initialize(chat: ChatInstance): Promise<void> {
@@ -186,9 +281,10 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       update: async (options: LinqGroupUpdateOptions): Promise<void> => {
         const request = normalizeGroupUpdate(options);
         validateKnownGroup(isGroup);
+        const client = await this.getApiClient();
 
         try {
-          await this.apiClient.chats.update(chatId, request);
+          await client.chats.update(chatId, request);
         } catch (error) {
           throw translateLinqError(error, {
             action: "update group chat",
@@ -200,9 +296,10 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       addParticipant: async (handle: string): Promise<void> => {
         validateParticipantHandle(handle);
         validateKnownGroup(isGroup);
+        const client = await this.getApiClient();
 
         try {
-          await this.apiClient.chats.participants.add(chatId, { handle });
+          await client.chats.participants.add(chatId, { handle });
         } catch (error) {
           throw translateLinqError(error, {
             action: "add group chat participant",
@@ -214,9 +311,10 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       removeParticipant: async (handle: string): Promise<void> => {
         validateParticipantHandle(handle);
         validateKnownGroup(isGroup);
+        const client = await this.getApiClient();
 
         try {
-          await this.apiClient.chats.participants.remove(chatId, { handle });
+          await client.chats.participants.remove(chatId, { handle });
         } catch (error) {
           throw translateLinqError(error, {
             action: "remove group chat participant",
@@ -227,9 +325,10 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       },
       leave: async (): Promise<void> => {
         validateKnownGroup(isGroup);
+        const client = await this.getApiClient();
 
         try {
-          await this.apiClient.chats.leaveChat(chatId);
+          await client.chats.leaveChat(chatId);
         } catch (error) {
           throw translateLinqError(error, {
             action: "leave group chat",
@@ -244,9 +343,10 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
         if (isGroup === true) {
           throw validationError("Linq location requests require a direct chat.");
         }
+        const client = await this.getApiClient();
 
         try {
-          await this.apiClient.chats.location.request(chatId);
+          await client.chats.location.request(chatId);
         } catch (error) {
           throw translateLinqError(error, {
             action: "request chat location",
@@ -256,8 +356,9 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
         }
       },
       retrieve: async (): Promise<LinqLocationSnapshot> => {
+        const client = await this.getApiClient();
         try {
-          const response = await this.apiClient.chats.location.retrieve(chatId);
+          const response = await client.chats.location.retrieve(chatId);
           return normalizeLocationSnapshot(threadId, response);
         } catch (error) {
           throw translateLinqError(error, {
@@ -299,8 +400,9 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
         await this.reactToMessagePart(threadId, messageId, reaction, "remove", options);
       },
       stopTyping: async (): Promise<void> => {
+        const client = await this.getApiClient();
         try {
-          await this.apiClient.chats.typing.stop(chatId);
+          await client.chats.typing.stop(chatId);
         } catch (error) {
           throw translateLinqError(error, {
             action: "stop chat typing",
@@ -310,8 +412,9 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
         }
       },
       shareContactCard: async (): Promise<void> => {
+        const client = await this.getApiClient();
         try {
-          await this.apiClient.chats.shareContactCard(chatId);
+          await client.chats.shareContactCard(chatId);
         } catch (error) {
           throw translateLinqError(error, {
             action: "share chat contact card",
@@ -322,9 +425,10 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       },
       sendVoiceMemo: async (source: LinqVoiceMemoSource): Promise<LinqVoiceMemoResult> => {
         const request = normalizeVoiceMemoSource(source);
+        const client = await this.getApiClient();
 
         try {
-          const response = await this.apiClient.chats.sendVoicememo(chatId, request);
+          const response = await client.chats.sendVoicememo(chatId, request);
           const voiceMemo = response.voice_memo;
 
           return Object.freeze({
@@ -381,12 +485,25 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     return this.linqEvents.subscribe(types, handler);
   }
 
+  /** Subscribe to the released delivery-status compatibility view. */
+  onDeliveryStatus(listener: LinqDeliveryStatusListener): () => void {
+    this.deliveryStatusListeners.add(listener);
+
+    return () => {
+      this.deliveryStatusListeners.delete(listener);
+    };
+  }
+
   // Thread ID
   //
   // The encoded form is always `linq:{chatId}` so the same Linq chat maps to the
   // same Chat SDK thread no matter which path (webhook, fetch, send) produced it.
   // Group/DM identity lives in `chatKinds` instead of the thread ID.
   encodeThreadId(platformData: LinqThreadId): string {
+    if (platformData.pendingHandle) {
+      return `linq:pending:${platformData.pendingHandle}`;
+    }
+
     if (platformData.isGroup !== undefined) {
       this.chatKinds.set(platformData.chatId, platformData.isGroup);
     }
@@ -399,6 +516,15 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
     if (adapterName !== "linq" || !chatId) {
       throw new Error(`Invalid Linq thread ID: ${threadId}`);
+    }
+
+    if (chatId === "pending") {
+      const pendingHandle = threadId.slice("linq:pending:".length);
+      if (!pendingHandle) {
+        throw new Error(`Invalid Linq thread ID: ${threadId}`);
+      }
+
+      return { chatId: "", pendingHandle, isGroup: false };
     }
 
     // Older adapter versions encoded group/dm into the thread ID. Keep decoding
@@ -417,12 +543,36 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     return { chatId, isGroup: this.chatKinds.get(chatId) };
   }
 
+  /**
+   * Opens an upstream-compatible bootstrap thread. Linq creates or reuses the
+   * canonical chat only when its first message is accepted.
+   */
+  async openDM(handle: string): Promise<string> {
+    const pendingHandle = handle.trim();
+    if (!pendingHandle) {
+      throw new Error("Linq openDM requires a handle.");
+    }
+
+    return this.encodeThreadId({ chatId: "", pendingHandle, isGroup: false });
+  }
+
+  private requireChatId(threadId: string): string {
+    const { chatId, pendingHandle } = this.decodeThreadId(threadId);
+    if (pendingHandle) {
+      throw new Error(
+        `Linq thread ${threadId} has no chat yet — send a message first to create it.`,
+      );
+    }
+
+    return chatId;
+  }
+
   // Messages
   async fetchMessages(
     threadId: string,
     options?: FetchOptions,
   ): Promise<FetchResult<LinqRawMessage>> {
-    const { chatId } = this.decodeThreadId(threadId);
+    const chatId = this.requireChatId(threadId);
 
     if (options?.direction === "forward") {
       throw new NotImplementedError("Linq message history does not support forward pagination");
@@ -431,11 +581,12 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     let cursor = options?.cursor;
     const visitedCursors = new Set<string>();
     let filteredPageCount = 0;
+    const client = await this.getApiClient();
 
     for (;;) {
       let page: Awaited<ReturnType<LinqAPIV3["chats"]["messages"]["list"]>>;
       try {
-        page = await this.apiClient.chats.messages.list(chatId, {
+        page = await client.chats.messages.list(chatId, {
           cursor,
           limit: options?.limit,
         });
@@ -486,11 +637,12 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   }
 
   async fetchMessage(threadId: string, messageId: string): Promise<Message<LinqRawMessage> | null> {
-    const { chatId } = this.decodeThreadId(threadId);
+    const chatId = this.requireChatId(threadId);
+    const client = await this.getApiClient();
 
     let message: Awaited<ReturnType<LinqAPIV3["messages"]["retrieve"]>>;
     try {
-      message = await this.apiClient.messages.retrieve(messageId);
+      message = await client.messages.retrieve(messageId);
     } catch (error) {
       if (isRecord(error) && error.status === 404) {
         return null;
@@ -538,7 +690,7 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     message: AdapterPostableMessage,
     replyTo?: { message_id: string; part_index?: number },
   ): Promise<RawMessage<LinqRawMessage>> {
-    const { chatId } = this.decodeThreadId(threadId);
+    const { chatId, pendingHandle } = this.decodeThreadId(threadId);
     const compiledText = compileLinqMessageText(message);
     const sendOptions = compileLinqSendOptions(message);
     const card = extractCardElement(message);
@@ -549,6 +701,9 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       cardImageUrls,
       sendOptions.richLink,
     );
+    if (pendingHandle && replyTo) {
+      throw validationError("Linq pending threads cannot reply before their chat exists.");
+    }
     const idempotencyKey = randomUUID();
 
     if (card) {
@@ -564,26 +719,28 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
     const createdAttachmentIds: string[] = [];
     let messageSendingBegan = false;
+    const client = await this.getApiClient();
 
     try {
-      const parts = await prepareLinqOutboundParts(this.apiClient, plan, (attachmentId) => {
+      const parts = await prepareLinqOutboundParts(client, plan, (attachmentId) => {
         createdAttachmentIds.push(attachmentId);
       });
 
       // Once send begins, Linq may have accepted attachment references even if
       // the client ultimately throws, so preparation cleanup must stop here.
       messageSendingBegan = true;
-      const response = await this.apiClient.chats.messages.send(chatId, {
-        message: {
-          idempotency_key: idempotencyKey,
-          parts,
-          ...(sendOptions.preferredService
-            ? { preferred_service: sendOptions.preferredService }
-            : {}),
-          ...(sendOptions.effect ? { effect: { ...sendOptions.effect } } : {}),
-          ...(replyTo ? { reply_to: replyTo } : {}),
-        },
-      });
+      const messageContent = {
+        idempotency_key: idempotencyKey,
+        parts,
+        ...(sendOptions.preferredService
+          ? { preferred_service: sendOptions.preferredService }
+          : {}),
+        ...(sendOptions.effect ? { effect: { ...sendOptions.effect } } : {}),
+        ...(replyTo ? { reply_to: replyTo } : {}),
+      };
+      const response = pendingHandle
+        ? await client.messages.create({ to: [pendingHandle], message: messageContent })
+        : await client.chats.messages.send(chatId, { message: messageContent });
 
       return {
         id: response.message.id,
@@ -592,7 +749,7 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       };
     } catch (error) {
       if (!messageSendingBegan) {
-        await this.cleanupPreparedAttachments(createdAttachmentIds);
+        await this.cleanupPreparedAttachments(client, createdAttachmentIds);
       }
 
       throw translateLinqError(error, {
@@ -603,10 +760,13 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     }
   }
 
-  private async cleanupPreparedAttachments(attachmentIds: string[]): Promise<void> {
+  private async cleanupPreparedAttachments(
+    client: LinqAPIV3,
+    attachmentIds: string[],
+  ): Promise<void> {
     await Promise.allSettled(
       attachmentIds.map(async (attachmentId) => {
-        await this.apiClient.attachments.delete(attachmentId);
+        await client.attachments.delete(attachmentId);
       }),
     );
   }
@@ -621,11 +781,12 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     if (!text) {
       throw validationError("Linq message text cannot be empty.");
     }
-    const { chatId } = this.decodeThreadId(threadId);
+    const chatId = this.requireChatId(threadId);
+    const client = await this.getApiClient();
 
     let response: Awaited<ReturnType<LinqAPIV3["messages"]["update"]>>;
     try {
-      response = await this.apiClient.messages.update(messageId, {
+      response = await client.messages.update(messageId, {
         text,
         part_index: 0,
       });
@@ -655,10 +816,11 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     emoji: EmojiValue | string,
   ): Promise<void> {
     validateStandardReaction(emoji);
-    this.decodeThreadId(threadId);
+    this.requireChatId(threadId);
+    const client = await this.getApiClient();
 
     try {
-      await this.apiClient.messages.addReaction(messageId, {
+      await client.messages.addReaction(messageId, {
         operation: "add",
         ...toLinqReaction(emoji),
       });
@@ -677,10 +839,11 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     emoji: EmojiValue | string,
   ): Promise<void> {
     validateStandardReaction(emoji);
-    this.decodeThreadId(threadId);
+    this.requireChatId(threadId);
+    const client = await this.getApiClient();
 
     try {
-      await this.apiClient.messages.addReaction(messageId, {
+      await client.messages.addReaction(messageId, {
         operation: "remove",
         ...toLinqReaction(emoji),
       });
@@ -729,9 +892,10 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     if (options?.partIndex !== undefined) {
       validatePartIndex(options.partIndex);
     }
+    const client = await this.getApiClient();
 
     try {
-      await this.apiClient.messages.addReaction(messageId, {
+      await client.messages.addReaction(messageId, {
         operation,
         ...toLinqReaction(reaction),
         ...(options?.partIndex === undefined ? {} : { part_index: options.partIndex }),
@@ -747,10 +911,11 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
   // Threads
   async fetchThread(threadId: string): Promise<ThreadInfo> {
-    const { chatId } = this.decodeThreadId(threadId);
+    const chatId = this.requireChatId(threadId);
+    const client = await this.getApiClient();
     let chat: Awaited<ReturnType<LinqAPIV3["chats"]["retrieve"]>>;
     try {
-      chat = await this.apiClient.chats.retrieve(chatId);
+      chat = await client.chats.retrieve(chatId);
     } catch (error) {
       throw translateLinqError(error, {
         action: "retrieve chat",
@@ -771,13 +936,14 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   }
 
   async startTyping(threadId: string, _status?: string): Promise<void> {
-    const { chatId } = this.decodeThreadId(threadId);
+    const chatId = this.requireChatId(threadId);
     if (!UUID_PATTERN.test(chatId)) {
       throw validationError("Linq typing requires a valid chat UUID.");
     }
+    const client = await this.getApiClient();
 
     try {
-      await this.apiClient.chats.typing.start(chatId);
+      await client.chats.typing.start(chatId);
     } catch (error) {
       throw translateLinqError(error, {
         action: "start chat typing",
@@ -793,10 +959,11 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     _messageId: string,
     _message?: Message<LinqRawMessage>,
   ): Promise<void> {
-    const { chatId } = this.decodeThreadId(threadId);
+    const chatId = this.requireChatId(threadId);
+    const client = await this.getApiClient();
 
     try {
-      await this.apiClient.chats.markAsRead(chatId);
+      await client.chats.markAsRead(chatId);
     } catch (error) {
       throw translateLinqError(error, {
         action: "mark chat as read",
@@ -862,6 +1029,8 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
     const genericDispatch = this.dispatchGenericLinqEvent(webhook, genericHandlers);
 
+    this.dispatchDeliveryStatus(webhook);
+
     if (genericHandlers.length > 0 && options?.waitUntil) {
       options.waitUntil(genericDispatch);
     }
@@ -875,6 +1044,56 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     }
 
     return { handled: "ignored" };
+  }
+
+  private dispatchDeliveryStatus(webhook: LinqVerifiedWebhook): void {
+    let delivery: LinqDeliveryStatusEvent | null = null;
+
+    if (
+      (webhook.kind === "message.sent" ||
+        webhook.kind === "message.delivered" ||
+        webhook.kind === "message.read") &&
+      webhook.lifecycle.direction === "outbound"
+    ) {
+      delivery = Object.freeze({
+        status:
+          webhook.kind === "message.sent"
+            ? "sent"
+            : webhook.kind === "message.delivered"
+              ? "delivered"
+              : "read",
+        threadId: this.encodeThreadId({ chatId: webhook.lifecycle.chatId }),
+        messageId: webhook.lifecycle.providerMessageId,
+        raw: webhook.rawEvent,
+      });
+    } else if (
+      webhook.kind === "message.failed" &&
+      webhook.failure.chatId &&
+      webhook.failure.providerMessageId
+    ) {
+      delivery = Object.freeze({
+        status: "failed",
+        threadId: this.encodeThreadId({ chatId: webhook.failure.chatId }),
+        messageId: webhook.failure.providerMessageId,
+        error: Object.freeze({
+          code: webhook.failure.code,
+          ...(webhook.failure.reason === null ? {} : { message: webhook.failure.reason }),
+        }),
+        raw: webhook.rawEvent,
+      });
+    }
+
+    if (!delivery) {
+      return;
+    }
+
+    for (const listener of this.deliveryStatusListeners) {
+      try {
+        listener(delivery);
+      } catch (error) {
+        this.logger.warn("Linq delivery-status listener threw", { error });
+      }
+    }
   }
 
   private async dispatchGenericLinqEvent(
@@ -915,7 +1134,24 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   private async verifyWebhookRequest(request: Request): Promise<{
     result: LinqWebhookVerificationResult;
   }> {
-    const authentication = await authenticateLinqWebhookRequest(request, this.signingSecret);
+    let authentication: LinqWebhookAuthenticationResult;
+    if (this.webhookVerifier) {
+      authentication = await authenticateTrustedLinqWebhookRequest(request, this.webhookVerifier);
+    } else {
+      let signingSecret: string;
+      try {
+        signingSecret = await this.getSigningSecret();
+      } catch {
+        return {
+          result: failure(
+            "missing_signing_secret",
+            503,
+            "Linq webhook signing secret is not configured",
+          ),
+        };
+      }
+      authentication = await authenticateLinqWebhookRequest(request, signingSecret);
+    }
 
     if (!authentication.ok) {
       return { result: authentication };
@@ -1038,7 +1274,7 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     return parseLinqMessage(
       raw,
       (platformData) => this.encodeThreadId(platformData),
-      this.apiClient.attachments,
+      async () => (await this.getApiClient()).attachments,
     );
   }
 
@@ -1058,7 +1294,7 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
     return {
       ...attachment,
-      fetchData: createLinqAttachmentFetcher(this.apiClient.attachments, {
+      fetchData: createLinqAttachmentFetcher(async () => (await this.getApiClient()).attachments, {
         attachmentId,
         filename: attachment.name,
         mimeType: attachment.mimeType,
