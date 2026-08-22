@@ -1,0 +1,290 @@
+[
+  {
+    "api_version": "v3",
+    "webhook_version": "2026-02-03",
+    "event_type": "poll.received",
+    "event_id": "10000000-0000-0000-0000-000000000001",
+    "created_at": "2026-07-08T17:35:01.123456789Z",
+    "trace_id": "poll-received-trace",
+    "partner_id": "70000000-0000-0000-0000-000000000001",
+    "data": {
+      "message_id": "20000000-0000-0000-0000-000000000001",
+      "direction": "inbound",
+      "chat": {
+        "id": "30000000-0000-0000-0000-000000000001",
+        "is_group": true,
+        "owner_handle": {
+          "id": "40000000-0000-0000-0000-000000000001",
+          "handle": "owner@example.com",
+          "joined_at": "2026-07-01T00:00:00Z",
+          "service": "iMessage",
+          "is_me": true,
+          "left_at": null,
+          "status": "active"
+        }
+      },
+      "sender_handle": {
+        "id": "40000000-0000-0000-0000-000000000002",
+        "handle": "+14155550100",
+        "joined_at": "2026-07-01T00:00:00Z",
+        "service": "iMessage",
+        "is_me": false,
+        "left_at": null,
+        "status": "active"
+      },
+      "created_at": "2026-07-08T17:35:00Z",
+      "updated_at": "2026-07-08T17:35:01Z",
+      "poll": {
+        "options": [
+          {
+            "option_id": "50000000-0000-0000-0000-000000000001",
+            "text": "Tacos",
+            "can_be_edited": true,
+            "creator_handle": null,
+            "voters": []
+          },
+          {
+            "option_id": "50000000-0000-0000-0000-000000000002",
+            "text": "Sushi",
+            "can_be_edited": true,
+            "creator_handle": null,
+            "voters": []
+          }
+        ],
+        "total_voters": 0
+      },
+      "service": "iMessage",
+      "received_at": "2026-07-08T17:35:01Z"
+    }
+  },
+  {
+    "api_version": "v3",
+    "webhook_version": "2026-02-03",
+    "event_type": "poll.sent",
+    "event_id": "10000000-0000-0000-0000-000000000002",
+    "created_at": "2026-07-08T17:35:02Z",
+    "trace_id": "poll-sent-trace",
+    "partner_id": "70000000-0000-0000-0000-000000000001",
+    "data": {
+      "message_id": "20000000-0000-0000-0000-000000000001",
+      "direction": "outbound",
+      "chat": {
+        "id": "30000000-0000-0000-0000-000000000001",
+        "is_group": true,
+        "owner_handle": null
+      },
+      "sender_handle": null,
+      "created_at": "2026-07-08T17:35:00Z",
+      "updated_at": "2026-07-08T17:35:02Z",
+      "poll": { "options": [], "total_voters": 0 },
+      "service": "iMessage",
+      "sent_at": "2026-07-08T17:35:02Z",
+      "delivered_at": null,
+      "read_at": null
+    }
+  },
+  {
+    "api_version": "v3",
+    "webhook_version": "2026-02-03",
+    "event_type": "poll.delivered",
+    "event_id": "10000000-0000-0000-0000-000000000003",
+    "created_at": "2026-07-08T17:35:03Z",
+    "trace_id": "poll-delivered-trace",
+    "partner_id": "70000000-0000-0000-0000-000000000001",
+    "data": {
+      "message_id": "20000000-0000-0000-0000-000000000001",
+      "direction": "outbound",
+      "chat": {
+        "id": "30000000-0000-0000-0000-000000000001",
+        "is_group": true,
+        "owner_handle": null
+      },
+      "sender_handle": null,
+      "created_at": "2026-07-08T17:35:00Z",
+      "updated_at": "2026-07-08T17:35:03Z",
+      "poll": { "options": [], "total_voters": 0 },
+      "service": "iMessage",
+      "sent_at": "2026-07-08T17:35:02Z",
+      "delivered_at": "2026-07-08T17:35:03Z",
+      "read_at": null
+    }
+  },
+  {
+    "api_version": "v3",
+    "webhook_version": "2026-02-03",
+    "event_type": "poll.read",
+    "event_id": "10000000-0000-0000-0000-000000000004",
+    "created_at": "2026-07-08T17:35:04Z",
+    "trace_id": "poll-read-trace",
+    "partner_id": "70000000-0000-0000-0000-000000000001",
+    "data": {
+      "message_id": "20000000-0000-0000-0000-000000000001",
+      "direction": "outbound",
+      "chat": {
+        "id": "30000000-0000-0000-0000-000000000001",
+        "is_group": true,
+        "owner_handle": null
+      },
+      "sender_handle": null,
+      "created_at": "2026-07-08T17:35:00Z",
+      "updated_at": "2026-07-08T17:35:04Z",
+      "poll": { "options": [], "total_voters": 0 },
+      "service": "iMessage",
+      "sent_at": "2026-07-08T17:35:02Z",
+      "delivered_at": "2026-07-08T17:35:03Z",
+      "read_at": "2026-07-08T17:35:04Z"
+    }
+  },
+  {
+    "api_version": "v3",
+    "webhook_version": "2026-02-03",
+    "event_type": "poll.updated",
+    "event_id": "10000000-0000-0000-0000-000000000005",
+    "created_at": "2026-07-08T17:36:00Z",
+    "trace_id": "poll-updated-trace",
+    "partner_id": "70000000-0000-0000-0000-000000000001",
+    "data": {
+      "message_id": "20000000-0000-0000-0000-000000000001",
+      "direction": "inbound",
+      "chat": {
+        "id": "30000000-0000-0000-0000-000000000001",
+        "is_group": true,
+        "owner_handle": null
+      },
+      "sender_handle": {
+        "id": "40000000-0000-0000-0000-000000000001",
+        "handle": "owner@example.com",
+        "joined_at": "2026-07-01T00:00:00Z",
+        "service": "iMessage",
+        "is_me": true,
+        "left_at": null,
+        "status": "active"
+      },
+      "added_options": [
+        {
+          "option_id": "50000000-0000-0000-0000-000000000003",
+          "text": "Pizza",
+          "can_be_edited": true,
+          "creator_handle": null,
+          "voters": []
+        }
+      ],
+      "service": "iMessage"
+    }
+  },
+  {
+    "api_version": "v3",
+    "webhook_version": "2026-02-03",
+    "event_type": "poll.failed",
+    "event_id": "10000000-0000-0000-0000-000000000006",
+    "created_at": "2026-07-08T17:36:01Z",
+    "trace_id": "poll-failed-trace",
+    "partner_id": "70000000-0000-0000-0000-000000000001",
+    "data": {
+      "message_id": "20000000-0000-0000-0000-000000000001",
+      "direction": "outbound",
+      "chat": {
+        "id": "30000000-0000-0000-0000-000000000001",
+        "is_group": true,
+        "owner_handle": null
+      },
+      "sender_handle": null,
+      "poll": { "options": [], "total_voters": 0 },
+      "service": "iMessage",
+      "error": { "code": 4001, "message": "Message send failed" },
+      "failed_at": "2026-07-08T17:36:01Z"
+    }
+  },
+  {
+    "api_version": "v3",
+    "webhook_version": "2026-02-03",
+    "event_type": "poll.vote.added",
+    "event_id": "10000000-0000-0000-0000-000000000007",
+    "created_at": "2026-07-08T17:38:00Z",
+    "trace_id": "poll-vote-added-trace",
+    "partner_id": "70000000-0000-0000-0000-000000000001",
+    "data": {
+      "message_id": "20000000-0000-0000-0000-000000000001",
+      "direction": "inbound",
+      "chat": {
+        "id": "30000000-0000-0000-0000-000000000001",
+        "is_group": true,
+        "owner_handle": null
+      },
+      "sender_handle": {
+        "id": "40000000-0000-0000-0000-000000000002",
+        "handle": "+14155550100",
+        "joined_at": "2026-07-01T00:00:00Z",
+        "service": "iMessage",
+        "is_me": false,
+        "left_at": null,
+        "status": "active"
+      },
+      "option_id": "50000000-0000-0000-0000-000000000001",
+      "service": "iMessage"
+    }
+  },
+  {
+    "api_version": "v3",
+    "webhook_version": "2026-02-03",
+    "event_type": "poll.vote.removed",
+    "event_id": "10000000-0000-0000-0000-000000000008",
+    "created_at": "2026-07-08T17:39:00Z",
+    "trace_id": "poll-vote-removed-trace",
+    "partner_id": "70000000-0000-0000-0000-000000000001",
+    "data": {
+      "message_id": "20000000-0000-0000-0000-000000000001",
+      "direction": "inbound",
+      "chat": {
+        "id": "30000000-0000-0000-0000-000000000001",
+        "is_group": true,
+        "owner_handle": null
+      },
+      "sender_handle": {
+        "id": "40000000-0000-0000-0000-000000000002",
+        "handle": "+14155550100",
+        "joined_at": "2026-07-01T00:00:00Z",
+        "service": "iMessage",
+        "is_me": false,
+        "left_at": null,
+        "status": "active"
+      },
+      "option_id": "50000000-0000-0000-0000-000000000001",
+      "service": "iMessage"
+    }
+  },
+  {
+    "api_version": "v3",
+    "webhook_version": "2026-02-03",
+    "event_type": "poll.reaction.added",
+    "event_id": "10000000-0000-0000-0000-000000000009",
+    "created_at": "2026-07-08T17:40:00Z",
+    "trace_id": "poll-reaction-trace",
+    "partner_id": "70000000-0000-0000-0000-000000000001",
+    "data": {
+      "chat_id": "30000000-0000-0000-0000-000000000001",
+      "message_id": "20000000-0000-0000-0000-000000000001",
+      "part_index": 0,
+      "reaction_type": "sticker",
+      "is_from_me": false,
+      "reacted_at": "2026-07-08T17:40:00Z",
+      "service": "iMessage",
+      "from_handle": {
+        "id": "40000000-0000-0000-0000-000000000002",
+        "handle": "+14155550100",
+        "joined_at": "2026-07-01T00:00:00Z",
+        "service": "iMessage",
+        "is_me": false,
+        "left_at": null,
+        "status": "active"
+      },
+      "sticker": {
+        "file_name": "vote.png",
+        "mime_type": "image/png",
+        "url": "https://example.com/vote.png",
+        "width": 64,
+        "height": 64
+      }
+    }
+  }
+]

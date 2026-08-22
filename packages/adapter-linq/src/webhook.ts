@@ -1,6 +1,14 @@
 import type { LinqAPIV3 } from "@linqapp/sdk";
 
 import { immutableJsonSnapshot, isRecord, isUsableLinqChatId, isUsableLinqId } from "./guards.js";
+import type { LinqHandle } from "./message.js";
+import {
+  isLinqPollUuid,
+  parsePollContent,
+  parsePollOption,
+  type LinqPollContent,
+  type LinqPollOption,
+} from "./polls.js";
 import { parseLinqTimestamp } from "./timestamps.js";
 
 export const LINQ_WEBHOOK_VERSION = "2026-02-03" as const;
@@ -198,6 +206,8 @@ export interface LinqMessagePartObservation {
   readonly index: number;
   readonly type: string | null;
   readonly value: string | null;
+  readonly mentionTarget: LinqHandle | null;
+  readonly mentionRange: readonly [start: number, end: number] | null;
   readonly textDecorations: readonly LinqTextDecorationObservation[];
   readonly reactions: readonly LinqPartReactionObservation[];
   readonly raw: LinqWebhookRawValue;
@@ -248,6 +258,70 @@ export interface LinqReactionObservation {
   readonly sticker: LinqStickerObservation | null;
 }
 
+export type LinqPollEventType =
+  | "poll.received"
+  | "poll.sent"
+  | "poll.delivered"
+  | "poll.read"
+  | "poll.updated"
+  | "poll.failed"
+  | "poll.vote.added"
+  | "poll.vote.removed"
+  | "poll.reaction.added";
+
+export interface LinqPollChatObservation {
+  readonly id: string;
+  readonly conversationKind: LinqConversationKind;
+  readonly ownerHandle: LinqChatHandleObservation | null;
+}
+
+interface LinqPollEventBaseData {
+  readonly messageId: string;
+  readonly direction: "inbound" | "outbound";
+  readonly chat: LinqPollChatObservation;
+  readonly senderHandle: LinqChatHandleObservation | null;
+  readonly service: LinqAPIV3.ServiceType;
+}
+
+export interface LinqPollReceivedEventData extends LinqPollEventBaseData {
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly receivedAt: string;
+  readonly poll: LinqPollContent;
+}
+
+export interface LinqPollReceiptEventData extends LinqPollEventBaseData {
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly sentAt: string;
+  readonly deliveredAt: string | null;
+  readonly readAt: string | null;
+  readonly poll: LinqPollContent;
+}
+
+export interface LinqPollUpdatedEventData extends LinqPollEventBaseData {
+  readonly senderHandle: LinqChatHandleObservation;
+  readonly addedOptions: readonly LinqPollOption[];
+}
+
+export interface LinqPollFailedEventData extends LinqPollEventBaseData {
+  readonly error: { readonly code: number; readonly message: string };
+  readonly failedAt: string;
+  readonly poll: LinqPollContent;
+}
+
+export interface LinqPollVoteEventData extends LinqPollEventBaseData {
+  readonly senderHandle: LinqChatHandleObservation;
+  readonly optionId: string;
+}
+
+export type LinqPollEventData =
+  | LinqPollReceivedEventData
+  | LinqPollReceiptEventData
+  | LinqPollUpdatedEventData
+  | LinqPollFailedEventData
+  | LinqPollVoteEventData;
+
 interface LinqVerifiedWebhookBase {
   readonly envelope: LinqWebhookEnvelopeObservation;
   readonly transport: LinqWebhookTransportObservation;
@@ -294,6 +368,16 @@ export interface LinqVerifiedLocationSharingStoppedWebhook extends LinqVerifiedW
   readonly locationSharing: LinqLocationSharingStoppedEventData;
 }
 
+export interface LinqVerifiedPollWebhook extends LinqVerifiedWebhookBase {
+  readonly kind: Exclude<LinqPollEventType, "poll.reaction.added">;
+  readonly poll: LinqPollEventData;
+}
+
+export interface LinqVerifiedPollReactionWebhook extends LinqVerifiedWebhookBase {
+  readonly kind: "poll.reaction.added";
+  readonly reaction: LinqReactionObservation;
+}
+
 export interface LinqVerifiedUnhandledWebhook extends LinqVerifiedWebhookBase {
   readonly kind: "unhandled";
 }
@@ -310,6 +394,8 @@ export type LinqVerifiedWebhook =
   | LinqVerifiedReactionWebhook
   | LinqVerifiedLocationSharingStartedWebhook
   | LinqVerifiedLocationSharingStoppedWebhook
+  | LinqVerifiedPollWebhook
+  | LinqVerifiedPollReactionWebhook
   | LinqVerifiedUnhandledWebhook
   | LinqVerifiedUnsupportedVersionWebhook;
 
@@ -324,6 +410,15 @@ const CURATED_LINQ_EVENT_TYPES = new Set<string>([
   "reaction.removed",
   "location.sharing.started",
   "location.sharing.stopped",
+  "poll.received",
+  "poll.sent",
+  "poll.delivered",
+  "poll.read",
+  "poll.updated",
+  "poll.failed",
+  "poll.vote.added",
+  "poll.vote.removed",
+  "poll.reaction.added",
 ]);
 
 /** Whether a current event name promises a curated adapter projection. */
@@ -463,6 +558,24 @@ export function normalizeAuthenticatedLinqWebhook(
     return {
       ok: true,
       webhook: Object.freeze({ ...base, kind: envelope.eventType, reaction }),
+    };
+  }
+
+  if (isPollEventType(envelope.eventType)) {
+    if (envelope.eventType === "poll.reaction.added") {
+      const reaction = parseReactionObservation(rawEvent.data);
+      if (!reaction) return authenticatedUnhandled(base);
+      return {
+        ok: true,
+        webhook: Object.freeze({ ...base, kind: envelope.eventType, reaction }),
+      };
+    }
+
+    const poll = parsePollEventData(envelope.eventType, rawEvent.data);
+    if (!poll) return authenticatedUnhandled(base);
+    return {
+      ok: true,
+      webhook: Object.freeze({ ...base, kind: envelope.eventType, poll }),
     };
   }
 
@@ -670,6 +783,8 @@ function messagePartObservation(
       index,
       type: null,
       value: null,
+      mentionTarget: null,
+      mentionRange: null,
       textDecorations: Object.freeze([]),
       reactions: Object.freeze([]),
       raw,
@@ -720,10 +835,32 @@ function messagePartObservation(
     index,
     type: typeof raw.type === "string" ? raw.type : null,
     value: typeof raw.value === "string" ? raw.value : null,
+    mentionTarget: typeof raw.mention === "string" ? raw.mention : null,
+    mentionRange: validMentionObservationRange(raw.mention_range, raw.value),
     textDecorations: Object.freeze(decorations),
     reactions: Object.freeze(reactions),
     raw: raw as LinqWebhookRawEvent,
   });
+}
+
+function validMentionObservationRange(
+  value: unknown,
+  text: unknown,
+): readonly [number, number] | null {
+  if (
+    typeof text !== "string" ||
+    !Array.isArray(value) ||
+    value.length !== 2 ||
+    !Number.isInteger(value[0]) ||
+    !Number.isInteger(value[1]) ||
+    (value[0] as number) < 0 ||
+    (value[0] as number) >= (value[1] as number) ||
+    (value[1] as number) > text.length
+  ) {
+    return null;
+  }
+
+  return Object.freeze([value[0] as number, value[1] as number]);
 }
 
 function isMessageLifecycleEventType(value: string): value is LinqMessageLifecycleEventType {
@@ -827,6 +964,156 @@ function parseMessageFailedEventData(value: unknown): LinqMessageFailedEventData
     service: isService(value.service) ? value.service : null,
     preferredService: isServicePreference(value.preferred_service) ? value.preferred_service : null,
     failedAt: value.failed_at,
+  });
+}
+
+function isPollEventType(value: string): value is LinqPollEventType {
+  return (
+    value === "poll.received" ||
+    value === "poll.sent" ||
+    value === "poll.delivered" ||
+    value === "poll.read" ||
+    value === "poll.updated" ||
+    value === "poll.failed" ||
+    value === "poll.vote.added" ||
+    value === "poll.vote.removed" ||
+    value === "poll.reaction.added"
+  );
+}
+
+function parsePollEventData(
+  eventType: Exclude<LinqPollEventType, "poll.reaction.added">,
+  value: unknown,
+): LinqPollEventData | null {
+  const base = parsePollEventBase(value);
+  if (!base || !isRecord(value)) return null;
+
+  if (eventType === "poll.received") {
+    const poll = parsePollContent(value.poll);
+    if (
+      !poll ||
+      !isValidTimestamp(value.created_at) ||
+      !isValidTimestamp(value.updated_at) ||
+      !isValidTimestamp(value.received_at)
+    ) {
+      return null;
+    }
+
+    return Object.freeze({
+      ...base,
+      createdAt: value.created_at,
+      updatedAt: value.updated_at,
+      receivedAt: value.received_at,
+      poll,
+    });
+  }
+
+  if (eventType === "poll.sent" || eventType === "poll.delivered" || eventType === "poll.read") {
+    const poll = parsePollContent(value.poll);
+    if (
+      !poll ||
+      !isValidTimestamp(value.created_at) ||
+      !isValidTimestamp(value.updated_at) ||
+      !isValidTimestamp(value.sent_at) ||
+      !isNullableTimestamp(value.delivered_at) ||
+      !isNullableTimestamp(value.read_at)
+    ) {
+      return null;
+    }
+    const deliveredAt = nullableTimestamp(value.delivered_at);
+    const readAt = nullableTimestamp(value.read_at);
+    if (
+      (eventType === "poll.sent" && (deliveredAt !== null || readAt !== null)) ||
+      (eventType === "poll.delivered" && (deliveredAt === null || readAt !== null)) ||
+      (eventType === "poll.read" && (deliveredAt === null || readAt === null))
+    ) {
+      return null;
+    }
+
+    return Object.freeze({
+      ...base,
+      createdAt: value.created_at,
+      updatedAt: value.updated_at,
+      sentAt: value.sent_at,
+      deliveredAt,
+      readAt,
+      poll,
+    });
+  }
+
+  if (eventType === "poll.updated") {
+    if (!base.senderHandle || !Array.isArray(value.added_options)) return null;
+    const addedOptions: LinqPollOption[] = [];
+    for (const rawOption of value.added_options) {
+      const option = parsePollOption(rawOption);
+      if (!option) return null;
+      addedOptions.push(option);
+    }
+    return Object.freeze({
+      ...base,
+      senderHandle: base.senderHandle,
+      addedOptions: Object.freeze(addedOptions),
+    });
+  }
+
+  if (eventType === "poll.failed") {
+    const poll = parsePollContent(value.poll);
+    if (
+      !poll ||
+      !isRecord(value.error) ||
+      !Number.isInteger(value.error.code) ||
+      !isNonEmptyString(value.error.message) ||
+      !isValidTimestamp(value.failed_at)
+    ) {
+      return null;
+    }
+    return Object.freeze({
+      ...base,
+      poll,
+      error: Object.freeze({ code: value.error.code as number, message: value.error.message }),
+      failedAt: value.failed_at,
+    });
+  }
+
+  if (!base.senderHandle || !isLinqPollUuid(value.option_id)) return null;
+  return Object.freeze({
+    ...base,
+    senderHandle: base.senderHandle,
+    optionId: value.option_id,
+  });
+}
+
+function parsePollEventBase(value: unknown): LinqPollEventBaseData | null {
+  if (!isRecord(value) || !isRecord(value.chat)) return null;
+  const owner = valueOrNull(value.chat.owner_handle);
+  const sender = valueOrNull(value.sender_handle);
+  if (
+    !isLinqPollUuid(value.message_id) ||
+    (value.direction !== "inbound" && value.direction !== "outbound") ||
+    !isLinqPollUuid(value.chat.id) ||
+    !isNullableBoolean(value.chat.is_group) ||
+    (owner !== null && !isChatHandle(owner)) ||
+    (sender !== null && !isChatHandle(sender)) ||
+    !isService(value.service)
+  ) {
+    return null;
+  }
+
+  return Object.freeze({
+    messageId: value.message_id,
+    direction: value.direction,
+    chat: Object.freeze({
+      id: value.chat.id,
+      conversationKind:
+        value.chat.is_group === true
+          ? "group"
+          : value.chat.is_group === false
+            ? "direct"
+            : "unknown",
+      ownerHandle: owner === null ? null : chatHandleObservation(owner),
+    }),
+    senderHandle: sender === null ? null : chatHandleObservation(sender),
+    service: value.service,
   });
 }
 

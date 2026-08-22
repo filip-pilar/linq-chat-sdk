@@ -4,6 +4,11 @@ import type {
   LinqMessageFailedEventData,
   LinqMessageLifecycleEventData,
   LinqMessageReceivedWebhookData,
+  LinqPollFailedEventData,
+  LinqPollReceivedEventData,
+  LinqPollReceiptEventData,
+  LinqPollUpdatedEventData,
+  LinqPollVoteEventData,
   LinqLocationSharingStartedEventData,
   LinqLocationSharingStoppedEventData,
   LinqReactionWebhookData,
@@ -25,6 +30,8 @@ export interface LinqEventBase<TType extends string, TData> {
 type LinqReactionEventType = "reaction.added" | "reaction.removed";
 
 type LinqMessageLifecycleEventType = "message.sent" | "message.delivered" | "message.read";
+type LinqPollReceiptEventType = "poll.sent" | "poll.delivered" | "poll.read";
+type LinqPollVoteEventType = "poll.vote.added" | "poll.vote.removed";
 
 type LinqEventData<TType extends LinqKnownEventType> = TType extends "message.received"
   ? LinqMessageReceivedWebhookData
@@ -40,7 +47,19 @@ type LinqEventData<TType extends LinqKnownEventType> = TType extends "message.re
             ? LinqLocationSharingStartedEventData
             : TType extends "location.sharing.stopped"
               ? LinqLocationSharingStoppedEventData
-              : LinqWebhookRawValue;
+              : TType extends "poll.received"
+                ? LinqPollReceivedEventData
+                : TType extends LinqPollReceiptEventType
+                  ? LinqPollReceiptEventData
+                  : TType extends "poll.updated"
+                    ? LinqPollUpdatedEventData
+                    : TType extends "poll.failed"
+                      ? LinqPollFailedEventData
+                      : TType extends LinqPollVoteEventType
+                        ? LinqPollVoteEventData
+                        : TType extends "poll.reaction.added"
+                          ? LinqReactionWebhookData
+                          : LinqWebhookRawValue;
 
 export type LinqEventMap = {
   readonly [TType in LinqKnownEventType]: LinqEventBase<TType, LinqEventData<TType>>;
@@ -83,7 +102,16 @@ export function createLinqEvent(webhook: LinqVerifiedWebhook): LinqAnyEvent {
           : webhook.kind === "location.sharing.started" ||
               webhook.kind === "location.sharing.stopped"
             ? webhook.locationSharing
-            : (webhook.rawEvent.data ?? null);
+            : webhook.kind === "poll.received" ||
+                webhook.kind === "poll.sent" ||
+                webhook.kind === "poll.delivered" ||
+                webhook.kind === "poll.read" ||
+                webhook.kind === "poll.updated" ||
+                webhook.kind === "poll.failed" ||
+                webhook.kind === "poll.vote.added" ||
+                webhook.kind === "poll.vote.removed"
+              ? webhook.poll
+              : (webhook.rawEvent.data ?? null);
 
   return Object.freeze({
     type: webhook.envelope.eventType,

@@ -656,6 +656,7 @@ describe("Linq conversation facade", () => {
       "addReaction",
       "group",
       "location",
+      "polls",
       "removeReaction",
       "replyToPart",
       "sendVoiceMemo",
@@ -670,9 +671,16 @@ describe("Linq conversation facade", () => {
       "update",
     ]);
     expect(Object.keys(conversation.location).sort()).toEqual(["request", "retrieve"]);
+    expect(Object.keys(conversation.polls).sort()).toEqual([
+      "addOptions",
+      "create",
+      "retrieve",
+      "vote",
+    ]);
     expect(Object.isFrozen(conversation)).toBe(true);
     expect(Object.isFrozen(conversation.group)).toBe(true);
     expect(Object.isFrozen(conversation.location)).toBe(true);
+    expect(Object.isFrozen(conversation.polls)).toBe(true);
   });
 
   it("translates part-reaction provider failures", async () => {

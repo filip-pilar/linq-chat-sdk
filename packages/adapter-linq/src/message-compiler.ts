@@ -10,7 +10,12 @@ import type {
 } from "chat";
 
 import { isRecord } from "./guards.js";
-import type { LinqMessageEffect, LinqPreferredService, LinqTextDecoration } from "./message.js";
+import type {
+  LinqMessageEffect,
+  LinqMentionOptions,
+  LinqPreferredService,
+  LinqTextDecoration,
+} from "./message.js";
 
 const DIVIDER_LINE = "———";
 const STYLES = new Set(["bold", "italic", "strikethrough", "underline"]);
@@ -39,6 +44,8 @@ const SCREEN_EFFECTS = new Set([
   "spotlight",
 ]);
 const BUBBLE_EFFECTS = new Set(["slam", "loud", "gentle", "invisible"]);
+const PARTICIPANT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+const MENTION_TOKEN_PATTERN = /<@([^<>]+)>/gu;
 
 type LinqDecorationStyle = Extract<LinqTextDecoration, { style: string }>["style"];
 type LinqDecorationAnimation = Extract<LinqTextDecoration, { animation: string }>["animation"];
@@ -57,6 +64,11 @@ export type LinqCompiledDecoration =
 
 export interface CompiledLinqMessageText {
   decorations: LinqCompiledDecoration[];
+  mention?: {
+    range?: [start: number, end: number];
+    target: string;
+    targetKind: "handle" | "participant_id";
+  };
   text: string;
 }
 
@@ -72,12 +84,50 @@ type TextFragment = CompiledLinqMessageText;
 export function compileLinqMessageText(message: AdapterPostableMessage): CompiledLinqMessageText {
   const rendered = compilePostable(message);
   const trimmed = trimFragment(rendered);
+  const mention = compileMention(message, trimmed.text);
   const manual = extractManualDecorations(message, trimmed.text.length);
+
+  if (mention && manual.length > 0) {
+    throw validationError("Linq mentions cannot be combined with manual text decorations.");
+  }
+
+  if (mention) {
+    return {
+      text: mention.text,
+      decorations: [],
+      mention: mention.mention,
+    };
+  }
+
   const decorations = normalizeDecorations([...trimmed.decorations, ...manual]);
 
   assertNonOverlappingAnimations(decorations);
 
   return { text: trimmed.text, decorations };
+}
+
+/** Replace a standard mention's participant ID with the resolved chat handle. */
+export function resolveCompiledLinqMention(
+  compiled: CompiledLinqMessageText,
+  handle: string,
+): CompiledLinqMessageText {
+  const mention = compiled.mention;
+  if (!mention || mention.targetKind !== "participant_id" || !mention.range) {
+    return compiled;
+  }
+
+  validateMentionHandle(handle);
+  const [start, end] = mention.range;
+
+  return {
+    decorations: [],
+    text: `${compiled.text.slice(0, start)}${handle}${compiled.text.slice(end)}`,
+    mention: {
+      range: [start, start + handle.length],
+      target: handle,
+      targetKind: "handle",
+    },
+  };
 }
 
 /** Validate and compile Linq's message-level service/effect request fields before any I/O. */
@@ -110,6 +160,16 @@ export function compileLinqSendOptions(message: AdapterPostableMessage): Compile
     ...(preferredService === undefined ? {} : { preferredService }),
     ...(richLink === undefined ? {} : { richLink }),
   };
+}
+
+/** Cross-field validation that depends on both compiled content and send metadata. */
+export function validateCompiledLinqMention(
+  compiled: CompiledLinqMessageText,
+  options: CompiledLinqSendOptions,
+): void {
+  if (compiled.mention && options.richLink !== undefined) {
+    throw validationError("Linq mentions cannot be combined with rich links.");
+  }
 }
 
 /** Compile Linq's deterministic static-card fallback, including CardText markdown styles. */
@@ -146,6 +206,112 @@ function compilePostable(message: AdapterPostableMessage): TextFragment {
   }
 
   return plain("");
+}
+
+function compileMention(
+  message: AdapterPostableMessage,
+  text: string,
+): { text: string; mention: NonNullable<CompiledLinqMessageText["mention"]> } | undefined {
+  const explicit = extractExplicitMention(message);
+  const tokens = [...text.matchAll(MENTION_TOKEN_PATTERN)];
+
+  if (explicit && tokens.length > 0) {
+    throw validationError(
+      "Linq messages must use either one Chat SDK mention token or explicit mention options, not both.",
+    );
+  }
+  if (tokens.length > 1) {
+    throw validationError("Linq messages support exactly one native mention target.");
+  }
+
+  if (explicit) {
+    if (!text) {
+      throw validationError("Linq mentions require one non-empty text part.");
+    }
+    const range = validateMentionRange(explicit.range, text.length);
+    return {
+      text,
+      mention: {
+        ...(range === undefined ? {} : { range }),
+        target: validateMentionHandle(explicit.handle),
+        targetKind: "handle",
+      },
+    };
+  }
+
+  const token = tokens[0];
+  if (!token || token.index === undefined) return undefined;
+  const target = token[1];
+  if (!target) {
+    throw validationError("Linq mention tokens require a participant handle or ID.");
+  }
+
+  const targetKind = PARTICIPANT_ID_PATTERN.test(target) ? "participant_id" : "handle";
+  if (targetKind === "handle") validateMentionHandle(target);
+  const start = token.index;
+  const replaced = `${text.slice(0, start)}${target}${text.slice(start + token[0].length)}`;
+
+  return {
+    text: replaced,
+    mention: {
+      range: [start, start + target.length],
+      target,
+      targetKind,
+    },
+  };
+}
+
+function extractExplicitMention(message: AdapterPostableMessage): LinqMentionOptions | undefined {
+  if (typeof message === "string" || !isRecord(message) || !isRecord(message.linq)) {
+    return undefined;
+  }
+
+  const value = message.linq.mention;
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) {
+    throw validationError("Linq mention options must be an object.");
+  }
+
+  return value as unknown as LinqMentionOptions;
+}
+
+function validateMentionRange(
+  value: unknown,
+  textLength: number,
+): [start: number, end: number] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length !== 2) {
+    throw validationError("Linq mention ranges must be [start, end] UTF-16 offsets.");
+  }
+
+  const [start, end] = value;
+  if (
+    !Number.isInteger(start) ||
+    !Number.isInteger(end) ||
+    (start as number) < 0 ||
+    (start as number) >= (end as number) ||
+    (end as number) > textLength
+  ) {
+    throw validationError(
+      "Linq mention ranges must satisfy 0 <= start < end <= rendered text length.",
+    );
+  }
+
+  return [start as number, end as number];
+}
+
+export function validateMentionHandle(value: unknown): string {
+  if (typeof value !== "string" || value.trim() !== value) {
+    throw validationError("Linq mention handles must be E.164 phone numbers or email addresses.");
+  }
+
+  const isE164 = /^\+[1-9]\d{1,14}$/u.test(value);
+  const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(value);
+  if (!isE164 && !isEmail) {
+    throw validationError("Linq mention handles must be E.164 phone numbers or email addresses.");
+  }
+
+  return value;
 }
 
 function compileAst(ast: FormattedContent): TextFragment {

@@ -15,6 +15,7 @@ import type {
   LinqFutureEvent,
   LinqGroupConversation,
   LinqGroupUpdateOptions,
+  LinqHandle,
   LinqKnownEventType,
   LinqLocationConversation,
   LinqLocationSharingStartedEventData,
@@ -25,11 +26,22 @@ import type {
   LinqMessageEditedEventData,
   LinqMessageObservation,
   LinqMessageOptions,
+  LinqMentionOptions,
   LinqMessageReceivedWebhookData,
   LinqRawMessage,
   LinqReactionObservation,
+  LinqReactionWebhookData,
   LinqSharedLocation,
   LinqPostableMessage,
+  LinqPollConversation,
+  LinqPollCreateOptions,
+  LinqPollFailedEventData,
+  LinqPollReceivedEventData,
+  LinqPollReceiptEventData,
+  LinqPollSnapshot,
+  LinqPollUpdatedEventData,
+  LinqPollVoteEventData,
+  LinqPollVoteInput,
   LinqVoiceMemoResult,
   LinqVoiceMemoSource,
   LinqWebhookVerifier,
@@ -163,6 +175,25 @@ function assertTypedEventRegistration(adapter: LinqAdapter): void {
     expectTypeOf(event.type).toEqualTypeOf<"chat.created">();
     expectTypeOf(event.data).not.toBeAny();
   });
+  adapter.onLinqEvent("poll.received", (event) => {
+    expectTypeOf(event.data).toEqualTypeOf<LinqPollReceivedEventData>();
+    expectTypeOf(event.data.poll.options[0]?.optionId).toEqualTypeOf<string | undefined>();
+  });
+  adapter.onLinqEvent(["poll.sent", "poll.read"], (event) => {
+    expectTypeOf(event.data).toEqualTypeOf<LinqPollReceiptEventData>();
+  });
+  adapter.onLinqEvent("poll.updated", (event) => {
+    expectTypeOf(event.data).toEqualTypeOf<LinqPollUpdatedEventData>();
+  });
+  adapter.onLinqEvent("poll.failed", (event) => {
+    expectTypeOf(event.data).toEqualTypeOf<LinqPollFailedEventData>();
+  });
+  adapter.onLinqEvent(["poll.vote.added", "poll.vote.removed"], (event) => {
+    expectTypeOf(event.data).toEqualTypeOf<LinqPollVoteEventData>();
+  });
+  adapter.onLinqEvent("poll.reaction.added", (event) => {
+    expectTypeOf(event.data).toEqualTypeOf<LinqReactionWebhookData>();
+  });
   const unsubscribeAll = adapter.onLinqEvent((event) => {
     expectTypeOf(event).toEqualTypeOf<LinqAnyEvent>();
   });
@@ -257,6 +288,17 @@ function assertLinqMessageErgonomics(
     // @ts-expect-error -- effect families are closed.
     effect: { type: "fullscreen", name: "confetti" },
   });
+  const handle: LinqHandle = "+15550000001";
+  const mention: LinqMentionOptions = { handle, range: [0, 5] };
+  const mentionMessage = linqMessage("owner", { mention });
+  expectTypeOf(mentionMessage.linq.mention).toEqualTypeOf<LinqMentionOptions | undefined>();
+  linqMessage("owner", {
+    mention: {
+      handle,
+      // @ts-expect-error -- mention ranges have exactly two UTF-16 endpoints.
+      range: [0, 1, 2],
+    },
+  });
 }
 
 void assertLinqMessageErgonomics;
@@ -304,6 +346,29 @@ function assertConversationErgonomics(
   expectTypeOf(byId.location).toEqualTypeOf<LinqLocationConversation>();
   expectTypeOf(byId.location.request()).resolves.toBeVoid();
   expectTypeOf(byId.location.retrieve()).resolves.toEqualTypeOf<LinqLocationSnapshot>();
+  expectTypeOf(byId.polls).toEqualTypeOf<LinqPollConversation>();
+  const createPoll: LinqPollCreateOptions = { options: ["Tacos", "Sushi"] };
+  const vote: LinqPollVoteInput = {
+    optionId: "33333333-3333-3333-3333-333333333333",
+    operation: "add",
+  };
+  expectTypeOf(byId.polls.create(createPoll)).resolves.toEqualTypeOf<LinqPollSnapshot>();
+  expectTypeOf(
+    byId.polls.addOptions("22222222-2222-2222-2222-222222222222", ["Pizza"]),
+  ).resolves.toEqualTypeOf<LinqPollSnapshot>();
+  expectTypeOf(
+    byId.polls.vote("22222222-2222-2222-2222-222222222222", vote),
+  ).resolves.toEqualTypeOf<LinqPollSnapshot>();
+  expectTypeOf(
+    byId.polls.retrieve("22222222-2222-2222-2222-222222222222"),
+  ).resolves.toEqualTypeOf<LinqPollSnapshot>();
+  // @ts-expect-error -- poll creation accepts option text, not endpoint-shaped objects.
+  byId.polls.create({ options: [{ text: "Tacos" }, { text: "Sushi" }] });
+  byId.polls.vote("22222222-2222-2222-2222-222222222222", {
+    optionId: "33333333-3333-3333-3333-333333333333",
+    // @ts-expect-error -- poll vote operations are a closed add/remove contract.
+    operation: "replace",
+  });
   // @ts-expect-error -- location requests take no adapter polling or consent options.
   byId.location.request({ duration: 3_600 });
   // @ts-expect-error -- retrieval is an on-demand snapshot, not a polling API.
@@ -356,6 +421,7 @@ type _ConversationSurfaceIsExact = Assert<
     | "stopTyping"
     | "shareContactCard"
     | "sendVoiceMemo"
+    | "polls"
     | "group"
     | "location"
   >

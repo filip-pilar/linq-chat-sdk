@@ -90,6 +90,47 @@ export function isReactionWebhookEvent(event: LinqWebhookEvent): event is LinqRe
   return event.event_type === "reaction.added" || event.event_type === "reaction.removed";
 }
 
+/** Truthful native-mention signal for one authenticated current group message. */
+export function isLinqOwnerMention(raw: LinqMessageReceivedWebhookData): boolean {
+  if (
+    !isRecord(raw.chat) ||
+    raw.chat.is_group !== true ||
+    !isRecord(raw.chat.owner_handle) ||
+    typeof raw.chat.owner_handle.handle !== "string" ||
+    !Array.isArray(raw.parts)
+  ) {
+    return false;
+  }
+
+  const ownerHandle = raw.chat.owner_handle.handle;
+  return raw.parts.some((part) => {
+    const decorations = isRecord(part) ? part.text_decorations : undefined;
+    if (
+      !isRecord(part) ||
+      part.type !== "text" ||
+      typeof part.value !== "string" ||
+      part.value.length === 0 ||
+      part.mention !== ownerHandle ||
+      (decorations !== undefined && decorations !== null && !Array.isArray(decorations)) ||
+      (Array.isArray(decorations) && decorations.length > 0)
+    ) {
+      return false;
+    }
+
+    const range = part.mention_range;
+    if (range === undefined || range === null) return true;
+    return (
+      Array.isArray(range) &&
+      range.length === 2 &&
+      Number.isInteger(range[0]) &&
+      Number.isInteger(range[1]) &&
+      (range[0] as number) >= 0 &&
+      (range[0] as number) < (range[1] as number) &&
+      (range[1] as number) <= part.value.length
+    );
+  });
+}
+
 function normalizeMessage(value: LinqRawMessage): {
   id: string;
   chatId: string;

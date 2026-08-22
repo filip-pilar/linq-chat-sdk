@@ -23,7 +23,13 @@ const URL_DOWNLOAD_LIMIT_BYTES = 10 * 1024 * 1024;
 
 type LinqOutboundPart =
   | { type: "link"; value: string }
-  | { type: "text"; value: string; text_decorations?: LinqCompiledDecoration[] }
+  | {
+      type: "text";
+      value: string;
+      text_decorations?: LinqCompiledDecoration[];
+      mention?: string;
+      mention_range?: [number, number];
+    }
   | { type: "media"; url: string }
   | { type: "media"; attachment_id: string };
 
@@ -163,6 +169,14 @@ export async function prepareLinqOutboundParts(
     parts.push({
       type: "text",
       value: plan.text.text,
+      ...(plan.text.mention
+        ? {
+            mention: plan.text.mention.target,
+            ...(plan.text.mention.range
+              ? { mention_range: [...plan.text.mention.range] as [number, number] }
+              : {}),
+          }
+        : {}),
       ...(plan.text.decorations.length > 0
         ? { text_decorations: plan.text.decorations.map((decoration) => ({ ...decoration })) }
         : {}),

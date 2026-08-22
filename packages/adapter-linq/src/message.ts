@@ -4,6 +4,15 @@ const LINQ_REPLY_PART_INDEX = Symbol("linq.replyPartIndex");
 
 export type LinqPreferredService = "iMessage" | "RCS" | "SMS";
 
+/** E.164 phone number or Apple ID email accepted by Linq as a chat participant handle. */
+export type LinqHandle = string;
+
+/** Native Linq mention metadata for one text part. Ranges use UTF-16 code units. */
+export interface LinqMentionOptions {
+  readonly handle: LinqHandle;
+  readonly range?: readonly [start: number, end: number];
+}
+
 export type LinqScreenEffectName =
   | "confetti"
   | "fireworks"
@@ -47,6 +56,7 @@ export interface LinqMessageOptions {
   readonly effect?: LinqMessageEffect;
   readonly decorations?: readonly LinqTextDecoration[];
   readonly richLink?: string | URL;
+  readonly mention?: LinqMentionOptions;
 }
 
 type LinqPostableContent = Exclude<AdapterPostableMessage, string>;
@@ -83,6 +93,16 @@ function snapshotOptions(options: LinqMessageOptions): Readonly<LinqMessageOptio
       )
     : undefined;
   const richLink = options.richLink instanceof URL ? options.richLink.toString() : options.richLink;
+  const mention = options.mention
+    ? Object.freeze({
+        handle: options.mention.handle,
+        ...(options.mention.range === undefined
+          ? {}
+          : {
+              range: Object.freeze([...options.mention.range]) as readonly [number, number],
+            }),
+      })
+    : undefined;
 
   return Object.freeze({
     ...(options.preferredService === undefined
@@ -91,6 +111,7 @@ function snapshotOptions(options: LinqMessageOptions): Readonly<LinqMessageOptio
     ...(effect === undefined ? {} : { effect }),
     ...(decorations === undefined ? {} : { decorations }),
     ...(richLink === undefined ? {} : { richLink }),
+    ...(mention === undefined ? {} : { mention }),
   });
 }
 

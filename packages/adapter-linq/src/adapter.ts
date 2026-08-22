@@ -35,13 +35,32 @@ import {
 import { immutableJsonSnapshot, isRecord, isUsableLinqChatId, isUsableLinqId } from "./guards.js";
 import { createLinqAttachmentFetcher } from "./inbound-media.js";
 import {
+  isLinqOwnerMention,
   isMessageReceivedWebhookEvent,
   isReactionWebhookEvent,
   parseLinqMessage,
   type LinqRawMessage,
 } from "./message-parser.js";
 import { planLinqOutboundMessage, prepareLinqOutboundParts } from "./outbound-media.js";
-import { compileLinqMessageText, compileLinqSendOptions } from "./message-compiler.js";
+import {
+  normalizePollAddOptions,
+  normalizePollCreateInput,
+  normalizePollMessageId,
+  normalizePollSnapshot,
+  normalizePollVoteInput,
+  type LinqPollConversation,
+  type LinqPollCreateOptions,
+  type LinqPollSnapshot,
+  type LinqPollVoteInput,
+} from "./polls.js";
+import {
+  compileLinqMessageText,
+  compileLinqSendOptions,
+  resolveCompiledLinqMention,
+  validateCompiledLinqMention,
+  validateMentionHandle,
+  type CompiledLinqMessageText,
+} from "./message-compiler.js";
 import { getLinqReplyPartIndex, withLinqReplyPartIndex } from "./message.js";
 import { fromLinqReaction, toLinqReaction } from "./reactions.js";
 import {
@@ -189,6 +208,7 @@ export interface LinqConversation {
   stopTyping(): Promise<void>;
   shareContactCard(): Promise<void>;
   sendVoiceMemo(source: LinqVoiceMemoSource): Promise<LinqVoiceMemoResult>;
+  readonly polls: LinqPollConversation;
   readonly group: LinqGroupConversation;
   readonly location: LinqLocationConversation;
 }
@@ -394,11 +414,93 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
         }
       },
     });
+    const polls: LinqPollConversation = Object.freeze({
+      create: async (input: LinqPollCreateOptions): Promise<LinqPollSnapshot> => {
+        const normalized = normalizePollCreateInput(input);
+        const idempotencyKey = normalized.idempotencyKey ?? randomUUID();
+        const client = await this.getApiClient();
+
+        try {
+          const response = await client.chats.polls.create(chatId, {
+            poll: {
+              options: normalized.options.map((option) => ({ text: option.text })),
+              idempotency_key: idempotencyKey,
+            },
+          });
+          return normalizePollSnapshot(threadId, chatId, response);
+        } catch (error) {
+          throw translateLinqError(error, {
+            action: "create chat poll",
+            resourceId: chatId,
+            resourceType: "chat",
+          });
+        }
+      },
+      addOptions: async (
+        messageId: string,
+        options: readonly string[],
+      ): Promise<LinqPollSnapshot> => {
+        const normalizedMessageId = normalizePollMessageId(messageId);
+        const normalized = normalizePollAddOptions(options);
+        const client = await this.getApiClient();
+
+        try {
+          const response = await client.messages.poll.addOptions(
+            normalizedMessageId,
+            { options: normalized.map((option) => ({ text: option.text })) },
+            { maxRetries: 0 },
+          );
+          return normalizePollSnapshot(threadId, chatId, response, normalizedMessageId);
+        } catch (error) {
+          throw translateLinqError(error, {
+            action: "add chat poll options",
+            resourceId: normalizedMessageId,
+            resourceType: "message",
+          });
+        }
+      },
+      vote: async (messageId: string, input: LinqPollVoteInput): Promise<LinqPollSnapshot> => {
+        const normalizedMessageId = normalizePollMessageId(messageId);
+        const normalized = normalizePollVoteInput(input);
+        const client = await this.getApiClient();
+
+        try {
+          const response = await client.messages.poll.vote(
+            normalizedMessageId,
+            { option_id: normalized.optionId, operation: normalized.operation },
+            { maxRetries: 0 },
+          );
+          return normalizePollSnapshot(threadId, chatId, response, normalizedMessageId);
+        } catch (error) {
+          throw translateLinqError(error, {
+            action: "vote on chat poll",
+            resourceId: normalizedMessageId,
+            resourceType: "message",
+          });
+        }
+      },
+      retrieve: async (messageId: string): Promise<LinqPollSnapshot> => {
+        const normalizedMessageId = normalizePollMessageId(messageId);
+        const client = await this.getApiClient();
+
+        try {
+          const response = await client.messages.poll.retrieve(normalizedMessageId);
+          return normalizePollSnapshot(threadId, chatId, response, normalizedMessageId);
+        } catch (error) {
+          throw translateLinqError(error, {
+            action: "retrieve chat poll",
+            resourceId: normalizedMessageId,
+            resourceType: "message",
+          });
+        }
+      },
+    });
 
     return Object.freeze({
       threadId,
       group,
       location,
+      polls,
       replyToPart: async (
         messageId: string,
         partIndex: number,
@@ -805,20 +907,29 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     message: AdapterPostableMessage,
     replyTo?: { message_id: string; part_index?: number },
   ): Promise<RawMessage<LinqRawMessage>> {
-    const { chatId, pendingHandle } = this.decodeThreadId(threadId);
-    const compiledText = compileLinqMessageText(message);
+    const { chatId, isGroup, pendingHandle } = this.decodeThreadId(threadId);
+    let compiledText = compileLinqMessageText(message);
     const sendOptions = compileLinqSendOptions(message);
+    validateCompiledLinqMention(compiledText, sendOptions);
     const card = extractCardElement(message);
     const cardImageUrls = card ? collectCardImageUrls(card) : [];
-    const plan = planLinqOutboundMessage(
-      message,
-      compiledText,
-      cardImageUrls,
-      sendOptions.richLink,
-    );
+    let plan = planLinqOutboundMessage(message, compiledText, cardImageUrls, sendOptions.richLink);
     if (pendingHandle && replyTo) {
       throw validationError("Linq pending threads cannot reply before their chat exists.");
     }
+    if (pendingHandle && compiledText.mention) {
+      throw validationError("Linq mentions require an existing group chat.");
+    }
+    if (compiledText.mention && isGroup === false) {
+      throw validationError("Linq mentions require a group chat.");
+    }
+
+    const client = await this.getApiClient();
+    if (compiledText.mention?.targetKind === "participant_id") {
+      compiledText = await this.resolveMentionParticipant(client, chatId, compiledText);
+      plan = planLinqOutboundMessage(message, compiledText, cardImageUrls, sendOptions.richLink);
+    }
+
     const idempotencyKey = randomUUID();
 
     if (card) {
@@ -834,7 +945,6 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
     const createdAttachmentIds: string[] = [];
     let messageSendingBegan = false;
-    const client = await this.getApiClient();
 
     try {
       const parts = await prepareLinqOutboundParts(client, plan, (attachmentId) => {
@@ -901,6 +1011,63 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     }
   }
 
+  private async resolveMentionParticipant(
+    client: LinqAPIV3,
+    chatId: string,
+    compiled: CompiledLinqMessageText,
+  ): Promise<CompiledLinqMessageText> {
+    const target = compiled.mention?.target;
+    if (!target || compiled.mention?.targetKind !== "participant_id") {
+      return compiled;
+    }
+
+    try {
+      const response = await client.chats.retrieve(chatId);
+      const chat = requireProviderRecord(response, "resolve message mention", "response");
+      requireMatchingProviderId(chat.id, chatId, "resolve message mention", "id");
+      if (chat.is_group !== true) {
+        if (chat.is_group === false) {
+          throw validationError("Linq mentions require a group chat.");
+        }
+        throw invalidLinqProviderResponse("resolve message mention", "is_group must be a boolean");
+      }
+      if (!Array.isArray(chat.handles)) {
+        throw invalidLinqProviderResponse("resolve message mention", "handles must be an array");
+      }
+
+      const participant = chat.handles.find(
+        (handle) =>
+          isRecord(handle) &&
+          handle.id === target &&
+          handle.status !== "left" &&
+          handle.status !== "removed",
+      );
+      if (!isRecord(participant)) {
+        throw validationError(
+          "Linq mention participant IDs must identify a current participant of this chat.",
+        );
+      }
+
+      let handle: string;
+      try {
+        handle = validateMentionHandle(participant.handle);
+      } catch {
+        throw invalidLinqProviderResponse(
+          "resolve message mention",
+          "the matching participant handle must be E.164 or email",
+        );
+      }
+
+      return resolveCompiledLinqMention(compiled, handle);
+    } catch (error) {
+      throw translateLinqError(error, {
+        action: "resolve message mention",
+        resourceId: chatId,
+        resourceType: "chat",
+      });
+    }
+  }
+
   private async cleanupPreparedAttachments(
     client: LinqAPIV3,
     attachmentIds: string[],
@@ -917,7 +1084,13 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     messageId: string,
     message: AdapterPostableMessage,
   ): Promise<RawMessage<LinqRawMessage>> {
-    const { text } = compileLinqMessageText(message);
+    const compiled = compileLinqMessageText(message);
+    const sendOptions = compileLinqSendOptions(message);
+    validateCompiledLinqMention(compiled, sendOptions);
+    if (compiled.mention) {
+      throw validationError("Linq native mentions are not supported when editing messages.");
+    }
+    const { text } = compiled;
 
     if (!text) {
       throw validationError("Linq message text cannot be empty.");
@@ -1381,6 +1554,9 @@ export class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
       const factory = async (): Promise<Message<unknown>> => {
         const msg = this.parseMessage(event.data);
+        if (isLinqOwnerMention(event.data)) {
+          msg.isMention = true;
+        }
 
         return msg;
       };
